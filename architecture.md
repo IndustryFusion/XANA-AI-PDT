@@ -454,28 +454,3 @@ for the full deployment walkthrough, including creating the `rag` database.
 **In-memory run store with DB backing.** `run_store: dict[str, RunRecord]` is the primary source of truth for running state. `pending_runs` in PostgreSQL provides persistence across restarts. For horizontal scaling, replace `run_store` with a Redis-backed store.
 
 **Event deduplication.** The event worker tracks active machine runs in a set. Duplicate events (e.g., Scorpio firing multiple times for the same machine) are dropped until the current run completes.
-
----
-
-## Local Development
-
-External IFF services (Scorpio, TimescaleDB, PostgreSQL, Alerta, Keycloak) must be reachable. Set their URLs in `backend/.env` before starting.
-
-```bash
-# Backend
-cd backend
-cp .env.example .env          # fill in credentials for your IFF services
-pip install -r requirements.txt
-python -m app                  # DB migrations run automatically on first boot
-
-# Frontend (separate terminal)
-cd frontend
-npm install
-npm run dev                    # → http://localhost:5173
-                               # Vite dev-server proxies /api/ and /ws/ to backend
-
-# Tests
-cd backend && pytest tests/ -v
-```
-
-The Vite dev proxy (`vite.config.js`) mirrors the nginx proxy in the production frontend image — both forward `/api/` and `/ws/` to the backend. No browser-side origin changes are needed between dev and production.
