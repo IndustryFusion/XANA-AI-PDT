@@ -25,6 +25,8 @@ describe('main navigation', () => {
   test.each([
     ['/incidents', 'Active incidents'],
     ['/history', 'Incident history'],
+    ['/explorer', 'Data explorer'],
+    ['/alerts', 'Alerts'],
   ])('%s shows its delivered area', async (path, label) => {
     renderApp({ path, controls: { authEnabled: false } })
     expect(await screen.findByRole('heading', { name: label, level: 1 })).toBeVisible()
@@ -32,8 +34,6 @@ describe('main navigation', () => {
   })
 
   test.each([
-    ['/explorer', 'Data explorer'],
-    ['/alerts', 'Alerts'],
     ['/dataspace', 'Dataspace'],
     ['/system', 'System'],
   ])('%s shows a placeholder naming the area', async (path, label) => {
@@ -99,7 +99,7 @@ describe('dataspace indicator', () => {
 describe('entity reference', () => {
   const id = 'urn:ngsi-ld:Machine:press-brake-02'
 
-  test('offers the four cross-navigation actions', async () => {
+  test('offers the cross-navigation actions and copying the identifier', async () => {
     const user = userEvent.setup()
     renderWithRouter(<EntityRef id={id} />)
     expect(screen.getByRole('link', { name: 'press-brake-02' })).toHaveAttribute('href', paths.entity(id))
@@ -108,6 +108,17 @@ describe('entity reference', () => {
     expect(screen.getByRole('link', { name: 'Start new incident' })).toHaveAttribute('href', paths.newIncident(id))
     expect(screen.getByRole('link', { name: 'Show active incidents' })).toHaveAttribute('href', paths.activeIncidentsFor(id))
     expect(screen.getByRole('link', { name: 'Show incident history' })).toHaveAttribute('href', paths.historyFor(id))
+    await user.click(screen.getByRole('button', { name: 'Copy identifier' }))
+    expect(await navigator.clipboard.readText()).toBe(id)
+    expect(screen.queryByRole('link', { name: 'Open in data explorer' })).not.toBeInTheDocument()
+  })
+
+  test('the explorer URL can be overridden, for example to keep a query', async () => {
+    const user = userEvent.setup()
+    renderWithRouter(<EntityRef id={id} to={`${paths.entity(id)}?type=Machine`} />)
+    expect(screen.getByRole('link', { name: 'press-brake-02' })).toHaveAttribute('href', `${paths.entity(id)}?type=Machine`)
+    await user.click(screen.getByRole('button', { name: 'Actions for press-brake-02' }))
+    expect(screen.getByRole('link', { name: 'Open in data explorer' })).toHaveAttribute('href', `${paths.entity(id)}?type=Machine`)
   })
 
   test('starting an incident opens Active incidents with the machine prefilled', async () => {

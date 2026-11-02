@@ -6,6 +6,7 @@ import { areas, bindArea, DataError } from '../../src/data'
 import { writeControls } from '../../src/data/sources/mock/controls'
 import { addRun, findRun, resetMock } from '../helpers'
 
+const SENSOR = 'urn:ngsi-ld:Sensor:chiller-01-flow'
 const docs = readFileSync(resolve(__dirname, '../../docs/data-interface.md'), 'utf8')
 
 describe('interface documentation', () => {
@@ -31,7 +32,7 @@ describe('facade', () => {
 
   test('unimplemented subscriptions report an error event', async () => {
     const events = []
-    const unsubscribe = areas.entities.subscribeEntities({}, (e) => events.push(e))
+    const unsubscribe = bindArea('entities', {}).subscribeEntities({}, (e) => events.push(e))
     await Promise.resolve()
     expect(events[0]).toMatchObject({ type: 'error', error: { kind: 'unavailable' } })
     expect(typeof unsubscribe).toBe('function')
@@ -78,6 +79,26 @@ describe('mock source matches the documented shapes', () => {
       getIncident: () => ['35'],
       reopenIncident: () => ['35'],
     },
+    entities: {
+      queryEntities: () => [{ type: 'Sensor', limit: 5 }],
+      getEntity: () => [SENSOR],
+      updateAttributes: () => [SENSOR, { value: { value: 20.5 } }],
+      appendAttributes: () => [SENSOR, { location: { type: 'Property', value: 'Hall 2' } }],
+      deleteAttribute: () => [SENSOR, 'value', { subAttribute: 'accuracy' }],
+      deleteEntity: () => [SENSOR],
+      importEntities: () => [[{ id: 'urn:ngsi-ld:Machine:saw-01', type: 'Machine' }]],
+      fetchImportDocument: () => ['https://samples.example.org/ngsi-ld/line-d.json'],
+      deleteByTypes: () => [['Component']],
+      getAttributeHistory: () => [SENSOR, 'value', { from: new Date(Date.now() - 3600_000).toISOString() }],
+      listTypesAt: () => [new Date(Date.now() - 86400_000).toISOString()],
+      queryEntitiesAt: () => [new Date(Date.now() - 86400_000).toISOString(), { type: 'Machine' }],
+      getValueHints: () => [{ entityType: 'Machine', attribute: 'status' }],
+    },
+    alerts: {
+      listAlerts: () => [{}],
+      getAlert: () => ['alert-001'],
+      applyAlertAction: () => ['alert-001', { action: 'close', text: 'Done.' }],
+    },
   }
   const implemented = Object.entries(SHAPES).flatMap(([area, ops]) => Object.keys(ops).map((op) => [area, op]))
 
@@ -86,8 +107,8 @@ describe('mock source matches the documented shapes', () => {
     expect(checkShape(result, SHAPES[area][op])).toEqual([])
   })
 
-  test('every run and incident operation is implemented and shape-checked', () => {
-    for (const area of ['runs', 'incidents']) expect(Object.keys(SHAPES[area]).sort()).toEqual(OPERATIONS[area].filter((op) => !op.startsWith('subscribe')).sort())
+  test('every run, incident, entity and alert operation is implemented and shape-checked', () => {
+    for (const area of ['runs', 'incidents', 'entities', 'alerts']) expect(Object.keys(SHAPES[area]).sort()).toEqual(OPERATIONS[area].filter((op) => !op.startsWith('subscribe')).sort())
   })
 
   test('wrong credentials are rejected as unauthorized', async () => {

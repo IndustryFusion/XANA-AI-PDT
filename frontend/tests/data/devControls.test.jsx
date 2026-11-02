@@ -30,3 +30,12 @@ test('the live connection of an open run can be interrupted and restored', async
   await user.click(within(dialog).getByRole('button', { name: 'Restore connection of run-1003' }))
   await waitFor(() => expect(engine.isInterrupted('run-1003')).toBe(false))
 })
+
+test('live entity updates and occasional new alerts are switched in the controls', async () => {
+  const user = userEvent.setup()
+  renderApp({ controls: { authEnabled: false } })
+  const dialog = await openControls(user)
+  await user.selectOptions(within(dialog).getByLabelText('Live entity updates'), 'unavailable')
+  await user.click(within(dialog).getByLabelText('Raise new alerts occasionally while the Alerts area is open'))
+  expect(readControls()).toMatchObject({ liveUpdates: 'unavailable', newAlerts: false })
+})

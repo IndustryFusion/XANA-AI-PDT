@@ -7,4 +7,4 @@ import { createStore } from './store'
 
 export const store = createStore()
 export const areas = createAreas(store)
-export const { engine } = areas
+export const { engine, raiseAlert } = areas

@@ -53,6 +53,14 @@ export const DELIVERY_STATES = ['pending', 'delivered', 'failed']
 export const INCIDENT_OUTCOMES = ['completed', 'failed', 'stopped', 'mb_closed']
 
 export const CONNECTION_STATES = ['connected', 'expired', 'disconnected', 'not_configured']
+
+/** Alert statuses, and the actions `applyAlertAction` accepts. */
+export const ALERT_STATUSES = ['open', 'ack', 'shelved', 'closed', 'expired', 'blackout', 'unknown']
+export const ALERT_ACTIONS = ['ack', 'unack', 'shelve', 'unshelve', 'close', 'open']
+
+/** Health of live entity updates, and per-entity results of an import. */
+export const LIVE_UPDATE_STATES = ['ok', 'unavailable']
+export const IMPORT_RESULTS = ['created', 'updated', 'failed']
 export const HEALTH_STATES = ['ok', 'degraded', 'error', 'unknown']
 
 /**
@@ -121,6 +129,26 @@ export const HEALTH_STATES = ['ok', 'degraded', 'error', 'unknown']
  * @property {number} total
  * @property {Object<string, number>} bySeverity
  *
+ * @typedef {Object} Entity     NGSI-LD entity (compacted terms): `id`, `type` and one
+ *                                 member per attribute, e.g. `{ type: 'Property', value,
+ *                                 unitCode?, observedAt?, datasetId?, <sub-attributes> }`,
+ *                                 `{ type: 'Relationship', object }`, `GeoProperty`,
+ *                                 `JsonProperty` (`json`), `LanguageProperty` (`languageMap`),
+ *                                 `ListProperty` (`valueList`), `VocabularyProperty` (`vocab`).
+ *
+ * @typedef {Object} Alert
+ * @property {string} id
+ * @property {string} resource     Entity ID of the affected machine.
+ * @property {string} event
+ * @property {string} text
+ * @property {string} severity
+ * @property {string} status       One of ALERT_STATUSES.
+ * @property {string} environment
+ * @property {string[]} service
+ * @property {string} createTime   ISO 8601.
+ * @property {{at: string, type: string, status: string, text: string, user: string|null}[]} history
+ *                                 Only in `getAlert` and `applyAlertAction` results.
+ *
  * @typedef {Object} EntityStats
  * @property {number} entityCount
  * @property {number} typeCount
@@ -170,6 +198,18 @@ const incidentSummary = {
   id: 'string', number: 'number', machineId: 'string', issue: 'string', outcome: { $enum: INCIDENT_OUTCOMES },
   rootCause: '?string', escalated: 'boolean', escalationRef: '?string', startedAt: 'date', closedAt: 'date', reopenedRunId: '?string',
 }
+const entity = { id: 'string', type: 'string' }
+const alertSummary = {
+  id: 'string', resource: 'string', event: 'string', text: 'string', severity: 'string',
+  status: { $enum: ALERT_STATUSES }, environment: 'string', service: ['string'], group: '?string',
+  value: '?string', origin: '?string', createTime: 'date', lastReceiveTime: 'date', duplicateCount: 'number',
+}
+const alertDetail = {
+  ...alertSummary,
+  attributes: { $optional: {} },
+  history: [{ at: 'date', type: 'string', status: { $enum: ALERT_STATUSES }, text: 'string', user: '?string' }],
+}
+const nothing = { $optional: {} }
 const message = { messageId: 'string', sender: { $enum: ['agent', 'operator', 'machine_builder'] }, act: 'string', text: 'string', convState: 'string', at: 'date' }
 
 /** Result shapes of implemented operations, checked by the data-interface tests. */
@@ -216,10 +256,31 @@ export const SHAPES = {
     reopenIncident: { runId: 'string' },
   },
   alerts: {
+    listAlerts: { alerts: [alertSummary], total: 'number', bySeverity: { $record: 'number' }, page: 'number', pageSize: 'number' },
     countAlerts: { total: 'number', bySeverity: { $record: 'number' } },
+    getAlert: alertDetail,
+    applyAlertAction: alertDetail,
+    listEnvironments: ['string'],
+    listServices: ['string'],
   },
   entities: {
     getStats: { entityCount: 'number', typeCount: 'number', byType: [{ type: 'string', count: 'number' }] },
+    listTypes: ['string'],
+    listAttributes: ['string'],
+    queryEntities: [entity],
+    getEntity: entity,
+    updateAttributes: nothing,
+    appendAttributes: nothing,
+    deleteAttribute: nothing,
+    deleteEntity: nothing,
+    importEntities: [{ id: '?string', result: { $enum: IMPORT_RESULTS }, reason: '?string' }],
+    fetchImportDocument: { url: 'string' },
+    deleteByTypes: [{ type: 'string', count: 'number' }],
+    getAttributeHistory: [{ at: 'date' }],
+    listTypesAt: ['string'],
+    queryEntitiesAt: [entity],
+    getLiveUpdateHealth: { status: { $enum: LIVE_UPDATE_STATES }, detail: '?string' },
+    getValueHints: ['string'],
   },
   dataspace: {
     getConnection: { state: { $enum: CONNECTION_STATES }, participantId: '?string', expiresAt: '?date' },
