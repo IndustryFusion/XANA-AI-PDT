@@ -1,0 +1,46 @@
+schema: spec-driven
+
+context: |
+  XANA AI PDT (Process Digital Twin AI) is a stateful industrial diagnostic and
+  decision-support system, not a chatbot. Purpose and target architecture are
+  documented in manifest.md and architecture.md; read them before proposing a
+  change and cite the sections a change affects.
+  Target stack per architecture.md: Python 3.12 / FastAPI backend, LangGraph
+  agent runtime (directed OBSERVE -> HYPOTHESIZE -> RETRIEVE -> VALIDATE ->
+  DECIDE -> ACT workflow), React 18 + Vite frontend, NGSI-LD (Scorpio),
+  TimescaleDB, PostgreSQL memory, Helm/Helmfile on Kubernetes.
+  architecture.md describes the target system; the backend, frontend and helm
+  directories it mentions are not in this repository yet. Do not assume that
+  code exists, and do not invent test, lint or dependency conventions for it.
+  Architectural principles to respect (architecture.md "Key Design
+  Decisions"): structured, typed LLM output instead of free text; confidence-
+  gated decisions; graceful degradation when a data source fails;
+  policy-enforced data sharing via the IFF Dataspace.
+  Governance: specs in openspec/specs/ are authoritative once approved.
+  Implementation starts only after a maintainer adds the `spec-approved` label
+  to the change's Pull Request. See AGENTS.md and CONTRIBUTING.md.
+  Change IDs use the form gh-<issue>-<kebab-summary>.
+
+rules:
+  proposal:
+    - "Start with a line `Issue: #<number>` naming the originating GitHub Issue"
+    - Include an "Out of Scope" section
+    - Name affected sections of architecture.md under Impact, or state that none are affected
+  specs:
+    - Every requirement must have at least one testable WHEN/THEN scenario that serves as an acceptance criterion
+    - Describe observable behavior only; no library, class or function names
+  design:
+    - Describe architectural implications and any conflict with architecture.md or existing specs
+    - List alternatives considered for each decision
+  tasks:
+    - Every task states how its completion is verified
+    - Include creating or updating the tests that cover the delta spec scenarios
+
+operations:
+  apply:
+    guidance:
+      - Confirm the Pull Request carries the `spec-approved` label before changing source code
+      - Never edit approved requirements to fit the implementation; stop and report the conflict instead
+  archive:
+    guidance:
+      - Archive only after the change's Pull Request is merged

@@ -1,0 +1,42 @@
+name: OpenSpec validate
+
+on:
+  pull_request:
+    paths:
+      - "openspec/**"
+      - ".github/workflows/openspec-validate.yml"
+  push:
+    branches: [main]
+    paths:
+      - "openspec/**"
+      - ".github/workflows/openspec-validate.yml"
+
+permissions:
+  contents: read
+
+env:
+  OPENSPEC_VERSION: v1.16.0
+  # SHA-256 of openspec-linux-x64.tar.gz from the release's SHA256SUMS
+  OPENSPEC_SHA256: f27fb2ff5c6c4aafb207cb0b797189215adb3a1150d4b4600a2d6a0b6e192ae1
+  OPENSPEC_TELEMETRY: "0"
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install OpenSpec
+        run: |
+          asset=openspec-linux-x64.tar.gz
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/$asset" \
+            "https://github.com/Fission-AI/OpenSpec/releases/download/$OPENSPEC_VERSION/$asset"
+          echo "$OPENSPEC_SHA256  $RUNNER_TEMP/$asset" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/bin"
+          tar -xzf "$RUNNER_TEMP/$asset" -C "$RUNNER_TEMP/bin" openspec
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
+      - name: Validate specs and changes
+        run: |
+          openspec --version
+          openspec validate --all --strict
