@@ -25,7 +25,7 @@
 
 - [x] 4.1 Replace the last placeholders and remove the placeholder view; add end-to-end tests: disconnect → header updates → connect with credential; approve a request → peer capability granted; change a setting → health detail updates; upload a document → done → test query finds it; verify all pass
 - [x] 4.2 Extend the accessibility suite to the Dataspace and System areas (including dialogs and the drop zone) in both themes; verify zero axe violations and keyboard operation, including uploading via the file picker
-- [ ] 4.3 Run the complete end-to-end suite on the full UI and `openspec validate --all --strict`; verify both pass and record per-scenario results in the Pull Request
+- [x] 4.3 Run the complete end-to-end suite on the full UI and `openspec validate --all --strict`; verify both pass and record per-scenario results in the Pull Request
 
 ## Workflow follow-up
 
