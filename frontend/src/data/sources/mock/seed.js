@@ -1,7 +1,14 @@
+import { COMPONENTS, LINES, MACHINES, PEERS, SENSORS, urn } from './catalog'
+import { applyNext, createRunRecord, incidentFromRun, initialCounters, simulate } from './runCore'
+
+export { PEERS }
+
 /**
  * Deterministic seed for the mock data source. The same seed always yields
  * the same data (given the same `now`), and every reference between areas
- * (runs and alerts → machines, machines → lines → factory) resolves.
+ * (runs, incidents and alerts → machines, machines → lines → factory) resolves.
+ * Runs and past incidents are produced by playing their scenarios with the
+ * run engine, so their steps, states and conversations are consistent.
  */
 
 /** Small deterministic PRNG (mulberry32). */
@@ -22,53 +29,12 @@ export function createRng(seed) {
 }
 
 export const SEED = 20261102
+/** Stored state with another version is discarded and rebuilt from the seed. */
+export const SEED_VERSION = 2
 const MINUTE = 60_000
 
-const urn = (type, id) => `urn:ngsi-ld:${type}:${id}`
 const prop = (value, extra = {}) => ({ type: 'Property', value, ...extra })
 const rel = (object) => ({ type: 'Relationship', object })
-
-const LINES = [
-  { id: 'line-a', name: 'Line A · Sheet metal' },
-  { id: 'line-b', name: 'Line B · Forming' },
-  { id: 'line-c', name: 'Line C · Finishing' },
-]
-
-const MACHINES = [
-  { id: 'laser-cutter-01', name: 'Laser cutter 01', line: 'line-a', builder: 'peer-photonic', kind: 'LaserCutter' },
-  { id: 'laser-cutter-02', name: 'Laser cutter 02', line: 'line-a', builder: 'peer-photonic', kind: 'LaserCutter' },
-  { id: 'press-brake-01', name: 'Press brake 01', line: 'line-b', builder: 'peer-formwerk', kind: 'PressBrake' },
-  { id: 'press-brake-02', name: 'Press brake 02', line: 'line-b', builder: 'peer-formwerk', kind: 'PressBrake' },
-  { id: 'deburring-01', name: 'Deburring unit 01', line: 'line-c', builder: 'peer-surfacetec', kind: 'Deburring' },
-  { id: 'coating-01', name: 'Powder coating booth 01', line: 'line-c', builder: 'peer-surfacetec', kind: 'Coating' },
-  { id: 'chiller-01', name: 'Process chiller 01', line: 'line-a', builder: 'peer-coolflow', kind: 'Chiller' },
-  { id: 'extractor-01', name: 'Fume extractor 01', line: 'line-a', builder: 'peer-coolflow', kind: 'Extractor' },
-]
-
-const COMPONENTS = {
-  LaserCutter: [['laser-source', 'Laser source'], ['cutting-head', 'Cutting head'], ['axis-drive', 'Axis drive']],
-  PressBrake: [['hydraulic-unit', 'Hydraulic unit'], ['back-gauge', 'Back gauge']],
-  Deburring: [['brush-unit', 'Brush unit'], ['conveyor', 'Conveyor']],
-  Coating: [['spray-gun', 'Spray gun'], ['curing-oven', 'Curing oven']],
-  Chiller: [['compressor', 'Compressor'], ['coolant-pump', 'Coolant pump']],
-  Extractor: [['filter-cartridge', 'Filter cartridge'], ['fan', 'Fan']],
-}
-
-const SENSORS = {
-  LaserCutter: [['temperature', '°C', 24, 32], ['power', 'kW', 3.5, 6]],
-  PressBrake: [['pressure', 'bar', 180, 260], ['oil-temperature', '°C', 35, 55]],
-  Deburring: [['vibration', 'mm/s', 1, 4]],
-  Coating: [['temperature', '°C', 160, 200]],
-  Chiller: [['coolant-temperature', '°C', 14, 22], ['flow', 'l/min', 30, 60]],
-  Extractor: [['differential-pressure', 'Pa', 300, 900]],
-}
-
-export const PEERS = [
-  { id: 'peer-photonic', name: 'Photonic Cutting Systems', capabilities: ['twin:direct', 'twin:adjacents', 'twin:history'] },
-  { id: 'peer-formwerk', name: 'Formwerk Press Technology', capabilities: ['twin:direct', 'twin:adjacents'] },
-  { id: 'peer-surfacetec', name: 'SurfaceTec Finishing', capabilities: ['twin:direct'] },
-  { id: 'peer-coolflow', name: 'CoolFlow Process Cooling', capabilities: ['twin:direct', 'twin:history'] },
-]
 
 function buildEntities(rng, now) {
   const observedAt = new Date(now).toISOString()
@@ -112,27 +78,63 @@ function buildEntities(rng, now) {
   return entities
 }
 
-const RUN_TEMPLATES = [
-  { machine: 'laser-cutter-01', issue: 'Cut quality degraded: burr formation on 3 mm steel since shift start', status: 'running', ageMin: 4 },
-  { machine: 'press-brake-02', issue: 'Hydraulic pressure drops intermittently during bending cycle', status: 'awaiting_input', ageMin: 38 },
-  { machine: 'chiller-01', issue: 'Coolant temperature above set point, laser source derating', status: 'awaiting_machine_builder', ageMin: 190 },
-  { machine: 'coating-01', issue: 'Uneven coating thickness on left side of parts', status: 'awaiting_confirmation', ageMin: 75 },
+const DAY = 24 * 60 * MINUTE
+const confirm = ['confirmResolution', { confirmed: true }]
+const escalate = ['escalate']
+const act = (a, extra = {}) => ['sendConversationAct', { act: a, ...extra }]
+
+/** Past incidents: scenario, operator actions and age in days. */
+const INCIDENT_TEMPLATES = [
+  ['press-brake-01', 'Back gauge positions parts 0.3 mm short on long flanges', 'happy_path', [confirm], 44],
+  ['laser-cutter-02', 'Piercing takes twice as long on 8 mm stainless steel', 'low_confidence', [['clarify', { text: 'Only on sheets from the new supplier; the protective window was replaced last week.' }], confirm], 39],
+  ['chiller-01', 'Coolant flow alarm after weekend start-up', 'mb_recommendation', [escalate, ['replyToRecommendation', { action: 'resolved' }]], 33],
+  ['deburring-01', 'Brush unit vibrates above limit at full speed', 'rejected_resolution', [['confirmResolution', { confirmed: false, text: 'The brush roller was replaced two days ago.' }], confirm], 28],
+  ['coating-01', 'Powder output fluctuates on the right spray gun', 'failure', [], 24],
+  ['extractor-01', 'Extraction volume too low while laser cutter 01 is running', 'mb_closes', [escalate, ['refreshConversationStatus']], 20],
+  ['laser-cutter-01', 'Cutting head collision alarm without visible contact', 'direct_contact', [escalate, act('escalate'), act('close', { outcome: 'escalated' })], 16],
+  ['press-brake-02', 'Oil temperature reaches 60 °C after two hours', 'degraded_data', [confirm], 12],
+  ['laser-cutter-02', 'Assist gas consumption 20 % above normal', 'request_beyond_tier', [escalate, ['approveDataRequest', { approved: true }], act('close', { outcome: 'resolved' })], 9],
+  ['deburring-01', 'Conveyor stops intermittently at the infeed', 'stop_and_reopen', [escalate, ['stopRun']], 6],
+  ['chiller-01', 'Compressor short-cycling during the night shift', 'escalation_within_tier', [escalate, act('request', { text: 'Do you expect a spare part to be needed?' }), act('grant'), act('close', { outcome: 'resolved' })], 4],
+  ['coating-01', 'Curing oven reaches temperature 10 minutes late', 'happy_path', [confirm], 2],
 ]
 
-function buildRuns(now) {
-  return RUN_TEMPLATES.map((t, i) => {
-    const startedAt = new Date(now - t.ageMin * MINUTE).toISOString()
-    const updatedAt = new Date(now - Math.max(1, Math.floor(t.ageMin / 3)) * MINUTE).toISOString()
-    return {
-      runId: `run-${String(1001 + i)}`,
-      incidentId: t.status === 'running' ? null : 41 + i,
-      machineId: urn('Machine', t.machine),
-      issue: t.issue,
-      status: t.status,
-      startedAt,
-      updatedAt,
+/** Open runs: scenario, operator actions so far, age in minutes; `partial` plays only the first events. */
+const RUN_TEMPLATES = [
+  { machine: 'laser-cutter-01', issue: 'Cut quality degraded: burr formation on 3 mm steel since shift start', scenario: 'happy_path', ageMin: 4, partial: 3 },
+  { machine: 'press-brake-02', issue: 'Hydraulic pressure drops intermittently during bending cycle', scenario: 'low_confidence', ageMin: 38 },
+  { machine: 'chiller-01', issue: 'Coolant temperature above set point, laser source derating', scenario: 'escalation_within_tier', ageMin: 190, actions: [escalate] },
+  { machine: 'coating-01', issue: 'Uneven coating thickness on left side of parts', scenario: 'rejected_resolution', ageMin: 75 },
+]
+
+/** Builds past incidents and open runs by playing their scenarios with the run engine. */
+function buildRunsAndIncidents(now) {
+  const state = { counters: { ...initialCounters(), run: 901, incident: 30 } }
+  const env = { state, connected: true }
+
+  const incidents = INCIDENT_TEMPLATES.map(([machine, issue, scenario, actions, ageDays]) => {
+    const clock = { t: now - ageDays * DAY, scale: 60 }
+    const run = createRunRecord({ runId: `run-${state.counters.run++}`, machineId: urn('Machine', machine), issue, scenario, at: new Date(clock.t).toISOString() })
+    simulate(run, env, actions, clock)
+    return incidentFromRun(run, new Date(clock.t + 10 * MINUTE).toISOString())
+  }).reverse()
+
+  state.counters.run = 1001
+  const runs = RUN_TEMPLATES.map((t) => {
+    const clock = { t: now - t.ageMin * MINUTE, scale: 30 }
+    const run = createRunRecord({ runId: `run-${state.counters.run++}`, machineId: urn('Machine', t.machine), issue: t.issue, scenario: t.scenario, at: new Date(clock.t).toISOString() })
+    if (t.partial) {
+      for (let i = 0; i < t.partial; i++) {
+        clock.t += (run.queue[0].delay ?? 0) * clock.scale
+        applyNext(run, new Date(clock.t).toISOString(), env)
+      }
+    } else {
+      simulate(run, env, t.actions ?? [], clock)
     }
+    return run
   })
+
+  return { runs, incidents, counters: state.counters }
 }
 
 const ALERT_EVENTS = [
@@ -176,8 +178,9 @@ const HEALTH_CHECKS = [
 
 export function buildSeed({ seed = SEED, now = Date.now() } = {}) {
   const rng = createRng(seed)
+  const { runs, incidents, counters } = buildRunsAndIncidents(now)
   return {
-    version: 1,
+    version: SEED_VERSION,
     createdAt: new Date(now).toISOString(),
     factory: {
       id: 'urn:ngsi-ld:Factory:plant-north',
@@ -189,7 +192,9 @@ export function buildSeed({ seed = SEED, now = Date.now() } = {}) {
     user: { username: 'operator', name: 'Alex Operator', email: 'operator@example.org' },
     session: { signedIn: false, revision: 0 },
     entities: buildEntities(rng, now),
-    runs: buildRuns(now),
+    runs,
+    incidents,
+    counters,
     alerts: buildAlerts(rng, now),
     peers: PEERS,
     connection: { state: 'connected', participantId: 'participant-plant-north', expiresAt: new Date(now + 8 * 60 * MINUTE).toISOString() },

@@ -2,7 +2,8 @@ import { DataError } from '../../errors'
 
 /**
  * Development controls of the mock source: per-area latency and failure,
- * mock authentication and dataspace state. Stored in localStorage so tests
+ * mock authentication, dataspace state, and the scenario and playback speed
+ * of simulated runs. Stored in localStorage so tests
  * can preset them before the app loads. Ignored in production builds.
  */
 export const CONTROLS_KEY = 'xana.mock.controls'
@@ -16,7 +17,13 @@ export const DEFAULT_CONTROLS = {
   connection: 'connected',
   // Bumped to invalidate the current mock session ("Expire session now").
   sessionRevision: 0,
+  // Scenario of the next started run, and playback speed of simulated runs.
+  scenario: 'happy_path',
+  speed: 1,
 }
+
+/** Playback speeds offered in the controls (multiples of real time). */
+export const SPEEDS = [0.5, 1, 2, 5, 10, 25]
 
 const listeners = new Set()
 

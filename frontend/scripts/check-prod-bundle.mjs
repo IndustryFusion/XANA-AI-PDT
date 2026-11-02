@@ -4,7 +4,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
 const DIST = new URL('../dist/', import.meta.url).pathname
-const FORBIDDEN = ['Mock data controls', 'xana.mock.controls', 'Per-area behaviour']
+const FORBIDDEN = ['Mock data controls', 'xana.mock.controls', 'Per-area behaviour', 'Playback speed of simulated runs']
 
 function files(dir) {
   return readdirSync(dir).flatMap((name) => {

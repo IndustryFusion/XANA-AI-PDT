@@ -1,7 +1,10 @@
 import { useEffect, useState } from 'react'
 import { AREAS } from '../../interface'
 import { Button, Dialog } from '../../../ui/components'
-import { FAILURE_MODES, onControlsChange, readControls, writeControls } from './controls'
+import { FAILURE_MODES, onControlsChange, readControls, SPEEDS, writeControls } from './controls'
+import { engine, store } from './instance'
+import { SCENARIOS } from './scenarios'
+import { OPEN_STATES } from './runCore'
 import { STORE_KEY } from './store'
 
 const CONNECTION_STATES = ['connected', 'expired', 'disconnected', 'not_configured']
@@ -13,8 +16,18 @@ const CONNECTION_STATES = ['connected', 'expired', 'disconnected', 'not_configur
 export default function DevControls() {
   const [open, setOpen] = useState(false)
   const [controls, setControls] = useState(readControls)
+  const [, setInterruptions] = useState(0)
 
   useEffect(() => onControlsChange(setControls), [])
+
+  const scenario = SCENARIOS.find((s) => s.id === controls.scenario) ?? SCENARIOS[0]
+  const openRuns = open ? store.get().runs.filter((r) => OPEN_STATES.includes(r.status)) : []
+
+  function toggleConnection(runId) {
+    if (engine.isInterrupted(runId)) engine.restore(runId)
+    else engine.interrupt(runId)
+    setInterruptions((n) => n + 1)
+  }
 
   const update = (patch) => setControls(writeControls(patch))
   const setArea = (key, area, value) => update({ [key]: { ...controls[key], [area]: value } })
@@ -48,6 +61,39 @@ export default function DevControls() {
               {CONNECTION_STATES.map((s) => <option key={s} value={s}>{s.replace('_', ' ')}</option>)}
             </select>
           </label>
+          <div className="field">
+            <label className="field__label" htmlFor="dev-scenario">Scenario for the next started run</label>
+            <select id="dev-scenario" value={scenario.id} onChange={(e) => update({ scenario: e.target.value })}>
+              {SCENARIOS.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
+            </select>
+            <span className="muted">{scenario.description}{scenario.actions.length > 0 && ` Operator: ${scenario.actions.join(' → ')}.`}</span>
+          </div>
+          <label className="field">
+            <span className="field__label">Playback speed of simulated runs</span>
+            <select value={controls.speed} onChange={(e) => update({ speed: Number(e.target.value) })}>
+              {SPEEDS.map((s) => <option key={s} value={s}>{s}×</option>)}
+            </select>
+          </label>
+          <table className="table">
+            <caption>Live connection of open runs</caption>
+            <thead>
+              <tr><th scope="col">Run</th><th scope="col">Status</th><th scope="col">Connection</th></tr>
+            </thead>
+            <tbody>
+              {openRuns.length === 0 && <tr><td colSpan={3} className="muted">No open runs.</td></tr>}
+              {openRuns.map((r) => (
+                <tr key={r.runId}>
+                  <th scope="row">{r.runId}</th>
+                  <td>{r.status.replace(/_/g, ' ')}</td>
+                  <td>
+                    <Button size="sm" onClick={() => toggleConnection(r.runId)}>
+                      {engine.isInterrupted(r.runId) ? `Restore connection of ${r.runId}` : `Interrupt connection of ${r.runId}`}
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
           <table className="table">
             <caption>Per-area behaviour</caption>
             <thead>

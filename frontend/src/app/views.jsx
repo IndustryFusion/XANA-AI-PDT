@@ -30,15 +30,13 @@ export function NotFound() {
 
 /** Change of issue #3 that delivers each area. */
 const DELIVERED_BY = {
-  incidents: 'gh-3-ui-incident-workflow',
-  history: 'gh-3-ui-incident-workflow',
   explorer: 'gh-3-ui-data-explorer-alerts',
   alerts: 'gh-3-ui-data-explorer-alerts',
   dataspace: 'gh-3-ui-dataspace-system',
   system: 'gh-3-ui-dataspace-system',
 }
 
-const ITEM_LABELS = { runId: 'Run', incidentId: 'Incident', entityId: 'Entity', alertId: 'Alert' }
+const ITEM_LABELS = { entityId: 'Entity', alertId: 'Alert' }
 
 /** Stand-in for an area delivered by a later change. */
 export function Placeholder() {

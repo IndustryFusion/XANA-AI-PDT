@@ -17,7 +17,7 @@ test('every area is reachable from the navigation and marked as current', async 
 })
 
 test('areas of later changes show a placeholder', async ({ page }) => {
-  for (const [path, label] of AREAS.slice(1)) {
+  for (const [path, label] of AREAS.filter(([p]) => !['/', '/incidents', '/history'].includes(p))) {
     await page.goto(path)
     await expect(page.getByText(`${label} is not available yet.`)).toBeVisible()
   }
@@ -57,13 +57,16 @@ test('dashboard incidents lead to their run; entity actions prefill a new incide
   const tile = page.getByRole('region', { name: 'Active incidents' })
   await tile.getByRole('link', { name: /Hydraulic pressure/ }).click()
   await expect(page).toHaveURL(/\/incidents\/run-1002$/)
-  await expect(page.getByText('run-1002')).toBeVisible()
+  await expect(page.getByRole('heading', { level: 2, name: 'Incident #42' })).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Open runs' }).getByRole('link', { name: /Hydraulic pressure/ })).toHaveAttribute('aria-current', 'true')
+  await expect(page.getByRole('region', { name: 'The agent needs more information' })).toBeVisible()
 
   await page.goBack()
   await tile.getByRole('button', { name: 'Actions for press-brake-02' }).click()
   await tile.getByRole('link', { name: 'Start new incident' }).click()
   await expect(page).toHaveURL(/\/incidents\?new=1&machine=urn%3Angsi-ld%3AMachine%3Apress-brake-02$/)
-  await expect(page.getByText('urn:ngsi-ld:Machine:press-brake-02')).toBeVisible()
+  await expect(page.getByLabel('Machine ID')).toHaveValue('urn:ngsi-ld:Machine:press-brake-02')
+  await expect(page.getByLabel('Issue')).toBeFocused()
 })
 
 test('expired dataspace session shows a reconnect hint', async ({ page }) => {

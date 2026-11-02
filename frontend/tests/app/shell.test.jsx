@@ -25,6 +25,13 @@ describe('main navigation', () => {
   test.each([
     ['/incidents', 'Active incidents'],
     ['/history', 'Incident history'],
+  ])('%s shows its delivered area', async (path, label) => {
+    renderApp({ path, controls: { authEnabled: false } })
+    expect(await screen.findByRole('heading', { name: label, level: 1 })).toBeVisible()
+    expect(screen.queryByText(`${label} is not available yet.`)).not.toBeInTheDocument()
+  })
+
+  test.each([
     ['/explorer', 'Data explorer'],
     ['/alerts', 'Alerts'],
     ['/dataspace', 'Dataspace'],
@@ -110,8 +117,10 @@ describe('entity reference', () => {
     await user.click((await within(tile).findAllByRole('button', { name: /^Actions for/ }))[0])
     await user.click(within(tile).getByRole('link', { name: 'Start new incident' }))
     expect(window.location.pathname).toBe('/incidents')
-    expect(new URLSearchParams(window.location.search).get('machine')).toMatch(/^urn:ngsi-ld:Machine:/)
-    expect(await screen.findByText('New incident for machine')).toBeVisible()
+    const machine = new URLSearchParams(window.location.search).get('machine')
+    expect(machine).toMatch(/^urn:ngsi-ld:Machine:/)
+    expect(await screen.findByLabelText('Machine ID')).toHaveValue(machine)
+    expect(screen.getByLabelText('Issue')).toHaveFocus()
   })
 })
 

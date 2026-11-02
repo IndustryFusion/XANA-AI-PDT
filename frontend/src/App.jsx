@@ -5,6 +5,8 @@ import { RouterProvider, useRoute } from './app/router'
 import { SessionGate } from './app/session'
 import { ConfigError, NotFound, Placeholder } from './app/views'
 import Dashboard from './features/dashboard/Dashboard'
+import IncidentHistory from './features/history/IncidentHistory'
+import ActiveIncidents from './features/incidents/ActiveIncidents'
 import { ToastProvider } from './ui/components'
 import { ThemeProvider } from './ui/theme'
 import './ui/tokens.css'
@@ -23,6 +25,8 @@ function AreaContent() {
   const { area } = useRoute()
   if (area === 'signin') return <SignInRedirect />
   if (area === 'dashboard') return <Dashboard />
+  if (area === 'incidents') return <ActiveIncidents />
+  if (area === 'history') return <IncidentHistory />
   if (area) return <Placeholder />
   return <NotFound />
 }
