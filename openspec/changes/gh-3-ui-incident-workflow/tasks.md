@@ -45,7 +45,7 @@
 - [x] 7.1 Add one end-to-end test per mock scenario driving the UI from start to the scenario's end state at high playback speed; verify all pass (spec: run-simulation → Named scenarios; machine-builder-conversation → Policy-gated data requests)
 - [x] 7.2 Add end-to-end tests for connection interruption and recovery, history reopen, and dashboard → run navigation; verify all pass
 - [x] 7.3 Extend the accessibility suite to the run view in each waiting state, the conversation and incident history in both themes; verify zero axe violations and keyboard operation of all panels and dialogs (spec: visual-system → Structured presentation, Keyboard operation)
-- [ ] 7.4 Run `openspec validate gh-3-ui-incident-workflow --strict` and the Frontend CI; verify both pass and record per-scenario results in the Pull Request
+- [x] 7.4 Run `openspec validate gh-3-ui-incident-workflow --strict` and the Frontend CI; verify both pass and record per-scenario results in the Pull Request
 
 ## Workflow follow-up
 
