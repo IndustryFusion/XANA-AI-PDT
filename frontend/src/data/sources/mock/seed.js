@@ -1,5 +1,6 @@
 import { COMPONENTS, LINES, MACHINES, PEERS, SENSORS, urn } from './catalog'
 import { applyNext, createRunRecord, incidentFromRun, initialCounters, simulate } from './runCore'
+import { machineStatusAt, sensorValueAt } from './history'
 
 export { PEERS }
 
@@ -30,11 +31,24 @@ export function createRng(seed) {
 
 export const SEED = 20261102
 /** Stored state with another version is discarded and rebuilt from the seed. */
-export const SEED_VERSION = 2
+export const SEED_VERSION = 3
 const MINUTE = 60_000
+const DAY = 24 * 60 * MINUTE
 
 const prop = (value, extra = {}) => ({ type: 'Property', value, ...extra })
 const rel = (object) => ({ type: 'Relationship', object })
+const iri = (id) => prop({ '@id': id })
+
+/** Line shifts (list attribute) and machine configurations (JSON attribute). */
+const SHIFTS = { 'line-a': ['early', 'late', 'night'], 'line-b': ['early', 'late'], 'line-c': ['early'] }
+const CONFIGURATION = {
+  LaserCutter: { firmware: '5.4.2', maxPowerKw: 6, assistGases: ['O2', 'N2'], nozzleChangerSlots: 8 },
+  PressBrake: { firmware: '3.1.0', maxForceKn: 2200, axes: ['Y1', 'Y2', 'X', 'R'] },
+  Deburring: { firmware: '2.0.7', brushes: 4, beltSpeedMPerMin: 6 },
+  Coating: { firmware: '1.9.3', guns: 2, cureTemperatureC: 180 },
+  Chiller: { firmware: '4.0.1', setPointC: 18, refrigerant: 'R-513A' },
+  Extractor: { firmware: '2.2.0', filterClass: 'H13', fanStages: 3 },
+}
 
 function buildEntities(rng, now) {
   const observedAt = new Date(now).toISOString()
@@ -43,42 +57,82 @@ function buildEntities(rng, now) {
     id: factoryId,
     type: 'Factory',
     name: prop('Plant North'),
+    description: { type: 'LanguageProperty', languageMap: { en: 'Sheet metal fabrication and finishing', de: 'Blechbearbeitung und Oberflächenveredelung' } },
     address: prop({ addressLocality: 'Rivertown', addressCountry: 'DE' }),
+    location: { type: 'GeoProperty', value: { type: 'Point', coordinates: [9.1829, 48.7758] } },
   }]
 
   for (const line of LINES) {
-    entities.push({ id: urn('ProductionLine', line.id), type: 'ProductionLine', name: prop(line.name), partOf: rel(factoryId) })
+    entities.push({
+      id: urn('ProductionLine', line.id),
+      type: 'ProductionLine',
+      name: prop(line.name),
+      shifts: { type: 'ListProperty', valueList: SHIFTS[line.id] },
+      partOf: rel(factoryId),
+    })
   }
 
   for (const m of MACHINES) {
     const machineId = urn('Machine', m.id)
+    rng.pick([0]) // keeps the random sequence of earlier seed versions
     entities.push({
       id: machineId,
       type: 'Machine',
       name: prop(m.name),
       machineType: prop(m.kind),
-      status: prop(rng.pick(['running', 'running', 'running', 'idle']), { observedAt }),
+      status: prop(machineStatusAt(machineId, now), { observedAt }),
+      operatingMode: { type: 'VocabularyProperty', vocab: m.id === 'coating-01' ? 'setup' : 'automatic' },
+      configuration: { type: 'JsonProperty', json: CONFIGURATION[m.kind] },
       partOf: rel(urn('ProductionLine', m.line)),
       manufacturer: prop(PEERS.find((p) => p.id === m.builder).name),
     })
+    const components = COMPONENTS[m.kind].map(([cid]) => urn('Component', `${m.id}-${cid}`))
     for (const [cid, cname] of COMPONENTS[m.kind]) {
       entities.push({ id: urn('Component', `${m.id}-${cid}`), type: 'Component', name: prop(cname), partOf: rel(machineId) })
     }
-    for (const [sid, unit, lo, hi] of SENSORS[m.kind]) {
-      const value = Math.round((lo + rng.next() * (hi - lo)) * 10) / 10
+    SENSORS[m.kind].forEach(([sid, unit, lo, hi], i) => {
+      const id = urn('Sensor', `${m.id}-${sid}`)
+      rng.next() // keeps the random sequence of earlier seed versions
       entities.push({
-        id: urn('Sensor', `${m.id}-${sid}`),
+        id,
         type: 'Sensor',
         name: prop(`${m.name} ${sid.replace(/-/g, ' ')}`),
-        value: prop(value, { unitCode: unit, observedAt }),
+        value: prop(sensorValueAt(id, now), {
+          unitCode: unit,
+          observedAt,
+          datasetId: 'urn:ngsi-ld:Dataset:live',
+          accuracy: prop(Math.round((hi - lo) * 0.01 * 100) / 100, { unitCode: unit }),
+          calibratedAt: prop(new Date(now - (30 + i * 11) * DAY).toISOString().slice(0, 10)),
+        }),
+        installedOn: iri(components[i % components.length]),
         measures: rel(machineId),
       })
-    }
+    })
   }
   return entities
 }
 
-const DAY = 24 * 60 * MINUTE
+/**
+ * Creation and deletion records, so time-shift can rebuild earlier states:
+ * a retrofitted sensor created two days ago, and entities deleted yesterday.
+ */
+function buildEntityLog(now) {
+  const machine = urn('Machine', 'press-brake-01')
+  return {
+    created: { [urn('Sensor', 'laser-cutter-02-power')]: new Date(now - 2 * DAY).toISOString() },
+    deleted: [
+      {
+        at: new Date(now - DAY).toISOString(),
+        entity: { id: urn('Sensor', 'press-brake-01-noise'), type: 'Sensor', name: prop('Press brake 01 noise'), value: prop(71.5, { unitCode: 'dB', observedAt: new Date(now - DAY - 10 * MINUTE).toISOString() }), measures: rel(machine) },
+      },
+      {
+        at: new Date(now - DAY).toISOString(),
+        entity: { id: urn('Camera', 'line-a-inspection'), type: 'Camera', name: prop('Line A inspection camera'), resolution: prop('4K'), partOf: rel(urn('ProductionLine', 'line-a')) },
+      },
+    ],
+  }
+}
+
 const confirm = ['confirmResolution', { confirmed: true }]
 const escalate = ['escalate']
 const act = (a, extra = {}) => ['sendConversationAct', { act: a, ...extra }]
@@ -137,32 +191,75 @@ function buildRunsAndIncidents(now) {
   return { runs, incidents, counters: state.counters }
 }
 
-const ALERT_EVENTS = [
-  ['TemperatureHigh', 'Temperature above threshold'],
-  ['PressureLow', 'Pressure below threshold'],
-  ['VibrationHigh', 'Vibration level elevated'],
-  ['FlowLow', 'Coolant flow below minimum'],
-  ['FilterClogged', 'Filter differential pressure high'],
-  ['DoorOpen', 'Safety door opened during operation'],
+export const ALERT_EVENTS = [
+  ['TemperatureHigh', 'Temperature above threshold', '°C'],
+  ['PressureLow', 'Pressure below threshold', 'bar'],
+  ['VibrationHigh', 'Vibration level elevated', 'mm/s'],
+  ['FlowLow', 'Coolant flow below minimum', 'l/min'],
+  ['FilterClogged', 'Filter differential pressure high', 'Pa'],
+  ['DoorOpen', 'Safety door opened during operation', null],
 ]
+
+export const ALERT_ENVIRONMENTS = ['Production', 'Commissioning']
+export const serviceOf = (machine) => (machine.line === 'line-a' ? 'Line A' : machine.line === 'line-b' ? 'Line B' : 'Line C')
+
+/** A newly raised alert of the mock alert manager. */
+export function createAlert({ id, machine, event, severity, at, environment = 'Production', value = null }) {
+  const [name, text] = ALERT_EVENTS.find(([e]) => e === event)
+  return {
+    id,
+    resource: urn('Machine', machine.id),
+    event: name,
+    text: `${machine.name}: ${text}`,
+    severity,
+    status: 'open',
+    environment,
+    service: [serviceOf(machine)],
+    group: 'Machine',
+    value,
+    origin: 'condition-monitoring',
+    type: 'exceptionAlert',
+    createTime: at,
+    lastReceiveTime: at,
+    duplicateCount: 0,
+    attributes: { line: machine.line, machineType: machine.kind },
+    history: [{ at, type: 'new', status: 'open', severity, text: 'Alert raised.', user: null }],
+  }
+}
+
+const STATUS_NOTES = {
+  ack: 'Checked at the machine; monitoring the value.',
+  shelved: 'Planned maintenance on this machine this week.',
+  closed: 'Value back within limits.',
+}
 
 function buildAlerts(rng, now) {
   const severities = ['critical', 'major', 'major', 'minor', 'minor', 'warning', 'warning', 'informational']
   const statuses = ['open', 'open', 'open', 'ack', 'closed']
   return Array.from({ length: 16 }, (_, i) => {
     const machine = rng.pick(MACHINES)
-    const [event, text] = rng.pick(ALERT_EVENTS)
-    return {
+    const [event, , unit] = rng.pick(ALERT_EVENTS)
+    const severity = rng.pick(severities)
+    const picked = rng.pick(statuses)
+    const at = now - rng.int(5, 3 * 24 * 60) * MINUTE
+    const status = i === 10 ? 'shelved' : picked
+    const alert = createAlert({
       id: `alert-${String(i + 1).padStart(3, '0')}`,
-      resource: urn('Machine', machine.id),
+      machine,
       event,
-      text: `${machine.name}: ${text}`,
-      severity: rng.pick(severities),
-      status: rng.pick(statuses),
-      environment: 'Production',
-      service: [machine.line === 'line-a' ? 'Line A' : machine.line === 'line-b' ? 'Line B' : 'Line C'],
-      createTime: new Date(now - rng.int(5, 3 * 24 * 60) * MINUTE).toISOString(),
-    }
+      severity,
+      at: new Date(at).toISOString(),
+      environment: i % 4 === 3 ? 'Commissioning' : 'Production',
+      value: unit ? `${10 + ((i * 37) % 90)} ${unit}` : null,
+    })
+    alert.duplicateCount = i % 3
+    alert.lastReceiveTime = new Date(at + (now - at) * 0.2).toISOString()
+    const steps = { ack: ['ack'], shelved: ['shelved'], closed: ['ack', 'closed'] }[status] ?? []
+    steps.forEach((s, k) => {
+      alert.history.push({ at: new Date(at + (now - at) * (0.4 + 0.2 * k)).toISOString(), type: 'status', status: s, severity, text: STATUS_NOTES[s], user: 'Alex Operator' })
+    })
+    alert.status = status
+    return alert
   })
 }
 
@@ -192,9 +289,10 @@ export function buildSeed({ seed = SEED, now = Date.now() } = {}) {
     user: { username: 'operator', name: 'Alex Operator', email: 'operator@example.org' },
     session: { signedIn: false, revision: 0 },
     entities: buildEntities(rng, now),
+    entityLog: buildEntityLog(now),
     runs,
     incidents,
-    counters,
+    counters: { ...counters, alert: 17 },
     alerts: buildAlerts(rng, now),
     peers: PEERS,
     connection: { state: 'connected', participantId: 'participant-plant-north', expiresAt: new Date(now + 8 * 60 * MINUTE).toISOString() },

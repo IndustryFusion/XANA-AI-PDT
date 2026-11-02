@@ -21,6 +21,31 @@ describe('seed', () => {
       }
     }
     expect(ids).toContain(seed.factory.id)
+    for (const e of seed.entities) {
+      for (const value of Object.values(e)) {
+        if (value?.value?.['@id']) expect(ids).toContain(value.value['@id'])
+      }
+    }
+  })
+
+  test('contains every NGSI-LD attribute kind, sub-attributes and metadata', () => {
+    const seed = buildSeed({ now: NOW })
+    const attrs = seed.entities.flatMap((e) => Object.values(e).filter((v) => v && typeof v === 'object' && v.type))
+    const kinds = new Set(attrs.map((a) => a.type))
+    expect([...kinds].sort()).toEqual(['GeoProperty', 'JsonProperty', 'LanguageProperty', 'ListProperty', 'Property', 'Relationship', 'VocabularyProperty'])
+    expect(attrs.some((a) => a.value?.['@id'])).toBe(true)
+    const sensorValue = seed.entities.find((e) => e.type === 'Sensor').value
+    expect(sensorValue).toMatchObject({ unitCode: expect.any(String), observedAt: expect.any(String), datasetId: expect.any(String), accuracy: { type: 'Property' } })
+  })
+
+  test('records created and deleted entities, and alert histories', () => {
+    const seed = buildSeed({ now: NOW })
+    expect(Object.keys(seed.entityLog.created)).toHaveLength(1)
+    expect(seed.entityLog.deleted.map((d) => d.entity.type)).toEqual(['Sensor', 'Camera'])
+    for (const alert of seed.alerts) {
+      expect(alert.history[0]).toMatchObject({ type: 'new', status: 'open' })
+      expect(alert.history.at(-1).status).toBe(alert.status)
+    }
   })
 })
 

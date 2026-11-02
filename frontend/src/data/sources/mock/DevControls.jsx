@@ -74,6 +74,17 @@ export default function DevControls() {
               {SPEEDS.map((s) => <option key={s} value={s}>{s}×</option>)}
             </select>
           </label>
+          <label className="field">
+            <span className="field__label">Live entity updates</span>
+            <select value={controls.liveUpdates} onChange={(e) => update({ liveUpdates: e.target.value })}>
+              <option value="available">available</option>
+              <option value="unavailable">unavailable</option>
+            </select>
+          </label>
+          <label className="row">
+            <input type="checkbox" checked={controls.newAlerts} onChange={(e) => update({ newAlerts: e.target.checked })} />
+            Raise new alerts occasionally while the Alerts area is open
+          </label>
           <table className="table">
             <caption>Live connection of open runs</caption>
             <thead>
