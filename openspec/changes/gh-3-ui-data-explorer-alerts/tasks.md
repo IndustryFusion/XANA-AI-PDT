@@ -28,7 +28,7 @@
 
 - [x] 4.1 Replace the explorer and alerts placeholders; add end-to-end tests: query → entity → relationship → history; edit and time-shift; import a sample file; alert filter → bulk acknowledge → detail → start incident; verify all pass
 - [x] 4.2 Extend the accessibility suite to the explorer (entity view, history, dialogs) and alerts (list, detail) in both themes; verify zero axe violations and keyboard operation
-- [ ] 4.3 Run `openspec validate gh-3-ui-data-explorer-alerts --strict` and the Frontend CI; verify both pass and record per-scenario results in the Pull Request
+- [x] 4.3 Run `openspec validate gh-3-ui-data-explorer-alerts --strict` and the Frontend CI; verify both pass and record per-scenario results in the Pull Request
 
 ## Workflow follow-up
 
