@@ -14,6 +14,8 @@ test('alert filter → bulk acknowledge → detail → start incident', async ({
   await expect(page).toHaveURL(/service=Line\+A&text=chiller/)
   const rows = list(page).locator('tbody tr')
   await expect(rows.first()).toBeVisible()
+  // Wait until the list shows the filtered result.
+  await expect(list(page).locator('tbody tr', { hasNotText: /chiller/i })).toHaveCount(0)
   const open = rows.filter({ has: page.locator('[data-status="open"]').nth(0) })
   const count = await open.count()
   expect(count).toBeGreaterThan(1)
