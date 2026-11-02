@@ -1,0 +1,65 @@
+import { DataError } from '../../errors'
+
+/**
+ * Development controls of the mock source: per-area latency and failure,
+ * mock authentication and dataspace state. Stored in localStorage so tests
+ * can preset them before the app loads. Ignored in production builds.
+ */
+export const CONTROLS_KEY = 'xana.mock.controls'
+
+export const FAILURE_MODES = ['none', 'unavailable', 'unauthorized']
+
+export const DEFAULT_CONTROLS = {
+  latencyMs: {},
+  failure: {},
+  authEnabled: true,
+  connection: 'connected',
+  // Bumped to invalidate the current mock session ("Expire session now").
+  sessionRevision: 0,
+}
+
+const listeners = new Set()
+
+export function readControls(storage = globalThis.localStorage) {
+  try {
+    const raw = storage?.getItem(CONTROLS_KEY)
+    return { ...DEFAULT_CONTROLS, ...(raw ? JSON.parse(raw) : {}) }
+  } catch {
+    return { ...DEFAULT_CONTROLS }
+  }
+}
+
+export function writeControls(patch, storage = globalThis.localStorage) {
+  const next = { ...readControls(storage), ...patch }
+  storage?.setItem(CONTROLS_KEY, JSON.stringify(next))
+  listeners.forEach((l) => l(next))
+  return next
+}
+
+export function onControlsChange(listener) {
+  listeners.add(listener)
+  return () => listeners.delete(listener)
+}
+
+const BASE_LATENCY_MS = 120
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
+/** Controls in effect: the stored ones in development, the defaults otherwise. */
+export function currentControls() {
+  return import.meta.env.DEV ? readControls() : DEFAULT_CONTROLS
+}
+
+/** Applied before every mock operation of `area`. */
+export async function applyControls(area) {
+  const controls = currentControls()
+  const extra = Number(controls.latencyMs[area] ?? 0)
+  const delay = import.meta.env.MODE === 'test' ? extra : BASE_LATENCY_MS + extra
+  if (delay > 0) await sleep(delay)
+  const failure = controls.failure[area] ?? 'none'
+  if (failure !== 'none') {
+    const message = failure === 'unauthorized'
+      ? `Access to ${area} was denied (simulated).`
+      : `${area} is unavailable (simulated failure).`
+    throw new DataError(area, failure, message)
+  }
+}

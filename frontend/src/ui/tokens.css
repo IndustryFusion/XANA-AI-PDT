@@ -1,0 +1,129 @@
+/*
+ * Design tokens. Dark is the primary theme; light mirrors it.
+ * Theme selection: [data-theme] on <html> when the operator chose one,
+ * otherwise the system colour-scheme preference.
+ */
+
+:root,
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --bg: #0f1117;
+  --surface: #191c29;
+  --surface-2: #222639;
+  --surface-hover: #2a2f46;
+  --border: #31364f;
+  --border-strong: #4a5070;
+
+  --text: #e6e9f2;
+  --text-muted: #a7b0c4;
+  --text-inverse: #0f1117;
+
+  --accent: #8b93ff;
+  --accent-strong: #4f46e5;
+  --accent-contrast: #ffffff;
+  --focus: #a5b4fc;
+
+  --tone-neutral: #94a3b8;
+  --tone-info: #38bdf8;
+  --tone-progress: #60a5fa;
+  --tone-attention: #fbbf24;
+  --tone-warning: #fb923c;
+  --tone-success: #4ade80;
+  --tone-danger: #f87171;
+  --tone-special: #c084fc;
+
+  --tint: 18%;
+  --shadow: 0 1px 2px rgb(0 0 0 / 40%), 0 4px 16px rgb(0 0 0 / 25%);
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+
+  --bg: #f4f5f9;
+  --surface: #ffffff;
+  --surface-2: #eef0f6;
+  --surface-hover: #e3e6f0;
+  --border: #d5d9e5;
+  --border-strong: #a9b0c4;
+
+  --text: #161a26;
+  --text-muted: #4a5367;
+  --text-inverse: #ffffff;
+
+  --accent: #4338ca;
+  --accent-strong: #4338ca;
+  --accent-contrast: #ffffff;
+  --focus: #4338ca;
+
+  --tone-neutral: #64748b;
+  --tone-info: #0369a1;
+  --tone-progress: #1d4ed8;
+  --tone-attention: #a16207;
+  --tone-warning: #c2410c;
+  --tone-success: #15803d;
+  --tone-danger: #b91c1c;
+  --tone-special: #7e22ce;
+
+  --tint: 12%;
+  --shadow: 0 1px 2px rgb(15 23 42 / 8%), 0 4px 16px rgb(15 23 42 / 8%);
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) {
+    color-scheme: light;
+
+    --bg: #f4f5f9;
+    --surface: #ffffff;
+    --surface-2: #eef0f6;
+    --surface-hover: #e3e6f0;
+    --border: #d5d9e5;
+    --border-strong: #a9b0c4;
+
+    --text: #161a26;
+    --text-muted: #4a5367;
+    --text-inverse: #ffffff;
+
+    --accent: #4338ca;
+    --accent-strong: #4338ca;
+    --accent-contrast: #ffffff;
+    --focus: #4338ca;
+
+    --tone-neutral: #64748b;
+    --tone-info: #0369a1;
+    --tone-progress: #1d4ed8;
+    --tone-attention: #a16207;
+    --tone-warning: #c2410c;
+    --tone-success: #15803d;
+    --tone-danger: #b91c1c;
+    --tone-special: #7e22ce;
+
+    --tint: 12%;
+    --shadow: 0 1px 2px rgb(15 23 42 / 8%), 0 4px 16px rgb(15 23 42 / 8%);
+  }
+}
+
+:root {
+  --font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-md: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.375rem;
+
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+
+  --radius-sm: 4px;
+  --radius: 8px;
+  --radius-lg: 12px;
+
+  --header-height: 56px;
+  --bp-single-column: 900px;
+}
