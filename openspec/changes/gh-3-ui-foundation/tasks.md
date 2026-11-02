@@ -4,7 +4,7 @@
 
 - [x] 1.1 Scaffold `frontend/` with Vite, React 18 and the folder structure from design decision 7; verify `npm ci` and `npm run build` succeed
 - [x] 1.2 Add Vitest (jsdom, Testing Library), Playwright with axe, and ESLint flat config with the recommended JavaScript, React and React Hooks rules; verify `npm run lint`, `npm test` and `npm run test:e2e` each run (with an initial smoke test)
-- [ ] 1.3 Add the `Frontend` CI workflow (lint, unit tests, build, end-to-end) on Pull Requests touching `frontend/**`; verify it passes on this Pull Request
+- [x] 1.3 Add the `Frontend` CI workflow (lint, unit tests, build, end-to-end) on Pull Requests touching `frontend/**`; verify it passes on this Pull Request
 
 ## 2. Visual system
 
@@ -44,7 +44,7 @@
 ## 7. Integration checks
 
 - [x] 7.1 Run the accessibility end-to-end suite on every route in both themes; verify zero axe violations and keyboard-only sign-in and navigation (spec: visual-system → Contrast, Keyboard operation)
-- [ ] 7.2 Run `openspec validate gh-3-ui-foundation --strict` and the full frontend CI locally; verify both pass and record per-scenario verification results in the Pull Request
+- [x] 7.2 Run `openspec validate gh-3-ui-foundation --strict` and the full frontend CI locally; verify both pass and record per-scenario verification results in the Pull Request
 
 ## Workflow follow-up
 
