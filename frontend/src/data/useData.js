@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { areas } from './index'
+import { areas, onDataEvent } from './index'
+
+const NO_EVENTS = []
 
 /**
  * Loads one data-interface operation and tracks its state.
@@ -10,9 +12,10 @@ import { areas } from './index'
  *   result.error   DataError when status is 'error'
  *   result.retry() / result.refresh()  load again
  *
+ * `refreshOn` lists facade events (e.g. CONNECTION_CHANGED) that reload it at once.
  * Each call is isolated: an error in one area never affects another.
  */
-export function useData(area, op, args = [], { refreshMs = 0, enabled = true, refreshKey = 0 } = {}) {
+export function useData(area, op, args = [], { refreshMs = 0, enabled = true, refreshKey = 0, refreshOn = NO_EVENTS } = {}) {
   const [state, setState] = useState({ status: 'loading', data: undefined, error: null })
   const [tick, setTick] = useState(0)
   const argsKey = JSON.stringify(args)
@@ -39,6 +42,13 @@ export function useData(area, op, args = [], { refreshMs = 0, enabled = true, re
     const id = setInterval(refresh, refreshMs)
     return () => clearInterval(id)
   }, [enabled, refreshMs, refresh])
+
+  const eventsKey = refreshOn.join(',')
+  useEffect(() => {
+    if (!enabled || !eventsKey) return undefined
+    const offs = eventsKey.split(',').map((event) => onDataEvent(event, refresh))
+    return () => offs.forEach((off) => off())
+  }, [enabled, eventsKey, refresh])
 
   return { ...state, retry: refresh, refresh }
 }

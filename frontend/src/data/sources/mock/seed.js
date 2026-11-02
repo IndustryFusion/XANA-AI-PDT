@@ -1,6 +1,7 @@
 import { COMPONENTS, LINES, MACHINES, PEERS, SENSORS, urn } from './catalog'
 import { applyNext, createRunRecord, incidentFromRun, initialCounters, simulate } from './runCore'
 import { machineStatusAt, sensorValueAt } from './history'
+import { buildKnowledgeBase } from './kbContent'
 
 export { PEERS }
 
@@ -31,7 +32,7 @@ export function createRng(seed) {
 
 export const SEED = 20261102
 /** Stored state with another version is discarded and rebuilt from the seed. */
-export const SEED_VERSION = 3
+export const SEED_VERSION = 4
 const MINUTE = 60_000
 const DAY = 24 * 60 * MINUTE
 
@@ -268,10 +269,40 @@ const HEALTH_CHECKS = [
   ['timeseries', 'Time-series database', 9],
   ['memory', 'Incident memory database', 6],
   ['alerts', 'Alert manager', 22],
+  ['message-broker', 'Message broker', 4],
   ['llm', 'Language model', 240],
   ['gateway', 'Dataspace gateway', 64],
   ['knowledge-base', 'Knowledge base', 35],
 ]
+
+/**
+ * Dataspace policies: what each peer may access here (`policies`), what this
+ * factory may access at each peer (`remoteGrants`), and incoming capability
+ * requests. Capabilities without an entry are at their default.
+ */
+function buildDataspace(now) {
+  const at = (days) => new Date(now - days * DAY).toISOString()
+  return {
+    policies: {
+      'peer-photonic': { 'twin:direct': 'granted', 'twin:adjacents': 'granted' },
+      'peer-formwerk': { 'twin:direct': 'granted', 'twin:history': 'denied' },
+      'peer-coolflow': { 'twin:direct': 'granted', 'twin:history': 'granted' },
+    },
+    remoteGrants: {
+      'peer-photonic': { 'twin:direct': 'granted', 'twin:history': 'denied' },
+      'peer-formwerk': { 'twin:direct': 'granted' },
+      'peer-surfacetec': {},
+      'peer-coolflow': { 'twin:direct': 'granted', 'twin:history': 'granted' },
+    },
+    capabilityRequests: [
+      { id: 'req-005', requesterId: 'peer-formwerk', capability: 'twin:history', purpose: 'Analyse hydraulic pressure trends of press brakes 01 and 02 before the next service visit.', requestedAt: at(0.2), status: 'pending', note: null, decidedAt: null },
+      { id: 'req-004', requesterId: 'peer-surfacetec', capability: 'twin:adjacents', purpose: 'Include spray gun and curing oven components in remote diagnostics.', requestedAt: at(1.5), status: 'pending', note: null, decidedAt: null },
+      { id: 'req-003', requesterId: 'peer-hydroservice', capability: 'twin:direct', purpose: 'Offer condition-based maintenance of hydraulic units.', requestedAt: at(3), status: 'pending', note: null, decidedAt: null },
+      { id: 'req-002', requesterId: 'peer-coolflow', capability: 'twin:history', purpose: 'Long-term monitoring of the process chiller.', requestedAt: at(8), status: 'approved', note: 'Agreed in the service contract.', decidedAt: at(7) },
+      { id: 'req-001', requesterId: 'peer-photonic', capability: 'twin:history', purpose: 'Benchmark cutting performance across customers.', requestedAt: at(12), status: 'denied', note: 'Only per incident, not for benchmarking.', decidedAt: at(11) },
+    ],
+  }
+}
 
 export function buildSeed({ seed = SEED, now = Date.now() } = {}) {
   const rng = createRng(seed)
@@ -292,10 +323,13 @@ export function buildSeed({ seed = SEED, now = Date.now() } = {}) {
     entityLog: buildEntityLog(now),
     runs,
     incidents,
-    counters: { ...counters, alert: 17 },
+    counters: { ...counters, alert: 17, job: 1 },
     alerts: buildAlerts(rng, now),
     peers: PEERS,
-    connection: { state: 'connected', participantId: 'participant-plant-north', expiresAt: new Date(now + 8 * 60 * MINUTE).toISOString() },
+    connection: { state: 'connected', participantId: 'participant-plant-north', expiresAt: new Date(now + 8 * 60 * MINUTE).toISOString(), sharingTier: 'minimal' },
+    dataspace: buildDataspace(now),
     health: HEALTH_CHECKS.map(([id, label, latencyMs]) => ({ id, label, latencyMs })),
+    settings: {},
+    kb: buildKnowledgeBase(now),
   }
 }

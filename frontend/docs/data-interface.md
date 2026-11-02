@@ -19,7 +19,7 @@ The operation list is defined in `src/data/interface.js` (`OPERATIONS`); result 
 
 - Live data uses `subscribeX(params, onEvent)`, which returns `unsubscribe()`. The source handles reconnection and polling; screens only see events. Failures arrive as `{ type: 'error', error }` events.
 - Timestamps are ISO 8601 strings. Entity identifiers are NGSI-LD URIs.
-- Status: **implemented** operations work on the mock source today; **planned** operations reject with `unavailable` until the change named in the heading implements them.
+- Status: every operation is **implemented** on the mock source. An operation a data source does not implement rejects with `unavailable`.
 
 ## session — implemented
 
@@ -156,36 +156,48 @@ Entities are NGSI-LD entities in compacted form: `id`, `type` and one member per
 
 **Mock specifics.** Sixteen seeded alerts on the factory's machines in the environments *Production* and *Commissioning*. In development, while the Alerts area lists alerts, a new alert is raised about every 60 s divided by the playback speed; the controls' *Raise new alerts occasionally* setting switches this off.
 
-## dataspace — dashboard part implemented; rest planned (gh-3-ui-dataspace-system)
+## dataspace — implemented
 
 | Operation | Input | Result | Errors |
 |---|---|---|---|
-| `getConnection()` | — | `{ state: connected \| expired \| disconnected \| not_configured, participantId, expiresAt }` | `unavailable` |
-| `connect({ secret })` | optional credential | connection | `unauthorized`, `unavailable` |
-| `disconnect()` | — | nothing | `unavailable` |
+| `getConnection()` | — | `{ state: connected \| expired \| disconnected \| not_configured, participantId, expiresAt, credentialConfigured, sharingTier }`: `credentialConfigured` tells whether the configuration provides the credential for `connect`; `sharingTier` is the configured data-sharing tier (`minimal`, `adjacent` or `timeseries`; `null` when not configured) | `unavailable` |
+| `connect({ secret })` | credential; may be omitted when `credentialConfigured` | connection (as `getConnection`) | `unauthorized` (credential rejected), `unavailable` (gateway unreachable), `conflict` (not configured) |
+| `disconnect()` | — | nothing | `conflict` (not configured), `unavailable` |
 | `listPeers()` | — | `[{ id, name, capabilities[] }]` compatible participants | `unavailable` (also when not connected) |
-| `getPeerCapabilities(peerId)` | peer ID | capabilities in both directions | `not_found` |
-| `listCapabilityRequests()` | — | incoming requests | `unavailable` |
-| `decideCapabilityRequest(id, { approved, note })` | decision | updated request | `conflict` |
-| `setCapabilityPolicy({ peerId, capability, action })` | policy change | nothing | `invalid` |
-| `resolveNames(ids)` | registry IDs | `{ [id]: name }` | `unavailable` |
-| `resolveBuilders(machineIds)` | machine entity IDs | `{ [machineId]: builderName }` | `unavailable` |
+| `getPeerCapabilities(peerId)` | peer ID | `{ peerId, name, atPeer: [{ capability, status }], here: [{ capability, status }] }`: what this factory may access at the peer, and what the peer may access here; `status` is `granted`, `denied` or `default` | `not_found`, `unavailable` (not connected) |
+| `listCapabilityRequests()` | — | `[{ id, requesterId, capability, purpose, requestedAt, status: pending \| approved \| denied, note, decidedAt }]` incoming requests, pending first, then newest first | `unavailable` (also when not connected) |
+| `decideCapabilityRequest(id, { approved, note })` | decision and optional note | updated request; approving grants the capability to the requester (`here` shows `granted`) | `conflict` (already decided; the message names the decision), `not_found` |
+| `setCapabilityPolicy({ peerId, capability, action })` | `action`: `grant`, `deny` or `reset` (back to default) for what the peer may access here | nothing | `invalid` (unknown action or capability), `not_found` (unknown peer), `unavailable` (not connected) |
+| `resolveNames(ids)` | registry IDs of participants | `{ [id]: name }`; unknown IDs are omitted | `unavailable` |
+| `resolveBuilders(machineIds)` | machine entity IDs | `{ [machineId]: builderName }`; machines without a known builder are omitted | `unavailable` |
 
-## knowledgeBase — planned (gh-3-ui-dataspace-system)
+**Capabilities and tiers.** `twin:direct` (the machine entity), `twin:adjacents` (linked components) and `twin:history` (signal history). The data-sharing tier is deployment configuration: `minimal` shares `twin:direct`, `adjacent` adds `twin:adjacents`, `timeseries` adds `twin:history`.
 
-| Operation | Input | Result | Errors |
-|---|---|---|---|
-| `listDocuments({ pipeline })` | ingestion pipeline | documents with status, date, chunks, description | `unavailable` |
-| `uploadDocument({ file, pipeline })` | file and pipeline | `{ jobId }` | `invalid` |
-| `getIngestJob(jobId)` | job ID | `{ status: queued \| processing \| done \| failed, progress, error }` | `not_found` |
-| `updateDescription(name, description)` | document and text | nothing | `not_found` |
-| `deleteDocument(name)` | document | nothing | `not_found` |
-| `query({ text, pipeline })` | test query | ranked passages with source | `unavailable` |
+**Connection changes.** After a successful `connect` or `disconnect` the data facade raises `CONNECTION_CHANGED` (`onDataEvent` in `src/data`); views showing the connection pass it to `useData` as `refreshOn` and reload at once. A backend adapter gets this for free.
 
-## system — health implemented; rest planned (gh-3-ui-dataspace-system)
+**Mock specifics.** Connected by default with participant `participant-plant-north`, a session of 8 hours (expired once past) and the tier `minimal`. The credential is `plant-north-secret` unless the controls' *Configuration provides the dataspace credential* is set; *Dataspace gateway reachable* off makes `connect` fail as `unavailable`. A connection state preset in the controls applies until the operator connects or disconnects. Four peers (the machine builders of the factory's machines), seeded policies, and five capability requests (three pending, one from a service company that is not a peer).
+
+## knowledgeBase — implemented
+
+Documents belong to an ingestion pipeline: `base` (page text, faster) or `structured` (section-aware, better for tables and diagrams). A document name is unique within its pipeline.
 
 | Operation | Input | Result | Errors |
 |---|---|---|---|
-| `getHealth()` | — | `{ overall, checkedAt, checks: [{ id, label, status, latencyMs, detail }] }`; statuses `ok`, `degraded`, `error`, `unknown` | `unavailable` |
-| `getServiceSettings()` | — | service settings | `unavailable` |
-| `saveServiceSettings(settings)` | settings | saved settings | `invalid` |
+| `listDocuments({ pipeline })` | pipeline (default `base`) | `[{ name, pipeline, status: queued \| processing \| done \| failed, uploadedAt, size, chunks, description, error, jobId, progress }]` newest first; `progress` (0–1) while ingesting, `error` when failed | `invalid` (unknown pipeline), `unavailable` |
+| `uploadDocument({ file, pipeline })` | `file`: `{ name, type, size, dataUrl }` read in the browser; PDF, Word (`.docx`) or Markdown by extension and MIME type, at most 50 MB | `{ jobId }`; the document is listed at once with status `queued` | `invalid` (type or size, with the reason), `conflict` (name exists in the pipeline) |
+| `getIngestJob(jobId)` | job ID | `{ jobId, name, pipeline, status, progress, error, chunks }`; screens poll it every second until `done` or `failed` | `not_found` |
+| `updateDescription(name, description, { pipeline })` | document, text, its pipeline (default `base`) | nothing | `not_found` |
+| `deleteDocument(name, { pipeline })` | document and its pipeline (default `base`); also removes a failed or running ingestion | nothing | `not_found` |
+| `query({ text, pipeline })` | test question | up to five passages `[{ document, location, text, score }]`, most relevant first; `location` is a page or section, `score` 0–1; empty when nothing matches | `invalid` (empty question), `unavailable` |
+
+**Mock specifics.** Seeded manuals, procedures and specification sheets for the factory's machines in both pipelines, including one failed ingestion. Ingestion advances in five steps of 0.8 s (divided by the playback speed); a file whose name contains `corrupt` fails at 60 %. Markdown files are split into passages at their headings (location `section <heading>`); other files yield one passage from their name, since the mock does not parse PDF or Word. Retrieval ranks passages by the share of question terms they contain (deterministic).
+
+## system — implemented
+
+| Operation | Input | Result | Errors |
+|---|---|---|---|
+| `getHealth({ fresh })` | `fresh`: check anew instead of returning a cached result | `{ overall, checkedAt, checks: [{ id, label, status, latencyMs, detail }] }`; statuses `ok`, `degraded`, `error`, `unknown`; overall is `degraded` when some and `error` when all checks fail | `unavailable` |
+| `getServiceSettings()` | — | `[{ key, label, value, deploymentValue, changed }]` for the context broker, time-series store, message broker and alert manager: the address in use, the deployment's address, and whether an operator override is in use | `unavailable` |
+| `saveServiceSettings(changes)` | `{ [key]: address \| null }`; `null` (or the deployment value) resets to the deployment value. Addresses are URLs with scheme `http`, `https`, `ws`, `wss` or `mqtt` | settings (as `getServiceSettings`) | `invalid` (with the reason; nothing is saved) |
+
+**Mock specifics.** Eight dependency checks with fixed latencies. Checks of services with a setting report the address in use in `detail`; a host under the reserved `.invalid` domain does not answer, to show a failing dependency. Failures injected for `entities`, `alerts`, `knowledgeBase` or `dataspace`, or an unreachable gateway in the controls, fail the matching check. Overrides are kept in the mock store.

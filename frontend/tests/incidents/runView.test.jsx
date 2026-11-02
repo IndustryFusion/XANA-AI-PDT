@@ -203,7 +203,7 @@ describe('escalation pre-flight', () => {
     await user.click(await screen.findByRole('button', { name: 'Escalate to machine builder…' }))
     const dialog = await screen.findByRole('dialog', { name: 'Escalate to the machine builder' })
     expect(await within(dialog).findByText('Formwerk Press Technology')).toBeVisible()
-    expect(dialog).toHaveTextContent('Tier 1 · machine data')
+    expect(dialog).toHaveTextContent('minimal · machine entity only')
     expect(dialog).toHaveTextContent('Current sensor values')
     expect(findRun('run-1002').status).toBe('awaiting_input')
     await user.click(within(dialog).getByRole('button', { name: 'Escalate' }))

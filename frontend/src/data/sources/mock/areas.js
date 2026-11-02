@@ -5,6 +5,9 @@ import { AGENT_ANSWER_MS, createRunRecord, FINISHED_STATES, incidentFromRun, pre
 import { createRunEngine } from './runEngine'
 import { createAlertsArea } from './alertsArea'
 import { createEntitiesArea } from './entitiesArea'
+import { createDataspaceArea } from './dataspaceArea'
+import { createKnowledgeBaseArea } from './knowledgeBaseArea'
+import { createSystemArea } from './systemArea'
 
 /** Mock credentials, shown as a hint on the sign-in screen. */
 export const MOCK_CREDENTIALS = { username: 'operator', password: 'operator' }
@@ -47,7 +50,7 @@ export function createAreas(store) {
     getFactory: withControls('session', () => structuredClone(store.get().factory)),
   }
 
-  const connectionState = () => currentControls().connection ?? store.get().connection.state
+  const { area: dataspace, connectionState } = createDataspaceArea(store)
   const speed = () => Number(currentControls().speed) || 1
   const engine = createRunEngine(store, { speed, connected: () => connectionState() === 'connected' })
   store.onReset?.(() => engine.reset())
@@ -204,43 +207,8 @@ export function createAreas(store) {
     }),
   }
 
-  const dataspace = {
-    getConnection: withControls('dataspace', () => {
-      const { connection } = store.get()
-      const state = currentControls().connection ?? connection.state
-      return {
-        state,
-        participantId: state === 'not_configured' ? null : connection.participantId,
-        expiresAt: state === 'connected' ? connection.expiresAt : null,
-      }
-    }),
-    listPeers: withControls('dataspace', () => {
-      const state = currentControls().connection ?? store.get().connection.state
-      if (state !== 'connected') throw new DataError('dataspace', 'unavailable', 'Not connected to the dataspace.')
-      return structuredClone(store.get().peers)
-    }),
-  }
+  const knowledgeBase = createKnowledgeBaseArea(store)
+  const system = createSystemArea(store, { connectionState })
 
-  const system = {
-    getHealth: withControls('system', () => {
-      const { failure } = currentControls()
-      const failed = (id) => {
-        if (id === 'gateway') return (failure.dataspace ?? 'none') !== 'none'
-        if (id === 'context-broker') return (failure.entities ?? 'none') !== 'none'
-        if (id === 'alerts') return (failure.alerts ?? 'none') !== 'none'
-        return false
-      }
-      const checks = store.get().health.map(({ id, label, latencyMs }) => failed(id)
-        ? { id, label, status: 'error', latencyMs: null, detail: 'Not reachable (simulated failure).' }
-        : { id, label, status: 'ok', latencyMs, detail: null })
-      const errors = checks.filter((c) => c.status === 'error').length
-      return {
-        overall: errors === 0 ? 'ok' : errors === checks.length ? 'error' : 'degraded',
-        checkedAt: new Date().toISOString(),
-        checks,
-      }
-    }),
-  }
-
-  return { session, runs, incidents, alerts, entities, dataspace, system, engine, raiseAlert }
+  return { session, runs, incidents, alerts, entities, dataspace, knowledgeBase, system, engine, raiseAlert }
 }
