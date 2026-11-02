@@ -16,10 +16,12 @@ test('every area is reachable from the navigation and marked as current', async 
   }
 })
 
-test('areas of later changes show a placeholder', async ({ page }) => {
-  for (const [path, label] of AREAS.filter(([p]) => ['/dataspace', '/system'].includes(p))) {
+test('every navigation entry leads to a working area, none to a placeholder', async ({ page }) => {
+  for (const [path, label] of AREAS) {
     await page.goto(path)
-    await expect(page.getByText(`${label} is not available yet.`)).toBeVisible()
+    await expect(page.getByRole('heading', { level: 1, name: label })).toBeVisible()
+    await expect(page.locator('main .card').first()).toBeVisible()
+    await expect(page.getByText(/is not available yet/)).toHaveCount(0)
   }
 })
 

@@ -5,6 +5,12 @@ export function formatTime(iso) {
   return new Date(iso).toLocaleString(undefined, { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
 }
 
+/** Time of day with seconds, for checks that are repeated within a minute. */
+export function formatClock(iso) {
+  if (!iso) return ''
+  return new Date(iso).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+}
+
 export function formatDate(iso) {
   if (!iso) return ''
   return new Date(iso).toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' })
