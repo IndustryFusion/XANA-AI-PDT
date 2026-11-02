@@ -46,6 +46,12 @@ export const RUN_STATES = [
   'completed', 'failed', 'stopped',
 ]
 
+/** Delivery states of messages the operator sent to the machine builder. */
+export const DELIVERY_STATES = ['pending', 'delivered', 'failed']
+
+/** Final run states an archived run (incident) can have. */
+export const INCIDENT_OUTCOMES = ['completed', 'failed', 'stopped', 'mb_closed']
+
 export const CONNECTION_STATES = ['connected', 'expired', 'disconnected', 'not_configured']
 export const HEALTH_STATES = ['ok', 'degraded', 'error', 'unknown']
 
@@ -79,6 +85,37 @@ export const HEALTH_STATES = ['ok', 'degraded', 'error', 'unknown']
  * @property {string} status       One of RUN_STATES.
  * @property {string} startedAt    ISO 8601.
  * @property {string} updatedAt    ISO 8601.
+ * @property {string|null} escalationRef  Reference of the escalation to the machine builder.
+ *
+ * @typedef {Object} RunStep
+ * @property {string} node         Step kind (observe, hypothesize, validate, decide, act,
+ *                                 retrieval, policy_check, message, …); unknown kinds are valid.
+ * @property {Object|null} input   What the step worked on.
+ * @property {Object} output       Structured output of the step.
+ * @property {string} at           ISO 8601 completion time.
+ *
+ * @typedef {Object} Run           RunSummary plus:
+ * @property {Object} data         State data of the current status (see data-interface.md).
+ * @property {RunStep[]} steps     Completed steps in order; conversation messages are `message` steps.
+ * @property {Object|null} escalation  `{ ref, recipient: { id, name }, tier, data[], sentAt }` once escalated.
+ * @property {{messageId: string, status: string}[]} outbox  Delivery state of operator messages.
+ * @property {boolean} reopenable
+ *
+ * @typedef {Object} IncidentSummary
+ * @property {string} id
+ * @property {number} number
+ * @property {string} machineId
+ * @property {string} issue
+ * @property {string} outcome      One of INCIDENT_OUTCOMES.
+ * @property {string|null} rootCause
+ * @property {boolean} escalated
+ * @property {string|null} escalationRef
+ * @property {string} startedAt
+ * @property {string} closedAt
+ * @property {string|null} reopenedRunId  Active run the incident was reopened as.
+ *
+ * @typedef {Object} Incident      IncidentSummary plus decision, resolution, builder,
+ *                                 escalation, conversation (messages) and trace (RunStep[]).
  *
  * @typedef {Object} AlertCounts
  * @property {number} total
@@ -114,6 +151,27 @@ export const HEALTH_STATES = ['ok', 'degraded', 'error', 'unknown']
 
 const user = { username: 'string', name: 'string', email: 'string' }
 
+const runSummary = {
+  runId: 'string', incidentId: '?number', machineId: 'string', issue: 'string',
+  status: { $enum: RUN_STATES }, startedAt: 'date', updatedAt: 'date', escalationRef: '?string',
+}
+const step = { node: 'string', input: { $optional: {} }, output: {}, at: 'date' }
+const outbox = [{ messageId: 'string', status: { $enum: DELIVERY_STATES } }]
+const run = {
+  ...runSummary,
+  data: {},
+  steps: [step],
+  escalation: { $optional: { ref: 'string', recipient: { id: 'string', name: 'string' }, tier: 'string', data: [{ label: 'string', category: 'string' }], sentAt: 'date' } },
+  outbox,
+  reopenable: 'boolean',
+}
+const status = { status: { $enum: RUN_STATES } }
+const incidentSummary = {
+  id: 'string', number: 'number', machineId: 'string', issue: 'string', outcome: { $enum: INCIDENT_OUTCOMES },
+  rootCause: '?string', escalated: 'boolean', escalationRef: '?string', startedAt: 'date', closedAt: 'date', reopenedRunId: '?string',
+}
+const message = { messageId: 'string', sender: { $enum: ['agent', 'operator', 'machine_builder'] }, act: 'string', text: 'string', convState: 'string', at: 'date' }
+
 /** Result shapes of implemented operations, checked by the data-interface tests. */
 export const SHAPES = {
   session: {
@@ -124,10 +182,38 @@ export const SHAPES = {
     getFactory: { id: 'string', name: 'string', owner: '?string', location: { $optional: { city: 'string', country: 'string' } } },
   },
   runs: {
-    listActiveRuns: [{
-      runId: 'string', incidentId: '?number', machineId: 'string', issue: 'string',
-      status: { $enum: RUN_STATES }, startedAt: 'date', updatedAt: 'date',
-    }],
+    listActiveRuns: [runSummary],
+    startRun: { runId: 'string' },
+    getRun: run,
+    clarify: status,
+    confirmResolution: status,
+    escalationPreflight: {
+      possible: 'boolean', reason: '?string', recipient: { $optional: { id: 'string', name: 'string' } },
+      data: [{ label: 'string', category: 'string' }], sharingTier: 'string',
+    },
+    escalate: { ...status, escalationRef: 'string' },
+    approveDataRequest: status,
+    replyToRecommendation: status,
+    sendConversationAct: { ...status, convState: 'string' },
+    askAgent: { reply: 'string' },
+    getOutboxStatus: outbox,
+    refreshConversationStatus: status,
+    recordMachineBuilderClose: status,
+    reopenRun: status,
+    stopRun: status,
+    archiveRun: { $optional: {} },
+  },
+  incidents: {
+    listIncidents: [incidentSummary],
+    getIncident: {
+      ...incidentSummary,
+      decision: { $optional: { rootCause: 'string', recommendedAction: 'string', confidence: 'number' } },
+      resolution: '?string',
+      builder: '?string',
+      conversation: [message],
+      trace: [step],
+    },
+    reopenIncident: { runId: 'string' },
   },
   alerts: {
     countAlerts: { total: 'number', bySeverity: { $record: 'number' } },
