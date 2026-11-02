@@ -34,3 +34,22 @@ test('dashboard tiles are in one column below 900 px', async ({ page }) => {
   const lefts = await tiles.evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().left)))
   expect(new Set(lefts).size).toBe(1)
 })
+
+test('entity view, history and alert detail fit and stack below 900 px', async ({ page }) => {
+  await presetControls(page, { authEnabled: false, newAlerts: false })
+  const overflow = () => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
+
+  await page.goto('/explorer/urn%3Angsi-ld%3ASensor%3Achiller-01-flow?type=Sensor')
+  await page.getByRole('button', { name: 'History of value' }).click()
+  await expect(page.getByRole('region', { name: 'History of value' }).getByRole('table')).toBeVisible()
+  expect(await overflow(), 'entity view overflows horizontally').toBeLessThanOrEqual(0)
+  const [list, main] = await Promise.all(['.split__side', '.split__main'].map((sel) => page.locator(sel).evaluate((el) => el.getBoundingClientRect())))
+  expect(main.top).toBeGreaterThan(list.top)
+  expect(Math.round(main.left)).toBe(Math.round(list.left))
+
+  await page.goto('/alerts/alert-001')
+  await expect(page.getByRole('article', { name: 'Alert alert-001' })).toBeVisible()
+  expect(await overflow(), 'alerts overflow horizontally').toBeLessThanOrEqual(0)
+  const [table, detail] = await Promise.all(['.alert-list', '.alert-detail'].map((sel) => page.locator(sel).evaluate((el) => el.getBoundingClientRect())))
+  expect(detail.top).toBeGreaterThan(table.top)
+})

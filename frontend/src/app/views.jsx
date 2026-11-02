@@ -30,13 +30,9 @@ export function NotFound() {
 
 /** Change of issue #3 that delivers each area. */
 const DELIVERED_BY = {
-  explorer: 'gh-3-ui-data-explorer-alerts',
-  alerts: 'gh-3-ui-data-explorer-alerts',
   dataspace: 'gh-3-ui-dataspace-system',
   system: 'gh-3-ui-dataspace-system',
 }
-
-const ITEM_LABELS = { entityId: 'Entity', alertId: 'Alert' }
 
 /** Stand-in for an area delivered by a later change. */
 export function Placeholder() {
@@ -52,7 +48,7 @@ export function Placeholder() {
           <p className="muted">This area is delivered by the change <code>{DELIVERED_BY[area]}</code>.</p>
           {(item || query.machine) && (
             <dl className="details">
-              {item && <><dt>{ITEM_LABELS[item[0]] ?? item[0]}</dt><dd className="mono">{item[1]}</dd></>}
+              {item && <><dt>{item[0]}</dt><dd className="mono">{item[1]}</dd></>}
               {query.machine && <><dt>{query.new ? 'New incident for machine' : 'Machine'}</dt><dd className="mono">{query.machine}</dd></>}
             </dl>
           )}
