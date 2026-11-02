@@ -42,3 +42,41 @@ export const AREAS = [
   ['/dataspace', 'Dataspace'],
   ['/system', 'System'],
 ]
+
+/** Playback speed used by end-to-end tests, so every scenario finishes in seconds. */
+export const E2E_SPEED = 25
+
+/** Starts a run of `scenario` from the new-incident form and waits for its run view. */
+export async function startScenario(page, scenario, { machine = 'press-brake-01', issue = `Scenario ${scenario}`, controls = {} } = {}) {
+  await presetControls(page, { authEnabled: false, scenario, speed: E2E_SPEED, ...controls })
+  await page.goto(`/incidents?new=1&machine=${encodeURIComponent(`urn:ngsi-ld:Machine:${machine}`)}`)
+  await page.getByLabel('Issue').fill(issue)
+  await page.getByRole('button', { name: 'Start analysis' }).click()
+  await expect(page).toHaveURL(/\/incidents\/run-\d+$/)
+}
+
+/** Expects the run view to show `status` (the run's state value). */
+export async function expectStatus(page, status) {
+  await expect(page.locator('.run-header [data-status]')).toHaveAttribute('data-status', status)
+}
+
+/** Escalates the shown run through the pre-flight dialog. */
+export async function escalate(page) {
+  await page.getByRole('button', { name: 'Escalate to machine builder…' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Escalate to the machine builder' })
+  await dialog.getByRole('button', { name: 'Escalate' }).click()
+  await expect(dialog).toHaveCount(0)
+  await expectStatus(page, 'awaiting_machine_builder')
+}
+
+/** Sends a structured act from the conversation composer. */
+export async function sendAct(page, act, { text, outcome } = {}) {
+  const form = page.getByRole('form', { name: 'Send to the machine builder' })
+  await form.getByLabel('Act').selectOption({ label: act })
+  if (outcome) await form.getByLabel('Outcome').selectOption({ label: outcome })
+  if (text) await form.getByLabel(/^Message/).fill(text)
+  await form.getByRole('button', { name: 'Send' }).click()
+}
+
+export const panel = (page, name) => page.getByRole('region', { name, exact: true })
+export const thread = (page) => page.getByRole('region', { name: 'Message thread' })

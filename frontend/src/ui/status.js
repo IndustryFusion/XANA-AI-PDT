@@ -49,7 +49,33 @@ export const CONNECTION = {
   not_configured: { label: 'Dataspace not configured', tone: 'neutral' },
 }
 
-export const STATUS_KINDS = { run: RUN_STATUS, severity: SEVERITY, health: HEALTH, connection: CONNECTION }
+/** Delivery of operator messages to the machine builder. */
+export const DELIVERY = {
+  pending: { label: 'Pending', tone: 'attention' },
+  delivered: { label: 'Delivered', tone: 'success' },
+  failed: { label: 'Delivery failed', tone: 'danger' },
+}
+
+/** State of the machine-builder conversation. */
+export const CONVERSATION = {
+  open: { label: 'Open', tone: 'special' },
+  direct_contact_operator: { label: 'Direct contact requested by you', tone: 'attention' },
+  direct_contact_machine_builder: { label: 'Direct contact requested by the machine builder', tone: 'attention' },
+  closed: { label: 'Closed', tone: 'neutral' },
+}
+
+/** Outcome of a past incident (the final state of its run). */
+export const INCIDENT_OUTCOME = {
+  completed: { label: 'Resolved', tone: 'success' },
+  mb_closed: { label: 'Closed by machine builder', tone: 'special' },
+  stopped: { label: 'Closed by operator', tone: 'neutral' },
+  failed: { label: 'Failed', tone: 'danger' },
+}
+
+export const STATUS_KINDS = {
+  run: RUN_STATUS, severity: SEVERITY, health: HEALTH, connection: CONNECTION,
+  delivery: DELIVERY, conversation: CONVERSATION, outcome: INCIDENT_OUTCOME,
+}
 
 export function describeStatus(kind, value) {
   const entry = STATUS_KINDS[kind]?.[value]
