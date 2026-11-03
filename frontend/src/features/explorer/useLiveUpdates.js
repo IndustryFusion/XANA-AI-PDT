@@ -5,16 +5,18 @@ import { entities } from '../../data'
 export const HEALTH_POLL_MS = 10_000
 
 /**
- * Live updates of the shown entity. Returns the health (`off`, `connecting`,
- * `ok`, `unavailable`) and the latest update `{ entityId, attributes, seq }`.
- * After a failure it resubscribes once the health check reports `ok` again.
+ * Live updates of the expanded entities. Returns the health (`off`,
+ * `connecting`, `ok`, `unavailable`) and `listen(entityId, onAttributes)`,
+ * with which each shown entity receives its changed attributes; it returns
+ * the function that stops listening. After a failure it resubscribes once
+ * the health check reports `ok` again.
  */
-export function useLiveUpdates({ enabled, entityId }) {
+export function useLiveUpdates({ enabled, ids = [] }) {
   const [status, setStatus] = useState('connecting')
-  const [lastUpdate, setLastUpdate] = useState(null)
   const [attempt, setAttempt] = useState(0)
   const statusRef = useRef(status)
-  const seq = useRef(0)
+  const listeners = useRef(new Map())
+  const idsKey = [...ids].sort().join('\n')
 
   const report = useCallback((next) => {
     if (next === 'ok' && statusRef.current === 'unavailable') setAttempt((a) => a + 1)
@@ -40,16 +42,25 @@ export function useLiveUpdates({ enabled, entityId }) {
   }, [enabled, report])
 
   useEffect(() => {
-    if (!enabled || !entityId) return undefined
-    return entities.subscribeEntities({ ids: [entityId] }, (event) => {
+    if (!enabled || !idsKey) return undefined
+    return entities.subscribeEntities({ ids: idsKey.split('\n') }, (event) => {
       if (event.type === 'error') report('unavailable')
       else if (event.type === 'update') {
-        seq.current += 1
-        setLastUpdate({ entityId: event.entityId, attributes: event.attributes, seq: seq.current })
+        listeners.current.get(event.entityId)?.forEach((fn) => fn(event.attributes))
         if (statusRef.current !== 'ok') report('ok')
       }
     })
-  }, [enabled, entityId, attempt, report])
+  }, [enabled, idsKey, attempt, report])
 
-  return { status: enabled ? status : 'off', lastUpdate }
+  const listen = useCallback((entityId, fn) => {
+    const map = listeners.current
+    if (!map.has(entityId)) map.set(entityId, new Set())
+    map.get(entityId).add(fn)
+    return () => {
+      map.get(entityId)?.delete(fn)
+      if (map.get(entityId)?.size === 0) map.delete(entityId)
+    }
+  }, [])
+
+  return { status: enabled ? status : 'off', listen }
 }

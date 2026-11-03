@@ -1,63 +1,62 @@
-import { useCallback, useId, useState } from 'react'
+import { useCallback, useEffect, useId, useState } from 'react'
 import { useData } from '../../data/useData'
-import { Link, useRoute } from '../../app/router'
+import { useRoute } from '../../app/router'
 import { Button, Card, DataView, EmptyState, ErrorState, StatusBadge } from '../../ui/components'
 import { formatTime } from '../../ui/format'
-import { displayName } from './attributes'
 import DeleteByTypeDialog from './DeleteByTypeDialog'
-import EntityView from './EntityView'
+import EntityNode from './EntityNode'
 import ImportDialog from './ImportDialog'
 import { entityPath, explorerPath, hasCriteria, readQuery, toRequest } from './query'
 import QueryBar from './QueryBar'
 import { useLiveUpdates } from './useLiveUpdates'
 import './explorer.css'
 
-/** Matching entities with ID, type and name. */
-function EntityList({ result, query, selected }) {
+/** Result list: matching entities as collapsible nodes, and an opened entity that is not among them. */
+function EntityList({ result, query, standalone, renderNode }) {
+  const invalid = result.status === 'error' && result.error?.kind === 'invalid'
+  let content
   if (!hasCriteria(query)) {
-    return (
-      <Card title="Entities">
-        <EmptyState title="No query yet.">Choose an entity type, an ID, an ID pattern or attribute conditions, then apply the query.</EmptyState>
-      </Card>
+    content = <EmptyState title="No query yet.">Choose an entity type, an ID, an ID pattern or attribute conditions, then apply the query.</EmptyState>
+  } else if (invalid && result.data === undefined) {
+    content = <EmptyState title="No results.">Correct the query to see entities.</EmptyState>
+  } else if (invalid) {
+    content = <EntityNodes list={result.data} query={query} renderNode={renderNode} />
+  } else {
+    content = (
+      <DataView
+        result={result}
+        errorTitle="Could not query entities"
+        isEmpty={(list) => list.length === 0}
+        empty={<EmptyState title="No entities matched the query.">Change the type, ID or conditions and apply the query again.</EmptyState>}
+      >
+        {(list) => <EntityNodes list={list} query={query} renderNode={renderNode} />}
+      </DataView>
     )
   }
-  const invalid = result.status === 'error' && result.error?.kind === 'invalid'
   return (
     <Card title="Entities" className="entity-list">
-      {invalid && result.data === undefined ? (
-        <EmptyState title="No results.">Correct the query to see entities.</EmptyState>
-      ) : invalid ? (
-        <EntityItems list={result.data} query={query} selected={selected} />
-      ) : (
-        <DataView
-          result={result}
-          errorTitle="Could not query entities"
-          isEmpty={(list) => list.length === 0}
-          empty={<EmptyState title="No entities matched the query.">Change the type, ID or conditions and apply the query again.</EmptyState>}
-        >
-          {(list) => <EntityItems list={list} query={query} selected={selected} />}
-        </DataView>
-      )}
+      <div className="stack">
+        {standalone && (
+          <div className="entity-list__opened stack">
+            <p className="muted entity-list__count">Opened entity, not among the query results:</p>
+            {renderNode(standalone, null)}
+          </div>
+        )}
+        {content}
+      </div>
     </Card>
   )
 }
 
-function EntityItems({ list, query, selected }) {
+function EntityNodes({ list, query, renderNode }) {
   const limit = Number(query.limit)
   return (
     <div className="stack">
       <p className="muted entity-list__count">
         {list.length} {list.length === 1 ? 'entity' : 'entities'}{list.length >= limit ? ` (limit of ${limit} reached)` : ''}
       </p>
-      <ul className="run-list__items">
-        {list.map((e) => (
-          <li key={e.id} className="run-list__item">
-            <Link to={entityPath(e.id, query)} className="run-list__link" aria-current={selected === e.id ? 'true' : undefined}>
-              <span className="run-list__issue">{displayName(e) ?? e.id}</span>
-              <span className="run-list__meta"><span>{e.type}</span><span className="mono">{e.id}</span></span>
-            </Link>
-          </li>
-        ))}
+      <ul className="entity-nodes" aria-label="Matching entities">
+        {list.map((e) => <li key={e.id}>{renderNode(e.id, e)}</li>)}
       </ul>
     </div>
   )
@@ -97,9 +96,9 @@ function TimeShiftControl({ at, onShift }) {
 }
 
 /**
- * Data explorer area: query bar, matching entities and the selected entity,
- * with time-shift, import, bulk delete and live updates. The query and the
- * time-shift moment are part of the URL.
+ * Data explorer area: query bar and the matching entities as a document
+ * tree, with time-shift, import, bulk delete and live updates. The query,
+ * the time-shift moment and the last expanded entity are part of the URL.
  */
 export default function DataExplorer() {
   const { params, query: urlQuery, search, navigate } = useRoute()
@@ -109,17 +108,61 @@ export default function DataExplorer() {
   const [refreshKey, setRefreshKey] = useState(0)
   const [liveOn, setLiveOn] = useState(true)
   const [dialog, setDialog] = useState(null)
+  const [expanded, setExpanded] = useState(() => new Set(entityId ? [entityId] : []))
   const refresh = useCallback(() => setRefreshKey((k) => k + 1), [])
+
+  // Opening an entity's URL (link, back, forward) expands its node.
+  useEffect(() => {
+    if (entityId) setExpanded((s) => (s.has(entityId) ? s : new Set(s).add(entityId)))
+  }, [entityId])
 
   const types = useData('entities', at ? 'listTypesAt' : 'listTypes', at ? [at] : [], { refreshKey })
   const attributes = useData('entities', 'listAttributes', [], { refreshKey })
   const request = toRequest(query)
   const list = useData('entities', at ? 'queryEntitiesAt' : 'queryEntities', at ? [at, request] : [request], { enabled: hasCriteria(query), refreshKey })
-  const live = useLiveUpdates({ enabled: liveOn && !at, entityId })
+
+  const listed = list.data ?? []
+  const settled = !hasCriteria(query) || list.data !== undefined || list.status === 'error'
+  const standalone = entityId && settled && !listed.some((e) => e.id === entityId) ? entityId : null
+  const shownIds = [...listed.map((e) => e.id), ...(standalone ? [standalone] : [])].filter((id) => expanded.has(id))
+  const live = useLiveUpdates({ enabled: liveOn && !at, ids: shownIds })
 
   const listError = list.status === 'error' && list.error?.kind === 'invalid' ? list.error : null
   const typesError = types.status === 'error' && types.error?.kind === 'invalid' ? types.error : null
   const go = (next) => navigate(entityId ? entityPath(entityId, next) : explorerPath(next))
+
+  function setNodeExpanded(id, open) {
+    setExpanded((s) => {
+      const next = new Set(s)
+      if (open) next.add(id)
+      else next.delete(id)
+      return next
+    })
+    if (open && id !== entityId) navigate(entityPath(id, query), { scroll: false })
+    if (!open && id === entityId) navigate(explorerPath(query), { replace: true, scroll: false })
+  }
+
+  function deleted(id) {
+    setExpanded((s) => { const next = new Set(s); next.delete(id); return next })
+    refresh()
+    if (id === entityId) navigate(explorerPath(query))
+  }
+
+  const renderNode = (id, summary) => (
+    <EntityNode
+      key={`${id}|${at ?? ''}`}
+      id={id}
+      summary={summary ?? undefined}
+      standalone={!summary}
+      query={query}
+      expanded={expanded.has(id)}
+      onExpandedChange={(open) => setNodeExpanded(id, open)}
+      current={id === entityId}
+      listen={live.listen}
+      onChanged={refresh}
+      onDeleted={() => deleted(id)}
+    />
+  )
 
   return (
     <section className="page explorer" aria-labelledby="page-title">
@@ -155,25 +198,7 @@ export default function DataExplorer() {
         onApply={(next) => navigate(explorerPath({ ...next, at: query.at }))}
       />
 
-      <div className="split explorer__split">
-        <div className="split__side"><EntityList result={list} query={query} selected={entityId} /></div>
-        <div className="split__main">
-          {entityId ? (
-            <EntityView
-              key={`${entityId}|${at ?? ''}`}
-              id={entityId}
-              query={query}
-              liveUpdate={live.lastUpdate}
-              onChanged={refresh}
-              onDeleted={() => { refresh(); navigate(explorerPath(query)) }}
-            />
-          ) : (
-            <div className="card"><div className="card__body">
-              <EmptyState title="No entity selected.">Select an entity in the list, or follow a reference from another area.</EmptyState>
-            </div></div>
-          )}
-        </div>
-      </div>
+      <EntityList result={list} query={query} standalone={standalone} renderNode={renderNode} />
 
       <ImportDialog open={dialog === 'import'} onClose={() => setDialog(null)} onImported={refresh} />
       <DeleteByTypeDialog open={dialog === 'delete'} types={types.data ?? []} onClose={() => setDialog(null)} onDeleted={refresh} />

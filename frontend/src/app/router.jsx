@@ -87,13 +87,13 @@ export function RouterProvider({ children }) {
     return () => window.removeEventListener('popstate', onPop)
   }, [])
 
-  const navigate = useCallback((to, { replace = false } = {}) => {
+  const navigate = useCallback((to, { replace = false, scroll = true } = {}) => {
     const url = new URL(to, window.location.origin)
     const next = { pathname: url.pathname, search: url.search }
     if (replace) window.history.replaceState(null, '', to)
     else window.history.pushState(null, '', to)
     setLocation(next)
-    window.scrollTo?.(0, 0)
+    if (scroll) window.scrollTo?.(0, 0)
   }, [])
 
   const value = useMemo(() => {

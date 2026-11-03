@@ -1,4 +1,4 @@
-import { attributeKind, editableValue, groupAttributes, parseInput, subAttributesOf } from '../../src/features/explorer/attributes'
+import { attributeKind, attributesOf, editableValue, instancesOf, parseInput, subAttributesOf, targetsOf } from '../../src/features/explorer/attributes'
 import { checkDocument, previewText } from '../../src/features/explorer/ImportDialog'
 import { buildExpression, parseExpression, readQuery, toRequest, toSearch } from '../../src/features/explorer/query'
 
@@ -57,7 +57,11 @@ describe('attributes', () => {
     expect(parseInput('12.5', 1, 'value')).toBe(12.5)
     expect(parseInput('high', 1, 'value')).toBe('high')
     expect(parseInput('urn:a:b', { '@id': 'urn:x:y' }, 'value')).toEqual({ '@id': 'urn:a:b' })
-    expect(groupAttributes({ id: 'x', type: 'T', b: { type: 'Relationship', object: 'urn:a:b' }, a: { type: 'Property', value: 1 } }).map((g) => g.kind)).toEqual(['property', 'relationship'])
+    expect(attributesOf({ id: 'x', type: 'T', '@context': [], b: { type: 'Relationship', object: 'urn:a:b' }, a: { type: 'Property', value: 1 } }).map(([k]) => k)).toEqual(['b', 'a'])
+    expect(instancesOf([{ value: 1 }, { value: 2 }])).toHaveLength(2)
+    expect(instancesOf({ value: 1 })).toEqual([{ value: 1 }])
+    expect(targetsOf({ type: 'Relationship', object: 'urn:a:b' })).toEqual(['urn:a:b'])
+    expect(targetsOf({ type: 'ListRelationship', objectList: [{ object: 'urn:a:b' }, 'urn:a:c'] })).toEqual(['urn:a:b', 'urn:a:c'])
   })
 })
 

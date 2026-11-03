@@ -1,94 +1,87 @@
 import { EntityRef } from '../../app/EntityRef'
-import { formatTime } from '../../ui/format'
 import { attributeKind, iriOf } from './attributes'
 
-const leaf = (v) => (typeof v === 'string' ? v : JSON.stringify(v))
-
-/** JSON value as a labelled tree; keys are shown as they are. */
-export function JsonTree({ value }) {
-  if (value === null || typeof value !== 'object') return <span className="mono">{leaf(value)}</span>
-  const entries = Array.isArray(value) ? value.map((v, i) => [i, v]) : Object.entries(value)
-  if (entries.length === 0) return <span className="muted">{Array.isArray(value) ? 'Empty list' : 'Empty object'}</span>
-  if (Array.isArray(value) && value.every((v) => v === null || typeof v !== 'object')) {
-    return <ul className="attr-list">{value.map((v, i) => <li key={i}><span className="mono">{leaf(v)}</span></li>)}</ul>
+/** A JSON value written inline with syntax colouring: strings, numbers, booleans and null differ. */
+export function JsonValue({ value, lang }) {
+  if (value === null || value === undefined) return <span className="tok tok--null">null</span>
+  if (typeof value === 'string') return <span className="tok tok--string" lang={lang}>&quot;{value}&quot;</span>
+  if (typeof value === 'number') return <span className="tok tok--number">{String(value)}</span>
+  if (typeof value === 'boolean') return <span className="tok tok--boolean">{String(value)}</span>
+  if (Array.isArray(value)) {
+    return (
+      <span className="tok-group">
+        <span className="tok tok--punct">{value.length ? '[ ' : '['}</span>
+        {value.map((v, i) => (
+          <span key={i}><JsonValue value={v} />{i < value.length - 1 && <span className="tok tok--punct">, </span>}</span>
+        ))}
+        <span className="tok tok--punct">{value.length ? ' ]' : ']'}</span>
+      </span>
+    )
   }
+  const entries = Object.entries(value)
   return (
-    <dl className="json-tree">
-      {entries.map(([k, v]) => (
-        <div key={k} className="json-tree__entry">
-          <dt className="mono">{Array.isArray(value) ? `[${k}]` : k}</dt>
-          <dd><JsonTree value={v} /></dd>
-        </div>
+    <span className="tok-group">
+      <span className="tok tok--punct">{entries.length ? '{ ' : '{'}</span>
+      {entries.map(([k, v], i) => (
+        <span key={k}>
+          <span className="tok tok--key">{k}</span><span className="tok tok--punct">: </span><JsonValue value={v} />
+          {i < entries.length - 1 && <span className="tok tok--punct">, </span>}
+        </span>
       ))}
-    </dl>
+      <span className="tok tok--punct">{entries.length ? ' }' : '}'}</span>
+    </span>
   )
-}
-
-function Scalar({ value, unit }) {
-  if (value === null || value === undefined || value === '') return <span className="muted">No value</span>
-  if (typeof value === 'boolean') return <span>{value ? 'true' : 'false'}</span>
-  if (typeof value === 'object') return <JsonTree value={value} />
-  return <span className="attr-value__scalar">{String(value)}{unit ? <span className="attr-value__unit"> {unit}</span> : null}</span>
 }
 
 function Geo({ value }) {
   if (value?.type === 'Point' && Array.isArray(value.coordinates)) {
     const [lon, lat] = value.coordinates
     return (
-      <span>
+      <span className="tok tok--geo">
         Point · {Math.abs(lat).toFixed(4)}° {lat >= 0 ? 'N' : 'S'}, {Math.abs(lon).toFixed(4)}° {lon >= 0 ? 'E' : 'W'}
       </span>
     )
   }
   return (
-    <span>
+    <span className="tok tok--geo">
       {value?.type ?? 'Geometry'}{Array.isArray(value?.coordinates) ? ` with ${value.coordinates.length} coordinates` : ''}
     </span>
   )
 }
 
+function LanguageMap({ map }) {
+  const entries = Object.entries(map ?? {})
+  return (
+    <span className="tok-group">
+      <span className="tok tok--punct">{entries.length ? '{ ' : '{'}</span>
+      {entries.map(([lang, text], i) => (
+        <span key={lang}>
+          <span className="tok tok--key">{lang}</span><span className="tok tok--punct">: </span><JsonValue value={text} lang={lang} />
+          {i < entries.length - 1 && <span className="tok tok--punct">, </span>}
+        </span>
+      ))}
+      <span className="tok tok--punct">{entries.length ? ' }' : '}'}</span>
+    </span>
+  )
+}
+
 /**
- * Value presentation of one attribute instance, chosen by its kind.
- * `refTo(id)` builds explorer URLs for relationship targets and IRIs.
+ * Value of one attribute instance, presented by its kind. IRI values are
+ * entity references; `refTo(id)` builds their explorer URLs. Relationship
+ * targets are rendered by the attribute line, which can also expand them.
  */
 export default function AttributeValue({ attr, refTo }) {
   const kind = attributeKind(attr)
-  if (kind === 'relationship') {
-    const targets = [].concat(attr.object ?? attr.objectList?.map((o) => o.object ?? o) ?? [])
-    return <span className="row">{targets.map((t) => <EntityRef key={t} id={t} label={t} to={refTo?.(t)} />)}</span>
-  }
   if (kind === 'iri') {
     const target = iriOf(attr.value)
     return <EntityRef id={target} label={target} to={refTo?.(target)} />
   }
   if (kind === 'geo') return <Geo value={attr.value} />
-  if (kind === 'json') return <JsonTree value={attr.json} />
-  if (kind === 'language') {
-    return (
-      <dl className="lang-map">
-        {Object.entries(attr.languageMap ?? {}).map(([lang, text]) => (
-          <div key={lang} className="lang-map__entry"><dt className="mono">{lang}</dt><dd lang={lang}>{text}</dd></div>
-        ))}
-      </dl>
-    )
-  }
-  if (kind === 'list') {
-    const items = attr.valueList ?? []
-    return items.length === 0
-      ? <span className="muted">Empty list</span>
-      : <ol className="attr-list">{items.map((v, i) => <li key={i}><Scalar value={v} /></li>)}</ol>
-  }
-  if (kind === 'vocabulary') return <span className="mono">{String(attr.vocab)}</span>
-  if (kind === 'property') return <Scalar value={attr.value} unit={attr.unitCode} />
-  return <JsonTree value={attr} />
-}
-
-/** Compact metadata line: unit, observation time, dataset. */
-export function AttributeMeta({ attr }) {
-  const items = []
-  if (attr.unitCode) items.push(<span key="unit">Unit {attr.unitCode}</span>)
-  if (attr.observedAt) items.push(<span key="obs">Observed <time dateTime={attr.observedAt}>{formatTime(attr.observedAt)}</time></span>)
-  if (attr.datasetId) items.push(<span key="ds">Dataset <span className="mono">{attr.datasetId}</span></span>)
-  if (attr.lang) items.push(<span key="lang">Language {attr.lang}</span>)
-  return items.length ? <span className="attr-meta">{items}</span> : null
+  if (kind === 'json') return <JsonValue value={attr.json} />
+  if (kind === 'language') return <LanguageMap map={attr.languageMap} />
+  if (kind === 'list') return <JsonValue value={attr.valueList ?? []} />
+  if (kind === 'vocabulary') return <span className="tok tok--vocab">{String(attr.vocab)}</span>
+  if (kind === 'property') return <JsonValue value={attr.value} />
+  const { type: _type, ...rest } = attr
+  return <JsonValue value={rest} />
 }

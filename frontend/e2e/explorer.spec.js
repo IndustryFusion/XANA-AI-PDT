@@ -1,15 +1,20 @@
 import { test, expect } from '@playwright/test'
-import { presetControls } from './helpers'
+import { presetControls, setControls } from './helpers'
 
 test.beforeEach(async ({ page }) => {
   await presetControls(page, { authEnabled: false })
 })
 
 const entities = (page) => page.getByRole('region', { name: 'Entities' })
-const attribute = (page, name) => page.locator(`[data-attribute="${name}"]`)
+const nodeHeadings = (page) => entities(page).getByRole('heading', { level: 3 })
+const node = (page, id) => page.locator(`[data-entity="${id}"]`).first()
+const attribute = (scope, name) => scope.locator(`[data-attribute="${name}"]`).first()
 const localInput = (ms) => new Date(ms - new Date(ms).getTimezoneOffset() * 60_000).toISOString().slice(0, 16)
+const SENSOR = 'urn:ngsi-ld:Sensor:chiller-01-flow'
+const CHILLER = 'urn:ngsi-ld:Machine:chiller-01'
+const MACHINE = 'urn:ngsi-ld:Machine:press-brake-01'
 
-test('query → entity → relationship → history', async ({ page }) => {
+test('query → expand an entity → relationship in place and followed → history', async ({ page }) => {
   await page.goto('/explorer')
   await page.getByLabel('Entity type').selectOption('Sensor')
   await page.getByRole('button', { name: 'Add condition' }).click()
@@ -20,16 +25,28 @@ test('query → entity → relationship → history', async ({ page }) => {
   await page.getByRole('button', { name: 'Apply query' }).click()
   await expect(page).toHaveURL(/\/explorer\?type=Sensor&q=value%3E40$/)
 
-  await entities(page).getByRole('link', { name: /Process chiller 01 flow/ }).click()
-  await expect(page.getByRole('heading', { level: 2, name: 'Process chiller 01 flow' })).toBeVisible()
-  await expect(page).toHaveURL(/\/explorer\/urn%3Angsi-ld%3ASensor%3Achiller-01-flow\?type=Sensor/)
+  const toggle = entities(page).getByRole('button', { name: 'Process chiller 01 flow', exact: true })
+  await toggle.click()
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+  await expect(page).toHaveURL(/\/explorer\/urn%3Angsi-ld%3ASensor%3Achiller-01-flow\?type=Sensor&q=value%3E40$/)
+  const sensor = node(page, SENSOR)
+  const measures = attribute(sensor, 'measures')
 
-  await attribute(page, 'measures').getByRole('link', { name: 'urn:ngsi-ld:Machine:chiller-01' }).click()
-  await expect(page.getByRole('heading', { level: 2, name: 'Process chiller 01' })).toBeVisible()
+  await measures.getByRole('button', { name: `Expand ${CHILLER} in place` }).click()
+  const nested = measures.locator(`[data-entity="${CHILLER}"]`)
+  await expect(nested.getByRole('heading', { level: 4, name: 'Process chiller 01' })).toBeVisible()
+  await expect(attribute(nested, 'partOf')).toContainText('urn:ngsi-ld:ProductionLine:line-a')
+  const indent = await nested.evaluate((el) => el.getBoundingClientRect().left)
+  const line = await measures.locator('.attr-line').first().evaluate((el) => el.getBoundingClientRect().left)
+  expect(indent).toBeGreaterThan(line)
+
+  await measures.locator('.attr-line').first().getByRole('link', { name: CHILLER }).click()
+  await expect(page).toHaveURL(/\/explorer\/urn%3Angsi-ld%3AMachine%3Achiller-01\?type=Sensor/)
+  await expect(entities(page).getByRole('button', { name: 'Process chiller 01', exact: true })).toHaveAttribute('aria-expanded', 'true')
   await page.goBack()
-  await expect(page.getByRole('heading', { level: 2, name: 'Process chiller 01 flow' })).toBeVisible()
+  await expect(page).toHaveURL(/\/explorer\/urn%3Angsi-ld%3ASensor%3Achiller-01-flow\?/)
 
-  await page.getByRole('button', { name: 'History of value' }).click()
+  await sensor.getByRole('button', { name: 'History of value' }).click()
   const history = page.getByRole('region', { name: 'History of value' })
   await history.getByLabel('Time range').selectOption({ label: 'Last 6 hours' })
   await expect(history.getByRole('img', { name: /^Line chart of value in l\/min/ })).toBeVisible()
@@ -37,34 +54,74 @@ test('query → entity → relationship → history', async ({ page }) => {
   await expect(history.getByRole('table').getByRole('row')).toHaveCount(73)
 })
 
-test('edit with suggestions, then view the past and return to the present', async ({ page }) => {
+test('opening an entity URL expands its node and scrolls it into view', async ({ page }) => {
+  await page.goto('/explorer/urn%3Angsi-ld%3ASensor%3Aextractor-01-differential-pressure?type=Sensor')
+  const toggle = entities(page).getByRole('button', { name: 'Fume extractor 01 differential pressure', exact: true })
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+  await expect(nodeHeadings(page)).toHaveCount(13)
+  await expect(toggle).toBeInViewport()
+})
+
+test('edit in place with suggestions, cancel with Escape, then view the past and return to the present', async ({ page }) => {
   await page.goto('/explorer/urn%3Angsi-ld%3AMachine%3Apress-brake-01?type=Machine')
-  await page.getByRole('button', { name: 'Edit status' }).click()
-  await page.getByRole('group', { name: 'Suggested values' }).getByRole('button', { name: 'maintenance' }).click()
-  await page.getByRole('button', { name: 'Save' }).click()
-  await expect(attribute(page, 'status')).toContainText('maintenance')
+  const status = attribute(node(page, MACHINE), 'status')
+  await status.getByRole('button', { name: /^Value of status:/ }).click()
+  await status.getByRole('listbox', { name: 'Suggested values' }).getByRole('option', { name: 'maintenance' }).click()
+  await expect(status.getByRole('combobox', { name: 'New value of status' })).toHaveValue('maintenance')
+  await page.keyboard.press('Enter')
+  await expect(status).toContainText('"maintenance"')
+  await expect(status.getByRole('combobox')).toHaveCount(0)
+
+  await status.getByRole('button', { name: 'Edit status' }).click()
+  await status.getByRole('combobox').fill('fault')
+  await page.keyboard.press('Escape')
+  await expect(status.getByRole('combobox')).toHaveCount(0)
+  await expect(status).toContainText('"maintenance"')
   await page.reload()
-  await expect(attribute(page, 'status')).toContainText('maintenance')
+  await expect(attribute(node(page, MACHINE), 'status')).toContainText('"maintenance"')
 
   await page.getByLabel('View as of').fill(localInput(Date.now() - 3 * 24 * 3600_000))
   await page.getByRole('button', { name: 'Show', exact: true }).click()
   const banner = page.getByRole('region', { name: 'Historical view' })
   await expect(banner).toContainText('Editing is disabled.')
   await expect(page).toHaveURL(/[?&]at=/)
-  await expect(page.getByRole('heading', { level: 2, name: 'Press brake 01' })).toBeVisible()
-  await expect(attribute(page, 'status')).not.toContainText('maintenance')
+  await expect(entities(page).getByRole('button', { name: 'Press brake 01', exact: true })).toHaveAttribute('aria-expanded', 'true')
+  await expect(attribute(node(page, MACHINE), 'status')).not.toContainText('maintenance')
   await expect(page.getByRole('button', { name: 'Edit status' })).toHaveCount(0)
   await expect(page.getByLabel('Entity type').locator('option', { hasText: 'Camera' })).toHaveCount(1)
 
   await banner.getByRole('button', { name: 'Return to the present' }).click()
   await expect(banner).toHaveCount(0)
-  await expect(attribute(page, 'status')).toContainText('maintenance')
+  await expect(attribute(node(page, MACHINE), 'status')).toContainText('maintenance')
   await expect(page.getByLabel('Entity type').locator('option', { hasText: 'Camera' })).toHaveCount(0)
+})
+
+test('edit the raw JSON of an entity', async ({ page }) => {
+  await page.goto('/explorer/urn%3Angsi-ld%3AMachine%3Apress-brake-01')
+  const machine = node(page, MACHINE)
+  await machine.getByRole('button', { name: 'Raw JSON of Press brake 01' }).click()
+  const raw = machine.getByLabel('Entity JSON')
+  const entity = JSON.parse(await raw.inputValue())
+  await expect(machine.getByRole('button', { name: 'Save JSON' })).toBeDisabled()
+  await raw.fill('{ not json')
+  await machine.getByRole('button', { name: 'Save JSON' }).click()
+  await expect(machine.getByRole('alert')).toContainText('The JSON is not valid')
+
+  delete entity.manufacturer
+  entity.machineType.value = 'PanelBender'
+  entity.floorArea = { type: 'Property', value: 12, unitCode: 'MTK' }
+  await raw.fill(JSON.stringify(entity, null, 2))
+  await machine.getByRole('button', { name: 'Save JSON' }).click()
+  await expect(page.getByText('Entity JSON saved.')).toBeVisible()
+  await machine.getByRole('button', { name: 'Raw JSON of Press brake 01' }).click()
+  await expect(attribute(machine, 'floorArea')).toContainText('12 MTK')
+  await expect(attribute(machine, 'machineType')).toContainText('"PanelBender"')
+  await expect(attribute(machine, 'manufacturer')).toHaveCount(0)
 })
 
 test('import a sample file', async ({ page }) => {
   await page.goto('/explorer?type=ProductionLine')
-  await expect(entities(page).getByRole('link')).toHaveCount(3)
+  await expect(nodeHeadings(page)).toHaveCount(3)
   await page.getByRole('button', { name: 'Import…' }).click()
   const dialog = page.getByRole('dialog', { name: 'Import entities' })
   const doc = [
@@ -76,14 +133,16 @@ test('import a sample file', async ({ page }) => {
   await dialog.getByRole('button', { name: 'Import 2 entities' }).click()
   await expect(dialog.getByRole('region', { name: 'Import results' })).toContainText('Import finished: 1 created, 1 updated, 0 failed.')
   await dialog.getByRole('button', { name: 'Done' }).click()
-  await expect(entities(page).getByRole('link')).toHaveCount(4)
-  await expect(entities(page).getByRole('link', { name: /Line A · Laser cutting/ })).toBeVisible()
+  await expect(nodeHeadings(page)).toHaveCount(4)
+  await expect(entities(page).getByRole('button', { name: 'Line A · Laser cutting', exact: true })).toBeVisible()
 })
 
-test('live values change on screen and the indicator reports unavailability', async ({ page }) => {
-  await presetControls(page, { authEnabled: false, speed: 25 })
+test('live values change on screen and are highlighted', async ({ page }) => {
+  await page.goto('/explorer')
+  await setControls(page, { speed: 25 })
   await page.goto('/explorer/urn%3Angsi-ld%3ASensor%3Achiller-01-flow')
   await expect(page.getByText('Live updates working')).toBeVisible()
-  await expect(attribute(page, 'value')).toHaveClass(/attr--changed/)
-  await expect(attribute(page, 'value').getByText('Updated')).toBeVisible()
+  const value = attribute(node(page, SENSOR), 'value')
+  await expect(value.locator('.attr-line').first()).toHaveClass(/attr-line--changed/)
+  await expect(value.getByText('Updated')).toBeVisible()
 })
