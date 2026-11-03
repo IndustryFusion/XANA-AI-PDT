@@ -4,9 +4,20 @@ import { OPERATIONS, SHAPES } from '../../src/data/interface'
 import { checkShape } from '../../src/data/shape'
 import { areas, bindArea, DataError } from '../../src/data'
 import { writeControls } from '../../src/data/sources/mock/controls'
+import { store } from '../../src/data/sources/mock'
+import { MOCK_DATASPACE_SECRET } from '../../src/data/sources/mock/dataspaceArea'
 import { addRun, findRun, resetMock } from '../helpers'
 
 const SENSOR = 'urn:ngsi-ld:Sensor:chiller-01-flow'
+const MARKDOWN = { name: 'Notes.md', type: 'text/markdown', size: 24, dataUrl: 'data:text/markdown,%23%20Notes%0ACheck%20the%20nozzle.' }
+/** Starts an ingestion job synchronously through the mock store, for operations that need one. */
+function uploadNow() {
+  store.update((s) => {
+    s.kb.jobs['job-90'] = { jobId: 'job-90', name: 'x.md', pipeline: 'base', status: 'queued', progress: 0, error: null, chunks: null, size: 10, startedAt: Date.now(), fails: false, passages: [] }
+    return s
+  })
+  return 'job-90'
+}
 const docs = readFileSync(resolve(__dirname, '../../docs/data-interface.md'), 'utf8')
 
 describe('interface documentation', () => {
@@ -27,7 +38,7 @@ describe('facade', () => {
   })
 
   test('operations a source does not implement reject with unavailable', async () => {
-    await expect(areas.knowledgeBase.listDocuments()).rejects.toMatchObject({ name: 'DataError', area: 'knowledgeBase', kind: 'unavailable' })
+    await expect(bindArea('knowledgeBase', {}).listDocuments()).rejects.toMatchObject({ name: 'DataError', area: 'knowledgeBase', kind: 'unavailable' })
   })
 
   test('unimplemented subscriptions report an error event', async () => {
@@ -99,6 +110,25 @@ describe('mock source matches the documented shapes', () => {
       getAlert: () => ['alert-001'],
       applyAlertAction: () => ['alert-001', { action: 'close', text: 'Done.' }],
     },
+    dataspace: {
+      connect: () => [{ secret: MOCK_DATASPACE_SECRET }],
+      getPeerCapabilities: () => ['peer-formwerk'],
+      decideCapabilityRequest: () => ['req-005', { approved: true, note: 'For the next service visit.' }],
+      setCapabilityPolicy: () => [{ peerId: 'peer-formwerk', capability: 'twin:adjacents', action: 'grant' }],
+      resolveNames: () => [['peer-formwerk', 'peer-hydroservice']],
+      resolveBuilders: () => [['urn:ngsi-ld:Machine:press-brake-01']],
+    },
+    knowledgeBase: {
+      listDocuments: () => [{ pipeline: 'base' }],
+      uploadDocument: () => [{ file: MARKDOWN, pipeline: 'base' }],
+      getIngestJob: () => [uploadNow()],
+      updateDescription: () => ['Shift handover checklist.md', 'Updated checks.', { pipeline: 'base' }],
+      deleteDocument: () => ['Shift handover checklist.md', { pipeline: 'base' }],
+      query: () => [{ text: 'protective window burr', pipeline: 'base' }],
+    },
+    system: {
+      saveServiceSettings: () => [{ messageBroker: 'mqtt://broker-2.example.org:1883' }],
+    },
   }
   const implemented = Object.entries(SHAPES).flatMap(([area, ops]) => Object.keys(ops).map((op) => [area, op]))
 
@@ -107,8 +137,8 @@ describe('mock source matches the documented shapes', () => {
     expect(checkShape(result, SHAPES[area][op])).toEqual([])
   })
 
-  test('every run, incident, entity and alert operation is implemented and shape-checked', () => {
-    for (const area of ['runs', 'incidents', 'entities', 'alerts']) expect(Object.keys(SHAPES[area]).sort()).toEqual(OPERATIONS[area].filter((op) => !op.startsWith('subscribe')).sort())
+  test('every operation of every area is implemented and shape-checked', () => {
+    for (const area of Object.keys(OPERATIONS)) expect(Object.keys(SHAPES[area]).sort()).toEqual(OPERATIONS[area].filter((op) => !op.startsWith('subscribe')).sort())
   })
 
   test('wrong credentials are rejected as unauthorized', async () => {

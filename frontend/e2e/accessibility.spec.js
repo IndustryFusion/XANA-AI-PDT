@@ -170,6 +170,98 @@ const EXPLORER_ALERT_STATES = [
   }],
 ]
 
+const MARKDOWN = { name: 'Checklist.md', mimeType: 'text/markdown', buffer: Buffer.from('# Checks\nInspect the nozzle.') }
+const kb = (page) => page.getByRole('region', { name: 'Knowledge base' })
+
+/** Dataspace and System views checked in both themes: extra controls preset, and how to reach the state. */
+const DATASPACE_SYSTEM_STATES = [
+  ['dataspace with a selected peer and requests', {}, async (page) => {
+    await page.goto('/dataspace?peer=peer-formwerk')
+    await expect(page.getByRole('table', { name: 'What Formwerk Press Technology may access here' })).toBeVisible()
+    await expect(page.locator('tr[data-request="req-003"]')).toContainText('HydroService Maintenance')
+  }],
+  ['dataspace disconnect dialog', {}, async (page) => {
+    await page.goto('/dataspace')
+    await page.getByRole('button', { name: 'Disconnect…' }).click()
+    await expect(page.getByRole('dialog')).toBeVisible()
+  }],
+  ['dataspace connect form with an error', { connection: 'disconnected' }, async (page) => {
+    await page.goto('/dataspace')
+    await page.getByLabel('Dataspace credential').fill('wrong')
+    await page.getByRole('button', { name: 'Connect' }).click()
+    await expect(page.getByRole('region', { name: 'Connection' }).getByRole('alert')).toBeVisible()
+  }],
+  ['dataspace not configured', { connection: 'not_configured' }, async (page) => {
+    await page.goto('/dataspace')
+    await expect(page.getByText('Not available: no dataspace connection is configured.')).toBeVisible()
+  }],
+  ['dataspace failing', { failure: { dataspace: 'unavailable' } }, async (page) => {
+    await page.goto('/dataspace')
+    await expect(page.getByText('Could not load the dataspace connection')).toBeVisible()
+  }],
+  ['dataspace policy confirmation', {}, async (page) => {
+    await page.goto('/dataspace?peer=peer-formwerk')
+    await page.getByRole('button', { name: 'Grant Signal history for Formwerk Press Technology' }).click()
+    await expect(page.getByRole('dialog')).toBeVisible()
+  }],
+  ['dataspace request decision dialog', {}, async (page) => {
+    await page.goto('/dataspace')
+    await page.getByRole('button', { name: /Deny request req-004/ }).click()
+    await expect(page.getByRole('dialog').getByLabel('Note (optional)')).toBeVisible()
+  }],
+  ['system with a failing dependency and an invalid setting', { gatewayReachable: false }, async (page) => {
+    await page.goto('/system')
+    await expect(page.getByText('Overall health: Degraded')).toBeVisible()
+    await page.getByLabel('Context broker', { exact: true }).fill('broker')
+    await page.getByRole('button', { name: 'Save settings' }).click()
+    await expect(page.getByText('Not saved: correct the marked addresses.')).toBeVisible()
+  }],
+  ['system with a changed setting', {}, async (page) => {
+    await page.goto('/system')
+    await page.getByLabel('Alert manager', { exact: true }).fill('https://alerts-2.example.org')
+    await page.getByRole('button', { name: 'Save settings' }).click()
+    await expect(page.getByRole('button', { name: 'Reset to deployment value: Alert manager' })).toBeVisible()
+  }],
+  ['knowledge base with an upload in progress, a refused file and the drop zone', { speed: 0.5 }, async (page) => {
+    await page.goto('/system')
+    await kb(page).getByLabel('Or choose files').setInputFiles([MARKDOWN, { name: 'photo.png', mimeType: 'image/png', buffer: Buffer.from('x') }])
+    await expect(kb(page).getByRole('progressbar', { name: 'Ingestion progress of Checklist.md' })).toBeVisible()
+    await expect(kb(page).getByRole('alert')).toContainText('photo.png was refused')
+  }],
+  ['knowledge base structured pipeline with a description being edited', {}, async (page) => {
+    await page.goto('/system')
+    await kb(page).getByRole('radio', { name: /Structured pipeline/ }).check()
+    await kb(page).getByRole('button', { name: 'Edit description of PB-2200 spare parts catalogue.pdf' }).click()
+    await expect(kb(page).getByLabel('Description of PB-2200 spare parts catalogue.pdf', { exact: true })).toBeVisible()
+  }],
+  ['knowledge base delete dialog', {}, async (page) => {
+    await page.goto('/system')
+    await kb(page).getByRole('button', { name: 'Delete Scanned wiring diagrams.pdf' }).click()
+    await expect(page.getByRole('dialog')).toBeVisible()
+  }],
+  ['knowledge base test query results', {}, async (page) => {
+    await page.goto('/system')
+    await kb(page).getByLabel('Question').fill('hydraulic pressure drop')
+    await kb(page).getByRole('button', { name: 'Run test query' }).click()
+    await expect(kb(page).getByRole('list', { name: 'Retrieved passages' })).toBeVisible()
+  }],
+]
+
+for (const theme of ['dark', 'light']) {
+  test.describe(`${theme} theme: dataspace and system`, () => {
+    test.use({ colorScheme: theme })
+
+    for (const [name, controls, arrange] of DATASPACE_SYSTEM_STATES) {
+      test(`${name} has no accessibility violations`, async ({ page }) => {
+        await presetControls(page, { authEnabled: false, speed: E2E_SPEED, ...controls })
+        await arrange(page)
+        await expect(page.getByText(/^Loading/)).toHaveCount(0)
+        expect(await violations(page)).toEqual([])
+      })
+    }
+  })
+}
+
 for (const theme of ['dark', 'light']) {
   test.describe(`${theme} theme: data explorer and alerts`, () => {
     test.use({ colorScheme: theme })
@@ -373,4 +465,58 @@ test('keyboard only: query, expand an entity, edit with a suggestion, cancel, an
   await page.keyboard.press('Enter')
   await expect(summary).toHaveAttribute('aria-pressed', 'true')
   expect(await summary.evaluate((el) => getComputedStyle(el).outlineStyle)).not.toBe('none')
+})
+
+test('keyboard only: connect, decide a request, change a policy and upload with the file picker', async ({ page }) => {
+  await presetControls(page, { authEnabled: false, speed: E2E_SPEED, connection: 'disconnected' })
+  await page.goto('/dataspace')
+  const credential = page.getByLabel('Dataspace credential')
+  await credential.focus()
+  await page.keyboard.type('plant-north-secret')
+  await page.keyboard.press('Enter')
+  await expect(page.getByRole('region', { name: 'Connection' }).getByText('Dataspace connected')).toBeVisible()
+
+  const peer = page.getByRole('region', { name: 'Compatible peers' }).getByRole('link', { name: /CoolFlow Process Cooling/ })
+  await peer.focus()
+  await page.keyboard.press('Enter')
+  const deny = page.getByRole('button', { name: 'Deny Signal history for CoolFlow Process Cooling' })
+  await deny.focus()
+  await page.keyboard.press('Enter')
+  const dialog = page.getByRole('dialog', { name: 'Deny: Signal history for CoolFlow Process Cooling' })
+  await expect(dialog.getByRole('button', { name: 'Close dialog' })).toBeFocused()
+  await page.keyboard.press('Escape')
+  await expect(dialog).toHaveCount(0)
+  await expect(deny).toBeFocused()
+  await page.keyboard.press('Enter')
+  await page.keyboard.press('Tab')
+  await page.keyboard.press('Tab')
+  await expect(dialog.getByRole('button', { name: 'Deny' })).toBeFocused()
+  await page.keyboard.press('Enter')
+  await expect(page.getByRole('table', { name: 'What CoolFlow Process Cooling may access here' }).locator('tr[data-capability="twin:history"]')).toContainText('Denied')
+
+  const approve = page.getByRole('button', { name: /Approve request req-003/ })
+  await approve.focus()
+  await page.keyboard.press('Enter')
+  const decision = page.getByRole('dialog', { name: 'Approve request req-003' })
+  await page.keyboard.press('Tab')
+  await expect(decision.getByLabel('Note (optional)')).toBeFocused()
+  await page.keyboard.type('Trial for three months.')
+  await page.keyboard.press('Tab')
+  await page.keyboard.press('Tab')
+  await page.keyboard.press('Enter')
+  await expect(page.locator('tr[data-request="req-003"]')).toContainText('Approved')
+
+  await page.goto('/system')
+  await page.getByRole('radio', { name: /Base pipeline/ }).focus()
+  await page.keyboard.press('ArrowRight')
+  await expect(page.getByRole('radio', { name: /Structured pipeline/ })).toBeChecked()
+  const picker = page.getByLabel('Or choose files')
+  await picker.focus()
+  expect(await picker.evaluate((el) => getComputedStyle(el).outlineStyle)).not.toBe('none')
+  const chooser = page.waitForEvent('filechooser')
+  await page.keyboard.press('Space')
+  await (await chooser).setFiles(MARKDOWN)
+  const row = page.locator('tr[data-document="Checklist.md"]')
+  await expect(row.getByText('Done')).toBeVisible()
+  await expect(page.getByRole('table', { name: 'Documents in the structured pipeline' })).toContainText('Checklist.md')
 })

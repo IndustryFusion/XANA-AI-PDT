@@ -2,7 +2,7 @@ import { DataError } from '../../errors'
 
 /**
  * Development controls of the mock source: per-area latency and failure,
- * mock authentication, dataspace state, the scenario and playback speed
+ * mock authentication, dataspace state and gateway, the scenario and playback speed
  * of simulated runs, live entity updates and occasional new alerts. Stored in localStorage so tests
  * can preset them before the app loads. Ignored in production builds.
  */
@@ -14,7 +14,12 @@ export const DEFAULT_CONTROLS = {
   latencyMs: {},
   failure: {},
   authEnabled: true,
-  connection: 'connected',
+  // Preset dataspace connection state (null: the state the mock keeps, changed by connect and
+  // disconnect, which also clear this preset), whether the gateway can be reached, and whether
+  // the configuration provides the dataspace credential.
+  connection: null,
+  gatewayReachable: true,
+  credentialConfigured: false,
   // Bumped to invalidate the current mock session ("Expire session now").
   sessionRevision: 0,
   // Scenario of the next started run, and playback speed of simulated runs.

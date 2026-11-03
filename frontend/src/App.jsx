@@ -3,12 +3,14 @@ import { configError, DevControls } from './data'
 import Header from './app/Header'
 import { RouterProvider, useRoute } from './app/router'
 import { SessionGate } from './app/session'
-import { ConfigError, NotFound, Placeholder } from './app/views'
+import { ConfigError, NotFound } from './app/views'
 import Alerts from './features/alerts/Alerts'
 import Dashboard from './features/dashboard/Dashboard'
+import Dataspace from './features/dataspace/Dataspace'
 import DataExplorer from './features/explorer/DataExplorer'
 import IncidentHistory from './features/history/IncidentHistory'
 import ActiveIncidents from './features/incidents/ActiveIncidents'
+import System from './features/system/System'
 import { ToastProvider } from './ui/components'
 import { ThemeProvider } from './ui/theme'
 import './ui/tokens.css'
@@ -31,7 +33,8 @@ function AreaContent() {
   if (area === 'history') return <IncidentHistory />
   if (area === 'explorer') return <DataExplorer />
   if (area === 'alerts') return <Alerts />
-  if (area) return <Placeholder />
+  if (area === 'dataspace') return <Dataspace />
+  if (area === 'system') return <System />
   return <NotFound />
 }
 

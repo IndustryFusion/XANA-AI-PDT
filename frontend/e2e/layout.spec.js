@@ -57,6 +57,27 @@ test('entity view, history and alert detail fit and stack below 900 px', async (
   expect(detail.top).toBeGreaterThan(table.top)
 })
 
+test('dataspace and system sections stack below 900 px', async ({ page }) => {
+  await presetControls(page, { authEnabled: false })
+  const overflow = () => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
+  const box = (sel) => page.locator(sel).first().evaluate((el) => el.getBoundingClientRect())
+
+  await page.goto('/dataspace?peer=peer-formwerk')
+  await expect(page.getByRole('table', { name: 'What Formwerk Press Technology may access here' })).toBeVisible()
+  expect(await overflow(), 'dataspace overflows horizontally').toBeLessThanOrEqual(0)
+  const [connection, tier, list, detail] = await Promise.all(['.dataspace-connection', '.sharing-tier', '.peer-list', '.peers__detail'].map(box))
+  expect(tier.top).toBeGreaterThan(connection.top)
+  expect(Math.round(tier.left)).toBe(Math.round(connection.left))
+  expect(detail.top).toBeGreaterThan(list.top)
+
+  await page.goto('/system')
+  await expect(page.locator('tr[data-document]').first()).toBeVisible()
+  expect(await overflow(), 'system overflows horizontally').toBeLessThanOrEqual(0)
+  const [health, settings] = await Promise.all(['.health', '.service-settings'].map(box))
+  expect(settings.top).toBeGreaterThan(health.top)
+  expect(Math.round(settings.left)).toBe(Math.round(health.left))
+})
+
 test('buttons next to inputs and selects are level with them', async ({ page }) => {
   await presetControls(page, { authEnabled: false })
   await page.goto('/')
@@ -73,6 +94,13 @@ for (const [name, path, open] of [
     await expect(page.getByRole('button', { name: 'Fetch' })).toBeVisible()
   }],
   ['alert filters', '/alerts', async (page) => expect(page.locator('tbody tr').first()).toBeVisible()],
+  ['knowledge-base test query and system forms', '/system', async (page) => expect(page.getByRole('button', { name: 'Run test query' })).toBeVisible()],
+  ['dataspace', '/dataspace?peer=peer-formwerk', async (page) => expect(page.getByRole('table', { name: 'What Formwerk Press Technology may access here' })).toBeVisible()],
+  ['dataspace connect form', '/dataspace', async (page) => {
+    await page.getByRole('button', { name: 'Disconnect…' }).click()
+    await page.getByRole('dialog').getByRole('button', { name: 'Disconnect' }).click()
+    await expect(page.getByRole('form', { name: 'Connect to the dataspace' })).toBeVisible()
+  }],
 ]) {
   test(`${name}: buttons are level with the inputs next to them`, async ({ page }) => {
     await presetControls(page, { authEnabled: false, newAlerts: false })

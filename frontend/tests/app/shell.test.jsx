@@ -1,8 +1,10 @@
-import { screen, within } from '@testing-library/react'
+import { act, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { DataspaceIndicator, FactoryDetails } from '../../src/app/Header'
 import { EntityRef } from '../../src/app/EntityRef'
 import { paths } from '../../src/app/router'
+import { dataspace } from '../../src/data'
+import { MOCK_DATASPACE_SECRET } from '../../src/data/sources/mock/dataspaceArea'
 import { writeControls } from '../../src/data/sources/mock/controls'
 import { renderApp, renderWithRouter } from '../helpers'
 
@@ -27,19 +29,12 @@ describe('main navigation', () => {
     ['/history', 'Incident history'],
     ['/explorer', 'Data explorer'],
     ['/alerts', 'Alerts'],
-  ])('%s shows its delivered area', async (path, label) => {
-    renderApp({ path, controls: { authEnabled: false } })
-    expect(await screen.findByRole('heading', { name: label, level: 1 })).toBeVisible()
-    expect(screen.queryByText(`${label} is not available yet.`)).not.toBeInTheDocument()
-  })
-
-  test.each([
     ['/dataspace', 'Dataspace'],
     ['/system', 'System'],
-  ])('%s shows a placeholder naming the area', async (path, label) => {
+  ])('%s shows its delivered area, never a placeholder', async (path, label) => {
     renderApp({ path, controls: { authEnabled: false } })
     expect(await screen.findByRole('heading', { name: label, level: 1 })).toBeVisible()
-    expect(screen.getByText(`${label} is not available yet.`)).toBeVisible()
+    expect(screen.queryByText(/is not available yet/)).not.toBeInTheDocument()
   })
 
   test('unknown URLs show not found with a link to the dashboard', async () => {
@@ -86,6 +81,15 @@ describe('dataspace indicator', () => {
     renderWithRouter(<DataspaceIndicator />)
     expect(await screen.findByText('Dataspace session expired')).toBeVisible()
     expect(screen.getByRole('link', { name: 'Reconnect' })).toHaveAttribute('href', '/dataspace')
+  })
+
+  test('updates immediately when the connection is changed, without waiting for its poll', async () => {
+    renderWithRouter(<DataspaceIndicator refreshMs={0} />)
+    expect(await screen.findByText('Dataspace connected')).toBeVisible()
+    await act(() => dataspace.disconnect())
+    expect(await screen.findByText('Dataspace disconnected')).toBeVisible()
+    await act(() => dataspace.connect({ secret: MOCK_DATASPACE_SECRET }))
+    expect(await screen.findByText('Dataspace connected')).toBeVisible()
   })
 
   test('not configured shows no reconnect hint', async () => {

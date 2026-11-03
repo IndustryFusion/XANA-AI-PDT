@@ -99,6 +99,42 @@ export const IMPORT_RESULT = {
   failed: { label: 'Failed', tone: 'danger' },
 }
 
+/** Policy of a dataspace capability for a peer. */
+export const POLICY = {
+  granted: { label: 'Granted', tone: 'success' },
+  denied: { label: 'Denied', tone: 'danger' },
+  default: { label: 'Default', tone: 'neutral' },
+}
+
+/** Decision on an incoming capability request. */
+export const CAPABILITY_REQUEST = {
+  pending: { label: 'Pending', tone: 'attention' },
+  approved: { label: 'Approved', tone: 'success' },
+  denied: { label: 'Denied', tone: 'danger' },
+}
+
+/** Ingestion of a knowledge-base document. */
+export const INGEST = {
+  queued: { label: 'Queued', tone: 'neutral' },
+  processing: { label: 'Processing', tone: 'progress' },
+  done: { label: 'Done', tone: 'success' },
+  failed: { label: 'Failed', tone: 'danger' },
+}
+
+/** State of the operator's sign-in session. */
+export const SESSION = {
+  active: { label: 'Active', tone: 'success' },
+  refreshing: { label: 'Refreshing', tone: 'progress' },
+  expired: { label: 'Expired', tone: 'warning' },
+  not_required: { label: 'Sign-in not required', tone: 'neutral' },
+}
+
+/** Origin of a service setting. */
+export const SETTING = {
+  deployment: { label: 'Deployment value', tone: 'neutral' },
+  changed: { label: 'Changed', tone: 'info' },
+}
+
 /** Confidence bands of agent output; the level label always accompanies the percentage. */
 export const CONFIDENCE = {
   high: { label: 'High', tone: 'success', min: 0.7 },
@@ -120,6 +156,7 @@ export const STATUS_KINDS = {
   run: RUN_STATUS, severity: SEVERITY, health: HEALTH, connection: CONNECTION,
   delivery: DELIVERY, conversation: CONVERSATION, outcome: INCIDENT_OUTCOME,
   alert: ALERT_STATUS, live: LIVE_UPDATES, import: IMPORT_RESULT, confidence: CONFIDENCE,
+  policy: POLICY, request: CAPABILITY_REQUEST, ingest: INGEST, session: SESSION, setting: SETTING,
 }
 
 export function describeStatus(kind, value) {

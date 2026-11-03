@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { CONNECTION_CHANGED } from '../../data'
 import { useData } from '../../data/useData'
 import { EntityRef } from '../../app/EntityRef'
 import { Link, paths } from '../../app/router'
@@ -150,10 +151,12 @@ function DataTile({ opts }) {
   )
 }
 
+const ON_CONNECTION_CHANGE = [CONNECTION_CHANGED]
+
 function DataspaceTile({ opts }) {
-  const connection = useData('dataspace', 'getConnection', [], opts)
+  const connection = useData('dataspace', 'getConnection', [], { ...opts, refreshOn: ON_CONNECTION_CHANGE })
   const connected = connection.data?.state === 'connected'
-  const peers = useData('dataspace', 'listPeers', [], { ...opts, enabled: connected })
+  const peers = useData('dataspace', 'listPeers', [], { ...opts, enabled: connected, refreshOn: ON_CONNECTION_CHANGE })
   return (
     <Card title={<TileTitle to={paths.dataspace()}>Dataspace</TileTitle>} className="tile">
       <DataView result={connection} errorTitle="Could not load dataspace status">

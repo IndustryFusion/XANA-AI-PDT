@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react'
+import { CONNECTION_CHANGED } from '../data'
 import { useData } from '../data/useData'
 import { Button, StatusBadge } from '../ui/components'
 import { ThemeSelect } from '../ui/theme'
@@ -35,8 +36,11 @@ export default function Header() {
   )
 }
 
+const ON_CONNECTION_CHANGE = [CONNECTION_CHANGED]
+
+/** Dataspace connection state; reloads at once when the connection is changed anywhere in the UI. */
 export function DataspaceIndicator({ refreshMs = CONNECTION_POLL_MS }) {
-  const result = useData('dataspace', 'getConnection', [], { refreshMs })
+  const result = useData('dataspace', 'getConnection', [], { refreshMs, refreshOn: ON_CONNECTION_CHANGE })
   if (result.status === 'error' && !result.data) {
     return <StatusBadge kind="connection" value="unknown" label="Dataspace status unknown" />
   }

@@ -57,9 +57,17 @@ export default function DevControls() {
           </div>
           <label className="field">
             <span className="field__label">Dataspace connection</span>
-            <select value={controls.connection} onChange={(e) => update({ connection: e.target.value })}>
+            <select value={controls.connection ?? store.get().connection.state} onChange={(e) => update({ connection: e.target.value })}>
               {CONNECTION_STATES.map((s) => <option key={s} value={s}>{s.replace('_', ' ')}</option>)}
             </select>
+          </label>
+          <label className="row">
+            <input type="checkbox" checked={controls.gatewayReachable} onChange={(e) => update({ gatewayReachable: e.target.checked })} />
+            Dataspace gateway reachable
+          </label>
+          <label className="row">
+            <input type="checkbox" checked={controls.credentialConfigured} onChange={(e) => update({ credentialConfigured: e.target.checked })} />
+            Configuration provides the dataspace credential
           </label>
           <div className="field">
             <label className="field__label" htmlFor="dev-scenario">Scenario for the next started run</label>

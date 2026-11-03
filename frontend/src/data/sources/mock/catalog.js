@@ -59,13 +59,23 @@ export function builderFor(machineId) {
   return machine ? PEERS.find((p) => p.id === machine.builder) ?? null : null
 }
 
+/** Participants the dataspace registry knows besides the compatible peers. */
+export const REGISTRY = [
+  ...PEERS.map(({ id, name }) => ({ id, name })),
+  { id: 'peer-hydroservice', name: 'HydroService Maintenance' },
+  { id: 'participant-plant-north', name: 'Plant North' },
+]
+
+/** Capabilities a dataspace participant can grant: machine entity, linked components, signal history. */
+export const CAPABILITIES = ['twin:direct', 'twin:adjacents', 'twin:history']
+
 /**
- * Data-sharing tier configured for machine builders. Requested data in one of
- * the `included` categories is shared automatically; anything else needs the
- * operator's approval.
+ * Data-sharing tier configured for machine builders (`minimal`: the machine
+ * entity only). Requested data in one of the `included` categories is shared
+ * automatically; anything else needs the operator's approval.
  */
 export const SHARING_TIER = {
-  id: 'tier-1',
-  label: 'Tier 1 · machine data',
+  id: 'minimal',
+  label: 'minimal · machine entity only',
   included: ['incident', 'machine', 'sensor', 'alert'],
 }

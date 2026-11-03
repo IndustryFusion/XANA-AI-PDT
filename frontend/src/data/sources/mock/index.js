@@ -4,15 +4,17 @@
  * backend.
  */
 import { MOCK_CREDENTIALS } from './areas'
+import { MOCK_DATASPACE_SECRET } from './dataspaceArea'
 import { areas, engine, raiseAlert, store } from './instance'
 import DevControlsPanel from './DevControls'
 
 export const info = {
   name: 'mock',
   signInHint: `Mock data: sign in as ${MOCK_CREDENTIALS.username} / ${MOCK_CREDENTIALS.password}`,
+  dataspaceHint: `Mock data: the dataspace credential is ${MOCK_DATASPACE_SECRET}`,
 }
 
-export const { session, runs, incidents, alerts, entities, dataspace, system } = areas
+export const { session, runs, incidents, alerts, entities, dataspace, knowledgeBase, system } = areas
 
 /** The mock's store, run engine and alert generator, for tests that need to arrange data. */
 export { store, engine, raiseAlert }
