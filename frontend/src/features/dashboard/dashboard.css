@@ -22,6 +22,7 @@
 }
 
 .tile__item:first-child { border-top: 0; }
+.tile__item--toned { padding-left: var(--space-2); padding-right: var(--space-2); border-radius: var(--radius); }
 
 .tile__item-main {
   display: flex;

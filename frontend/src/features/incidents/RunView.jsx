@@ -7,6 +7,7 @@ import { Link, paths } from '../../app/router'
 import { Button, ErrorState, LoadingState, StatusBadge, Tabs } from '../../ui/components'
 import { ConfirmDialog } from '../../ui/structured'
 import { formatTime } from '../../ui/format'
+import { toneOf } from '../../ui/status'
 import { DecisionCard, HypothesisList } from './Analysis'
 import Conversation from './Conversation'
 import { StatePanel } from './panels'
@@ -16,7 +17,7 @@ import StepFeed from './StepFeed'
 export function RunHeader({ run }) {
   const [stopping, setStopping] = useState(false)
   return (
-    <header className="run-header">
+    <header className={`run-header toned toned--${toneOf('run', run.status)}`} data-status={run.status}>
       <div className="run-header__title">
         <h2 id="run-title">{run.incidentId != null ? `Incident #${run.incidentId}` : 'New analysis'}</h2>
         <StatusBadge kind="run" value={run.status} />

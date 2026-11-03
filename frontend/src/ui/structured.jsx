@@ -1,18 +1,25 @@
 import { Fragment, useEffect, useId, useState } from 'react'
 import { Button, Dialog } from './components'
 import { formatSize, humanize, percent } from './format'
+import { CONFIDENCE, confidenceLevel } from './status'
 
 /* ── ConfidenceMeter ────────────────────────────────────────────────────── */
 
-/** Confidence as percentage text plus a bar; the text carries the meaning. */
+/**
+ * Confidence as percentage text, a bar and its level (high, medium, low),
+ * coloured by level; the text carries the meaning.
+ */
 export function ConfidenceMeter({ value, label = 'Confidence' }) {
   if (value == null) return null
   const pct = Math.max(0, Math.min(1, Number(value)))
+  const level = confidenceLevel(pct)
+  const { label: levelLabel, tone } = CONFIDENCE[level]
   return (
-    <span className="confidence">
+    <span className={`confidence confidence--${tone}`} data-level={level}>
       {label && <span className="confidence__label">{label}</span>}
       <strong className="confidence__value">{percent(pct)}</strong>
       <span className="confidence__bar" aria-hidden="true"><span style={{ width: percent(pct) }} /></span>
+      <span className="confidence__level">{levelLabel}</span>
     </span>
   )
 }
