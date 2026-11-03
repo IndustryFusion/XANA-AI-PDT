@@ -24,6 +24,15 @@ describe('open runs list', () => {
     expect(rows[3]).toHaveTextContent('3 h 10 min')
   })
 
+  test('each run is colour-coded by its status, and runs in progress or waiting for input pulse', async () => {
+    open('/incidents')
+    const rows = await items()
+    expect(rows[0]).toHaveClass('toned--progress')
+    expect(rows[1]).toHaveClass('toned--attention')
+    expect(within(rows[1]).getByText('Needs input')).toHaveClass('badge--pulse')
+    expect(within(rows[3]).getByText('Awaiting machine builder')).not.toHaveClass('badge--pulse')
+  })
+
   test('no open runs: an empty state offers to start a new analysis', async () => {
     const user = userEvent.setup()
     resetMock({ path: '/incidents', controls })

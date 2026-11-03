@@ -6,7 +6,7 @@ import { Link, paths, useRoute } from '../../app/router'
 import { Button, Card, DataView, EmptyState, ErrorState, LoadingState, StatusBadge } from '../../ui/components'
 import { ConfidenceMeter, ConfirmDialog } from '../../ui/structured'
 import { formatDate, formatTime } from '../../ui/format'
-import { INCIDENT_OUTCOME } from '../../ui/status'
+import { INCIDENT_OUTCOME, toneOf } from '../../ui/status'
 import { MessageThread, threadEntries } from '../incidents/Conversation'
 import { StepItem } from '../incidents/StepFeed'
 import '../incidents/incidents.css'
@@ -93,7 +93,7 @@ export function IncidentList({ selected, machine }) {
           {(list) => (
             <ul className="run-list__items">
               {filtered(list).map((i) => (
-                <li key={i.id} className="run-list__item">
+                <li key={i.id} className={`run-list__item toned toned--${toneOf('outcome', i.outcome)}`} data-status={i.outcome}>
                   <Link to={incidentPath(i.id, machine)} className="run-list__link" aria-current={selected === i.id ? 'true' : undefined}>
                     <span className="run-list__issue">{i.issue}</span>
                     <span className="run-list__meta">

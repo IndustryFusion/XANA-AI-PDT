@@ -1,4 +1,5 @@
 import { ConfidenceMeter } from '../../ui/structured'
+import { confidenceTone } from '../../ui/status'
 import { currentDecision, currentHypotheses } from './runModel'
 
 /** Hypotheses with confidence and evidence; validated ones replace the proposal. */
@@ -13,7 +14,7 @@ export function HypothesisList({ steps }) {
       <div className="card__body">
         <ol className="hypotheses">
           {current.hypotheses.map((h) => (
-            <li key={h.id} className="hypothesis">
+            <li key={h.id} className={`hypothesis toned toned--${confidenceTone(h.confidence)}`}>
               <div className="hypothesis__head">
                 <strong>{h.title}</strong>
                 <ConfidenceMeter value={h.confidence} />
@@ -40,7 +41,7 @@ export function DecisionCard({ steps }) {
   const decision = currentDecision(steps)
   if (!decision) return null
   return (
-    <section className="card decision" aria-labelledby="decision-title">
+    <section className={`card decision toned toned--${confidenceTone(decision.confidence)}`} aria-labelledby="decision-title">
       <header className="card__header">
         <h3 id="decision-title" className="card__title">Decision</h3>
         <ConfidenceMeter value={decision.confidence} />

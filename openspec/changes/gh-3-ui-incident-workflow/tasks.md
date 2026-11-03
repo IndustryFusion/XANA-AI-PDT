@@ -47,6 +47,10 @@
 - [x] 7.3 Extend the accessibility suite to the run view in each waiting state, the conversation and incident history in both themes; verify zero axe violations and keyboard operation of all panels and dialogs (spec: visual-system → Structured presentation, Keyboard operation)
 - [x] 7.4 Run `openspec validate gh-3-ui-incident-workflow --strict` and the Frontend CI; verify both pass and record per-scenario results in the Pull Request
 
+## 8. Review follow-up
+
+- [x] 8.1 Colour-code runs and confidence: status stripe on open runs, past incidents, dashboard entries and the run header, pulsing badge for runs in progress or waiting for input, confidence bands high (≥ 70 %, green), medium (≥ 40 %, amber) and low (red) with the level as text on hypotheses, decisions, panels and steps; verify component tests and zero axe violations in both themes (spec: visual-system → Readable status, Contrast; run-view → Hypotheses, Decision)
+
 ## Workflow follow-up
 
 - A maintainer adds the `spec-approved` label before any task above starts.

@@ -77,6 +77,16 @@
 .badge--danger { --badge-tone: var(--tone-danger); }
 .badge--special { --badge-tone: var(--tone-special); }
 
+/* In progress or waiting for someone: the dot pulses (not with reduced motion). */
+@media (prefers-reduced-motion: no-preference) {
+  .badge--pulse .badge__dot { animation: badge-pulse 1.4s ease-in-out infinite; }
+}
+
+@keyframes badge-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--badge-tone) 70%, transparent); }
+  50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--badge-tone) 0%, transparent); }
+}
+
 /* ── Card ───────────────────────────────────────────────────────────────── */
 
 .card {
@@ -303,7 +313,22 @@ textarea {
   font-size: var(--text-sm);
 }
 
+.confidence { --confidence-tone: var(--accent); }
+.confidence--success { --confidence-tone: var(--tone-success); }
+.confidence--attention { --confidence-tone: var(--tone-attention); }
+.confidence--danger { --confidence-tone: var(--tone-danger); }
+
 .confidence__label { color: var(--text-muted); }
+.confidence__value { color: var(--confidence-tone); }
+
+.confidence__level {
+  padding: 0 var(--space-2);
+  border: 1px solid color-mix(in srgb, var(--confidence-tone) 55%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--confidence-tone) var(--tint), transparent);
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
 
 .confidence__bar {
   width: 80px;
@@ -317,7 +342,7 @@ textarea {
 .confidence__bar > span {
   display: block;
   height: 100%;
-  background: var(--accent);
+  background: var(--confidence-tone);
 }
 
 /* ── Structured fields ──────────────────────────────────────────────────── */
@@ -354,3 +379,20 @@ textarea { width: 100%; min-height: 5rem; resize: vertical; }
   .structured { grid-template-columns: minmax(0, 1fr); }
   .structured dt { margin-top: var(--space-1); }
 }
+
+/* ── Toned entries: a status colour stripe on list entries and panels ──── */
+
+.toned {
+  --item-tone: var(--tone-neutral);
+  border-left: 4px solid var(--item-tone);
+  background-image: linear-gradient(90deg, color-mix(in srgb, var(--item-tone) 12%, transparent), transparent 70%);
+}
+
+.toned--neutral { --item-tone: var(--tone-neutral); }
+.toned--info { --item-tone: var(--tone-info); }
+.toned--progress { --item-tone: var(--tone-progress); }
+.toned--attention { --item-tone: var(--tone-attention); }
+.toned--warning { --item-tone: var(--tone-warning); }
+.toned--success { --item-tone: var(--tone-success); }
+.toned--danger { --item-tone: var(--tone-danger); }
+.toned--special { --item-tone: var(--tone-special); }
