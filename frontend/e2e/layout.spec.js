@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { AREAS, presetControls } from './helpers'
+import { AREAS, misalignedControls, presetControls } from './helpers'
 
 test.use({ viewport: { width: 800, height: 900 } })
 
@@ -33,4 +33,11 @@ test('dashboard tiles are in one column below 900 px', async ({ page }) => {
   await expect(tiles).toHaveCount(5)
   const lefts = await tiles.evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().left)))
   expect(new Set(lefts).size).toBe(1)
+})
+
+test('buttons next to inputs and selects are level with them', async ({ page }) => {
+  await presetControls(page, { authEnabled: false })
+  await page.goto('/')
+  await expect(page.getByRole('button', { name: 'Refresh now' })).toBeVisible()
+  expect(await misalignedControls(page)).toEqual([])
 })

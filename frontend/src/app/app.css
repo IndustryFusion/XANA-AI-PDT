@@ -66,7 +66,7 @@
 
 .app-header__tools { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
 
-.theme-select select { padding: var(--space-1) var(--space-2); }
+.theme-select select { height: var(--control-height-sm); padding: var(--space-1) var(--space-2); }
 
 /* ── User menu ──────────────────────────────────────────────────────────── */
 
