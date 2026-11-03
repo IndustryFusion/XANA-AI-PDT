@@ -18,7 +18,7 @@ function ConditionRow({ index, condition, attributes, onChange, onRemove }) {
       {takesValue(condition.op) && (
         <input aria-label={`Value of condition ${n}`} value={condition.value} onChange={(e) => onChange({ ...condition, value: e.target.value })} />
       )}
-      <Button size="sm" variant="ghost" onClick={onRemove} aria-label={`Remove condition ${n}`}>Remove</Button>
+      <Button variant="ghost" onClick={onRemove} aria-label={`Remove condition ${n}`}>Remove</Button>
     </li>
   )
 }

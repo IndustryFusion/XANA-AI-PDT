@@ -91,7 +91,7 @@ function Filters({ filters, onChange, refreshMs, onRefreshMs, onRefresh }) {
           {REFRESH_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
       </div>
-      <Button size="sm" onClick={onRefresh}>Refresh now</Button>
+      <Button onClick={onRefresh}>Refresh now</Button>
     </div>
   )
 }

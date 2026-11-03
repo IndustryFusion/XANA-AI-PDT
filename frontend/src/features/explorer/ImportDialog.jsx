@@ -130,7 +130,7 @@ export default function ImportDialog({ open, onClose, onImported }) {
                 <input id={ids.file} type="file" accept=".json,.jsonld,application/json,application/ld+json" onChange={onFile} />
               </div>
             ) : (
-              <form className="row import__url" onSubmit={fetchUrl}>
+              <form className="form-row import__url" onSubmit={fetchUrl}>
                 <div className="field">
                   <label className="field__label" htmlFor={ids.url}>Document URL</label>
                   <input id={ids.url} type="url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://…" />

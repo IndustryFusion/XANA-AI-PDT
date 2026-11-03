@@ -212,7 +212,8 @@
 
 .value-editor { display: flex; flex-direction: column; gap: var(--space-1); min-width: min(18rem, 100%); }
 .value-editor__row { display: flex; align-items: center; gap: var(--space-1); }
-.value-editor__input { min-width: 0; flex: 1; max-width: 24rem; }
+.value-editor__input { min-width: 0; flex: 1; max-width: 24rem; height: var(--control-height-sm); }
+.value-editor__row .icon-btn { height: var(--control-height-sm); min-width: var(--control-height-sm); }
 .value-editor__error { margin: 0; }
 
 .value-editor__list {
@@ -291,7 +292,6 @@
 
 /* ── Import ─────────────────────────────────────────────────────────────── */
 
-.import__url { align-items: flex-end; }
 .import__url .field { flex: 1; }
 .import__problems { margin: 0; padding-left: var(--space-5); font-size: var(--text-sm); }
 

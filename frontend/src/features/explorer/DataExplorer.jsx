@@ -89,7 +89,7 @@ function TimeShiftControl({ at, onShift }) {
         id={ids.input} type="datetime-local" value={value} onChange={(e) => setValue(e.target.value)}
         aria-invalid={error ? true : undefined} aria-describedby={error ? ids.error : undefined}
       />
-      <Button type="submit" size="sm">Show</Button>
+      <Button type="submit">Show</Button>
       {error && <span id={ids.error} className="field__error" role="alert">{error}</span>}
     </form>
   )
@@ -175,8 +175,8 @@ export default function DataExplorer() {
           </label>
           <span aria-live="polite"><StatusBadge kind="live" value={at ? 'paused' : live.status} /></span>
           <TimeShiftControl key={at ?? 'present'} at={at} onShift={(moment) => go({ ...query, at: moment })} />
-          <Button size="sm" onClick={() => setDialog('import')} disabled={!!at}>Import…</Button>
-          <Button size="sm" variant="danger" onClick={() => setDialog('delete')} disabled={!!at}>Delete by type…</Button>
+          <Button onClick={() => setDialog('import')} disabled={!!at}>Import…</Button>
+          <Button variant="danger" onClick={() => setDialog('delete')} disabled={!!at}>Delete by type…</Button>
         </div>
       </div>
 
