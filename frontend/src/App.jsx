@@ -1,0 +1,62 @@
+import { useEffect } from 'react'
+import { configError, DevControls } from './data'
+import Header from './app/Header'
+import { RouterProvider, useRoute } from './app/router'
+import { SessionGate } from './app/session'
+import { ConfigError, NotFound, Placeholder } from './app/views'
+import Dashboard from './features/dashboard/Dashboard'
+import { ToastProvider } from './ui/components'
+import { ThemeProvider } from './ui/theme'
+import './ui/tokens.css'
+import './ui/base.css'
+import './ui/ui.css'
+import './app/app.css'
+
+/** Already signed in: the sign-in URL leads to the dashboard. */
+function SignInRedirect() {
+  const { navigate } = useRoute()
+  useEffect(() => { navigate('/', { replace: true }) }, [navigate])
+  return null
+}
+
+function AreaContent() {
+  const { area } = useRoute()
+  if (area === 'signin') return <SignInRedirect />
+  if (area === 'dashboard') return <Dashboard />
+  if (area) return <Placeholder />
+  return <NotFound />
+}
+
+function Shell() {
+  return (
+    <>
+      <a href="#main" className="skip-link">Skip to content</a>
+      <Header />
+      <main id="main" className="app-main" tabIndex={-1}>
+        <AreaContent />
+      </main>
+    </>
+  )
+}
+
+export default function App({ sessionCheckMs }) {
+  if (configError) {
+    return (
+      <ThemeProvider>
+        <ConfigError error={configError} />
+      </ThemeProvider>
+    )
+  }
+  return (
+    <ThemeProvider>
+      <ToastProvider>
+        <RouterProvider>
+          <SessionGate checkIntervalMs={sessionCheckMs}>
+            <Shell />
+          </SessionGate>
+        </RouterProvider>
+        {DevControls && <DevControls />}
+      </ToastProvider>
+    </ThemeProvider>
+  )
+}

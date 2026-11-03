@@ -13,8 +13,8 @@ It is not a chatbot. Every output is a typed, structured artifact: a hypothesis 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
 │  Frontend (React + Vite)                                                │
-│  ContextView │ AIPanel │ IncidentTimeline │ Diagnostics                 │
-│  ClarificationPanel │ MachineBuilderPanel │ OperatorApprovalPanel       │
+│  Dashboard │ Active incidents │ Incident history │ Data explorer        │
+│  Alerts │ Dataspace │ System          UI data interface → data source   │
 └───────────────────────────┬─────────────────────────────────────────────┘
                             │ REST + WebSocket
 ┌───────────────────────────▼─────────────────────────────────────────────┐
@@ -71,32 +71,51 @@ It is not a chatbot. Every output is a typed, structured artifact: a hypothesis 
 
 ### Frontend (`frontend/`)
 
-Built with React 18 + Vite. Three panels, no chat interface.
+Built with React 18 + Vite in JavaScript. Structured views, no chat interface. Every area and selected item has its own URL.
 
-| Component | Responsibility |
+| Area | Responsibility |
 |---|---|
-| `ContextView` | Form to submit a `machine_id` and `issue`; disabled while a run is active |
-| `AIPanel` | Live step feed, hypothesis confidence cards, decision card, and escalation panels |
-| `ClarificationPanel` | Shown when confidence < threshold; operator submits additional info to resume the run |
-| `MachineBuilderPanel` | Shown while waiting for machine builder reply via dataspace |
-| `OperatorApprovalPanel` | Shown when a MB data request exceeds the data-sharing policy; operator approves or declines |
-| `IncidentTimeline` | Scrollable list of past incidents; click to expand with full agent trace |
+| Sign-in and shell | Sign-in when authentication is enabled; header with main navigation, user and factory details, dataspace indicator with reconnect hint; cross-navigation from any entity reference (open in data explorer, start incident, show active incidents, show history) |
+| Dashboard | Tiles for active incidents, open alerts, data overview, dataspace and system health, each loading and failing independently |
+| Active incidents | Open runs; new-incident form (`machine_id` + issue); run view with live steps, hypotheses, decision, one panel per waiting state, and the machine-builder conversation |
+| Incident history | Past incidents with full agent trace; reopen |
+| Data explorer | NGSI-LD entities, relationships, attribute history, time-shift, edits, import, live updates |
+| Alerts | Alert list, filters, actions, detail |
+| Dataspace | Gateway connection, peers and capabilities, capability requests, sharing tier |
+| System | Dependency health, service settings, knowledge-base documents |
 
-**Data flow in the frontend:**
-1. User submits → `POST /api/agent/run` → receives `run_id`
-2. WebSocket opens on `/ws/run/{run_id}`
-3. Each completed agent node streams a structured update message
-4. Run enters one of several possible states:
-   - **`completed`** — incident logged; sentinel closes the connection
-   - **`awaiting_input`** — confidence below threshold; `ClarificationPanel` appears; operator submits text/files → `POST /api/agent/clarify/{run_id}` → run resumes
-   - **`awaiting_machine_builder`** — escalated via dataspace; `MachineBuilderPanel` appears; inbox poller checks for MB reply every 30 s
-   - **`awaiting_operator_approval`** — MB replied with a data request exceeding policy; `OperatorApprovalPanel` appears; operator approves/declines → `POST /api/agent/operator-approve/{run_id}`
+**Data layer.** Screens obtain data only through the UI data interface (`src/data`), one module per area: session, runs, incidents, entities, alerts, dataspace, knowledge base, system health. A data source implements the interface and is selected with `VITE_DATA_SOURCE`:
+- `mock` (default): runs in the browser with deterministic seeded data, a simulated run engine, and development controls for per-area latency and failure. No backend is needed.
+- A backend adapter implementing the same interface talks to the API layer below over REST and WebSocket. Attaching it changes no screen.
+
+The interface is documented in `frontend/docs/data-interface.md`. Lint rules forbid screens from importing a data source or doing network I/O directly.
+
+**Run states the UI represents:**
+
+| State | Meaning |
+|---|---|
+| `running` | Agent pipeline executing; steps stream in |
+| `awaiting_input` | Confidence below threshold; operator clarifies or escalates |
+| `awaiting_confirmation` | Proposed resolution; operator confirms, or rejects with a reason (new round) |
+| `awaiting_machine_builder` | Escalated via the dataspace; conversation open |
+| `awaiting_operator_approval` | Machine builder requested data beyond the sharing tier |
+| `awaiting_recommendation_review` | Machine builder sent a recommendation to accept or reject |
+| `mb_closed` | Machine builder closed the conversation |
+| `completed` · `failed` | Terminal outcomes |
+| `stopped` | Closed by the operator; reopenable when a conversation exists |
+| archived | Removed from the active list; available in incident history |
+
+The run stream delivers the run's current state first, then step events (one per agent step, including retrieval, policy-check, resolution and conversation steps) and status events. Reconnection and polling are handled inside the data source.
 
 **Key files:**
-- `src/hooks/useWebSocket.js` — manages WS lifecycle, separates node messages from final sentinel
-- `src/hooks/useIncidents.js` — fetches incident list and detail; accepts a `refreshKey` to reload after a completed run
-- `src/api/client.js` — thin fetch wrappers for all API endpoints
-- `src/App.css` — dark industrial theme using CSS variables, no framework
+- `src/data/index.js`: data facade; selects the data source
+- `src/data/interface.js`: operations per area and result shapes
+- `src/data/sources/mock/`: mock data source and development controls
+- `src/app/`: router, session gate, header, entity references
+- `src/ui/`: design tokens (CSS custom properties, dark and light themes, no CSS framework) and shared components
+- `src/features/`: one folder per area
+
+**Tests:** Vitest with Testing Library (components, data interface), Playwright with axe (end to end, accessibility), ESLint. The `Frontend` workflow runs them on every pull request that touches `frontend/`.
 
 ---
 
