@@ -190,13 +190,16 @@ export const ESCALATION_DATA = [
   { label: 'Hypotheses and confidence of the incident agent', category: 'incident' },
 ]
 
+/** Run states from which the operator can escalate to the machine builder. */
+export const ESCALATABLE = ['awaiting_input', 'awaiting_confirmation']
+
 export function preflight(run, env) {
   const builder = builderFor(run.machineId)
   const base = { recipient: builder ? { id: builder.id, name: builder.name } : null, data: ESCALATION_DATA, sharingTier: SHARING_TIER.label }
   const no = (reason) => ({ possible: false, reason, ...base })
   if (!builder) return { ...no('No machine builder is registered for this machine in the dataspace.'), data: [] }
   if (run.escalation) return no('This run has already been escalated.')
-  if (run.status !== 'awaiting_input') return no('Escalation is possible while the run waits for input.')
+  if (!ESCALATABLE.includes(run.status)) return no('Escalation is possible while the run waits for input or for the confirmation of a resolution.')
   if (!env.connected) return no('The dataspace is not connected. Connect in the Dataspace area and try again.')
   return { possible: true, reason: null, ...base }
 }
@@ -276,7 +279,7 @@ const ACTIONS = {
   },
 
   escalate(run, _args, x, env) {
-    requireStatus(run, ['awaiting_input'], 'escalation')
+    requireStatus(run, ESCALATABLE, 'escalation')
     const pre = preflight(run, env)
     if (!pre.possible) throw new DataError('runs', 'unavailable', pre.reason)
     const ref = `ESC-${env.state.counters.escalation++}`

@@ -101,7 +101,7 @@ describe('runs: invalid states are conflicts', () => {
   test.each([
     ['clarify on a run waiting for confirmation', () => areas.runs.clarify('run-1004', { text: 'x' })],
     ['confirming a run that waits for input', () => areas.runs.confirmResolution('run-1002', { confirmed: true })],
-    ['escalating a run that is not waiting for input', () => areas.runs.escalate('run-1004')],
+    ['escalating a run that is still running', () => areas.runs.escalate('run-1001')],
     ['approving without a data request', () => areas.runs.approveDataRequest('run-1003', { approved: true })],
     ['answering a recommendation that was not sent', () => areas.runs.replyToRecommendation('run-1003', { action: 'resolved' })],
     ['granting without a pending request', () => areas.runs.sendConversationAct('run-1003', { act: 'grant' })],

@@ -40,9 +40,9 @@ export function RunHeader({ run }) {
 function Diagnostics({ run }) {
   return (
     <div className="stack">
+      <StepFeed steps={run.steps} running={run.status === 'running'} />
       <HypothesisList steps={run.steps} />
       <DecisionCard steps={run.steps} />
-      <StepFeed steps={run.steps} running={run.status === 'running'} />
     </div>
   )
 }
