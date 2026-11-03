@@ -1,7 +1,8 @@
-import { useCallback, useId, useState } from 'react'
+import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { useData } from '../../data/useData'
 import { EntityRef } from '../../app/EntityRef'
 import { Link, paths, useRoute } from '../../app/router'
+import { useRevealOnChange } from '../../app/reveal'
 import { Button, Card, DataView, EmptyState, StatusBadge, useToast } from '../../ui/components'
 import { ContextMenu, isMenuKey, menuPointFor } from '../../ui/ContextMenu'
 import { copyText } from '../../ui/clipboard'
@@ -134,6 +135,14 @@ export default function Alerts() {
   const [pending, setPending] = useState(null)
   const [outcome, setOutcome] = useState(null)
   const [menu, setMenu] = useState(null)
+  const detailRef = useRef(null)
+  useRevealOnChange(detailRef, selectedAlert ?? '')
+
+  // Side by side, opening the detail narrows the table; keep the selected row in view.
+  useEffect(() => {
+    if (!selectedAlert || !window.matchMedia?.('(min-width: 900px)').matches) return
+    document.querySelector(`tr[data-alert="${CSS.escape(selectedAlert)}"]`)?.scrollIntoView?.({ block: 'nearest' })
+  }, [selectedAlert])
   const closeMenu = useCallback(() => setMenu(null), [])
   const notify = useToast()
   const result = useData('alerts', 'listAlerts', [toRequest(filters)], { refreshMs, refreshKey })
@@ -221,13 +230,15 @@ export default function Alerts() {
             <p className="muted">Showing {result.data.alerts.length} of {result.data.total} alerts; narrow the filter to see the others.</p>
           )}
         </Card>
-        {selectedAlert && (
-          <AlertDetail
-            key={selectedAlert} id={selectedAlert} refreshKey={refreshKey}
-            onAction={(action, ids) => setPending({ action, ids })}
-            onClose={() => navigate(alertsPath(filters))}
-          />
-        )}
+        <div className="alerts__detail" ref={detailRef} hidden={!selectedAlert}>
+          {selectedAlert && (
+            <AlertDetail
+              key={selectedAlert} id={selectedAlert} refreshKey={refreshKey}
+              onAction={(action, ids) => setPending({ action, ids })}
+              onClose={() => navigate(alertsPath(filters))}
+            />
+          )}
+        </div>
       </div>
 
       {menu && <ContextMenu at={menu.at} label={`Actions for alert ${menu.alert.id}`} items={menuItems(menu.alert)} onClose={closeMenu} />}
