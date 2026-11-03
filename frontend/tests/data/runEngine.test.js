@@ -60,6 +60,13 @@ test('an operator action continues a waiting run', async () => {
   expect(events.map((e) => e.node ?? e.status)).toEqual(['resolution', 'running', 'act', 'completed'])
 })
 
+test('a run waiting for the confirmation of a resolution can be escalated to the machine builder', async () => {
+  const { engine } = setup()
+  await vi.advanceTimersByTimeAsync(20_000)
+  const result = engine.perform('run-t1', 'escalate')
+  expect(result).toMatchObject({ status: 'awaiting_machine_builder', escalationRef: expect.stringMatching(/^ESC-/) })
+})
+
 test('actions that the waiting stage does not accept are conflicts', async () => {
   const { engine } = setup()
   await vi.advanceTimersByTimeAsync(20_000)

@@ -137,3 +137,11 @@ test('degraded data: observe names the unavailable source and the run continues'
   await panel(page, 'Confirm the proposed resolution').getByRole('button', { name: 'Confirm resolution' }).click()
   await expectStatus(page, 'completed')
 })
+
+test('a proposed resolution can be escalated to the machine builder instead of confirmed', async ({ page }) => {
+  await startScenario(page, 'happy_path')
+  await expectStatus(page, 'awaiting_confirmation')
+  await expect(panel(page, 'Confirm the proposed resolution').getByRole('button', { name: 'Escalate to machine builder…' })).toBeVisible()
+  await escalate(page)
+  await expect(page.getByText(/^Escalated as ESC-/)).toBeVisible()
+})

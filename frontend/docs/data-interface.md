@@ -42,7 +42,7 @@ The operation list is defined in `src/data/interface.js` (`OPERATIONS`); result 
 | `clarify(runId, { text, files })` | clarification text, attached files | `{ status }` | `conflict`, `invalid` |
 | `confirmResolution(runId, { confirmed, text, files })` | confirm, or reject with reason (required) and files | `{ status }` | `conflict`, `invalid` |
 | `escalationPreflight(runId)` | run ID | `{ possible, reason \| null, recipient: { id, name } \| null, data: [{ label, category }], sharingTier }` | `not_found` |
-| `escalate(runId)` | run ID | `{ status, escalationRef }` | `conflict`, `unavailable` |
+| `escalate(runId)` | run ID; possible while the run is `awaiting_input` or `awaiting_confirmation` | `{ status, escalationRef }` | `conflict`, `unavailable` |
 | `approveDataRequest(runId, { approved, note })` | decision on a data request beyond the sharing tier | `{ status }` | `conflict` |
 | `replyToRecommendation(runId, { action, message })` | `resolved` \| `still_failing` \| `escalate` | `{ status }` | `conflict`, `invalid` |
 | `sendConversationAct(runId, { act, outcome, text, inReplyTo })` | `inform`, `request`, `grant`, `deny`, `escalate` (ask for direct contact), `deescalate` (end direct contact), `close` (with `outcome`), `cancel` | `{ status, convState }` | `conflict`, `invalid` |
