@@ -285,9 +285,11 @@ textarea {
   padding: var(--space-2) var(--space-3);
 }
 
-/* Single-line controls share the regular button height, so they line up in a row. */
-input:not([type='checkbox'], [type='radio'], [type='file'], [type='range']),
-select { height: var(--control-height); }
+/*
+ * Single-line controls share the regular button height, so they line up in a
+ * row. Zero specificity, so a component class can set another height.
+ */
+:where(input:not([type='checkbox'], [type='radio'], [type='file'], [type='range']), select) { height: var(--control-height); }
 
 /*
  * A row of labelled fields and buttons: everything lines up on the bottom
