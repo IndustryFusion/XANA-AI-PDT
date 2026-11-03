@@ -87,13 +87,19 @@ export function RouterProvider({ children }) {
     return () => window.removeEventListener('popstate', onPop)
   }, [])
 
-  const navigate = useCallback((to, { replace = false } = {}) => {
+  /**
+   * Goes to `to`. Moving to another area starts at the top of the page;
+   * within an area (selecting an item, changing a filter) the page keeps its
+   * scroll position. `scroll: true | false` overrides this.
+   */
+  const navigate = useCallback((to, { replace = false, scroll } = {}) => {
     const url = new URL(to, window.location.origin)
     const next = { pathname: url.pathname, search: url.search }
+    const toTop = scroll ?? matchRoute(url.pathname)?.area !== matchRoute(window.location.pathname)?.area
     if (replace) window.history.replaceState(null, '', to)
     else window.history.pushState(null, '', to)
     setLocation(next)
-    window.scrollTo?.(0, 0)
+    if (toTop) window.scrollTo?.(0, 0)
   }, [])
 
   const value = useMemo(() => {
