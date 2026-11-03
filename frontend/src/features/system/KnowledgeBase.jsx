@@ -276,7 +276,7 @@ function TestQuery({ pipeline, pipelineLabel }) {
   return (
     <section className="stack test-query" aria-labelledby={`${inputId}-title`}>
       <h3 id={`${inputId}-title`}>Test retrieval</h3>
-      <form className="row test-query__form" onSubmit={run} noValidate>
+      <form className="form-row test-query__form" onSubmit={run} noValidate>
         <div className="field test-query__field">
           <label className="field__label" htmlFor={inputId}>Question</label>
           <input id={inputId} type="search" value={text} onChange={(e) => setText(e.target.value)} placeholder="e.g. burr on 3 mm steel" aria-invalid={state.status === 'invalid' ? 'true' : undefined} />
