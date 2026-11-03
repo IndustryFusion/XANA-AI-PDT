@@ -63,3 +63,22 @@ for (const viewport of [{ width: 1400, height: 800 }, { width: 800, height: 800 
     expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(0)
   })
 }
+
+test('dataspace: choosing a peer while scrolled down shows its capabilities and keeps the peer in view', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 700 })
+  await page.goto('/dataspace')
+  const peers = page.getByRole('list', { name: 'Peers' }).getByRole('link')
+  await peers.nth(0).click()
+  await expect(page.getByRole('region', { name: /^Capabilities of / })).toBeVisible()
+  const target = peers.nth(3)
+  await target.scrollIntoViewIfNeeded()
+  await page.mouse.move(700, 350)
+  await page.mouse.wheel(0, 250)
+  const name = (await target.locator('.peer-list__name').textContent()).trim()
+  await target.click()
+  const heading = page.getByRole('heading', { level: 3, name })
+  await expect(heading).toBeVisible()
+  await expect.poll(() => inView(heading)).toBe(true)
+  await expect.poll(() => inView(target)).toBe(true)
+  expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(0)
+})

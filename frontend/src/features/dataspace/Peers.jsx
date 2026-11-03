@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { dataspace } from '../../data'
 import { useData } from '../../data/useData'
 import { Link } from '../../app/router'
+import { useRevealOnChange } from '../../app/reveal'
 import { Button, Card, DataView, EmptyState, StatusBadge, useToast } from '../../ui/components'
 import { ConfirmDialog } from '../../ui/structured'
 import { capabilityDescription, capabilityLabel, dataspacePath, POLICY_ACTIONS } from './model'
@@ -12,6 +13,8 @@ import { capabilityDescription, capabilityLabel, dataspacePath, POLICY_ACTIONS }
  */
 export default function Peers({ selected, factoryName, policyKey, onPolicyChange }) {
   const peers = useData('dataspace', 'listPeers')
+  const detailRef = useRef(null)
+  useRevealOnChange(detailRef, selected ?? '')
   return (
     <Card title="Compatible peers" className="peers">
       <DataView
@@ -32,7 +35,7 @@ export default function Peers({ selected, factoryName, policyKey, onPolicyChange
                 </li>
               ))}
             </ul>
-            <div className="peers__detail">
+            <div className="peers__detail" ref={detailRef}>
               {selected
                 ? <PeerCapabilities key={selected} peerId={selected} factoryName={factoryName} policyKey={policyKey} onPolicyChange={onPolicyChange} />
                 : <p className="muted">Select a peer to see what each side may access.</p>}
