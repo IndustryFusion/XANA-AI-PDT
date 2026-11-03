@@ -37,6 +37,21 @@
 
 .alerts__layout { display: grid; gap: var(--space-4); grid-template-columns: minmax(0, 1fr); align-items: start; }
 .alerts__layout--detail { grid-template-columns: minmax(0, 1fr) minmax(320px, 420px); }
+.alerts__detail { min-width: 0; }
+/* At least a screen tall, so the page does not shrink while the alert loads. */
+.alerts__detail:not([hidden]) { min-height: calc(100vh - var(--header-height) - 2 * var(--space-3)); }
+.alert-table tbody tr { scroll-margin-top: calc(var(--header-height) + var(--space-6, 2rem)); }
+
+/* The selected alert stays in view next to a long list and scrolls on its own. */
+@media (min-width: 900px) {
+  .alerts__detail {
+    position: sticky;
+    top: calc(var(--header-height) + var(--space-3));
+    max-height: calc(100vh - var(--header-height) - 2 * var(--space-3));
+    overflow-y: auto;
+    border-radius: var(--radius-lg);
+  }
+}
 
 .alert-table tr[aria-current='true'] td { background: var(--surface-2); }
 .alert-table__row { cursor: pointer; }

@@ -8,6 +8,21 @@
 }
 
 .split__side, .split__main { min-width: 0; }
+/* At least a screen tall, so the page does not shrink while a newly selected item loads. */
+.split__main {
+  min-height: calc(100vh - var(--header-height) - 2 * var(--space-3));
+}
+
+/* The list stays in view next to a long detail and scrolls on its own. */
+@media (min-width: 900px) {
+  .split__side {
+    position: sticky;
+    top: calc(var(--header-height) + var(--space-3));
+    max-height: calc(100vh - var(--header-height) - 2 * var(--space-3));
+    overflow-y: auto;
+    border-radius: var(--radius-lg);
+  }
+}
 
 @media (max-width: 899.98px) {
   .split { grid-template-columns: minmax(0, 1fr); }
