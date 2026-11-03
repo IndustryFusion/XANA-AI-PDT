@@ -41,7 +41,7 @@ export default function Dashboard() {
               {REFRESH_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
           </label>
-          <Button size="sm" onClick={() => setRefreshKey((k) => k + 1)}>Refresh now</Button>
+          <Button onClick={() => setRefreshKey((k) => k + 1)}>Refresh now</Button>
         </div>
       </div>
       <div className="columns dashboard-grid">

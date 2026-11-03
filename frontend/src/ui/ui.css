@@ -16,8 +16,8 @@
   text-decoration: none;
 }
 
-.btn--md { padding: var(--space-2) var(--space-4); }
-.btn--sm { padding: var(--space-1) var(--space-2); }
+.btn--md { min-height: var(--control-height); padding: var(--space-2) var(--space-4); }
+.btn--sm { min-height: var(--control-height-sm); padding: var(--space-1) var(--space-2); }
 
 .btn:hover:not(:disabled) { background: var(--surface-hover); }
 .btn:disabled { opacity: 0.6; cursor: not-allowed; }
@@ -283,6 +283,22 @@ textarea {
   border: 1px solid var(--border-strong);
   border-radius: var(--radius);
   padding: var(--space-2) var(--space-3);
+}
+
+/* Single-line controls share the regular button height, so they line up in a row. */
+input:not([type='checkbox'], [type='radio'], [type='file'], [type='range']),
+select { height: var(--control-height); }
+
+/*
+ * A row of labelled fields and buttons: everything lines up on the bottom
+ * edge, so buttons sit level with the inputs rather than with their labels.
+ * Use regular-size buttons in such rows.
+ */
+.form-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-2) var(--space-3);
 }
 
 .field {
