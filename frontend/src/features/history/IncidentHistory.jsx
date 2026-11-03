@@ -1,4 +1,4 @@
-import { useId, useState } from 'react'
+import { useId, useRef, useState } from 'react'
 import { incidents as incidentsApi } from '../../data'
 import { useData } from '../../data/useData'
 import { EntityRef, entityLabel } from '../../app/EntityRef'
@@ -6,6 +6,7 @@ import { Link, paths, useRoute } from '../../app/router'
 import { Button, Card, DataView, EmptyState, ErrorState, LoadingState, StatusBadge } from '../../ui/components'
 import { ConfidenceMeter, ConfirmDialog } from '../../ui/structured'
 import { formatDate, formatTime } from '../../ui/format'
+import { useRevealOnChange } from '../../app/reveal'
 import { INCIDENT_OUTCOME, toneOf } from '../../ui/status'
 import { MessageThread, threadEntries } from '../incidents/Conversation'
 import { StepItem } from '../incidents/StepFeed'
@@ -211,12 +212,14 @@ export function IncidentDetail({ id }) {
 /** Incident history area: past incidents next to the selected incident. */
 export default function IncidentHistory() {
   const { params, query } = useRoute()
+  const mainRef = useRef(null)
+  useRevealOnChange(mainRef, params.incidentId ?? '')
   return (
     <section className="page" aria-labelledby="page-title">
       <div className="page__header"><h1 id="page-title">Incident history</h1></div>
       <div className="split">
         <div className="split__side"><IncidentList selected={params.incidentId} machine={query.machine} /></div>
-        <div className="split__main">
+        <div className="split__main" ref={mainRef}>
           {params.incidentId
             ? <IncidentDetail key={params.incidentId} id={params.incidentId} />
             : (

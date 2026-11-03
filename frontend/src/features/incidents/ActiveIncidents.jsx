@@ -5,6 +5,7 @@ import { EntityRef, entityLabel } from '../../app/EntityRef'
 import { Link, paths, useRoute } from '../../app/router'
 import { Button, Card, DataView, EmptyState, StatusBadge } from '../../ui/components'
 import { formatAge } from '../../ui/format'
+import { useRevealOnChange } from '../../app/reveal'
 import { toneOf } from '../../ui/status'
 import RunView from './RunView'
 import './incidents.css'
@@ -126,6 +127,8 @@ export default function ActiveIncidents() {
   const refreshList = useCallback(() => setRefreshKey((k) => k + 1), [])
   const creating = query.new === '1'
   const machine = !creating && query.machine ? query.machine : null
+  const mainRef = useRef(null)
+  useRevealOnChange(mainRef, creating ? 'new' : params.runId ?? '')
 
   function started(runId) {
     refreshList()
@@ -153,7 +156,7 @@ export default function ActiveIncidents() {
       </div>
       <div className="split">
         <div className="split__side"><RunList selected={params.runId} machine={machine} refreshKey={refreshKey} /></div>
-        <div className="split__main">{main}</div>
+        <div className="split__main" ref={mainRef}>{main}</div>
       </div>
     </section>
   )
