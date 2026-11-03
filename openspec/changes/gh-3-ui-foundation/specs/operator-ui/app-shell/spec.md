@@ -46,10 +46,6 @@ The header SHALL show the product name and a navigation entry for each area: Das
 - **WHEN** the operator selects a navigation entry
 - **THEN** that area is shown and its entry is marked as current, both visually and for assistive technology
 
-#### Scenario: Area not yet delivered
-- **WHEN** the operator opens an area whose screen is not part of this change
-- **THEN** a placeholder names the area and states that it is not available yet
-
 ### Requirement: Addressable screens
 Every area and every selected item (run, incident, entity, alert) SHALL have its own URL, so the view can be bookmarked, shared and reloaded.
 
