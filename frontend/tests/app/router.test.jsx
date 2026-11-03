@@ -55,3 +55,23 @@ test('query parameters are exposed', () => {
   renderWithRouter(<Where />, { path: paths.newIncident('urn:ngsi-ld:Machine:x') })
   expect(screen.getByRole('status')).toHaveTextContent('"machine":"urn:ngsi-ld:Machine:x"')
 })
+
+describe('scroll position', () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  test('within an area (selecting an item, changing a filter) the page keeps its position', async () => {
+    const scrollTo = vi.spyOn(window, 'scrollTo')
+    renderWithRouter(<><Link to={paths.alert('alert-002')}>Select</Link><Link to="/alerts?severity=major">Filter</Link></>, { path: '/alerts/alert-001' })
+    await userEvent.click(screen.getByRole('link', { name: 'Select' }))
+    await userEvent.click(screen.getByRole('link', { name: 'Filter' }))
+    expect(window.location.search).toBe('?severity=major')
+    expect(scrollTo).not.toHaveBeenCalled()
+  })
+
+  test('moving to another area starts at the top', async () => {
+    const scrollTo = vi.spyOn(window, 'scrollTo')
+    renderWithRouter(<Link to={paths.dataspace()}>Dataspace</Link>, { path: '/alerts' })
+    await userEvent.click(screen.getByRole('link', { name: 'Dataspace' }))
+    expect(scrollTo).toHaveBeenCalledWith(0, 0)
+  })
+})
