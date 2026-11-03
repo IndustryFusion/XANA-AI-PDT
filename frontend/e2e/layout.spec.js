@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { AREAS, presetControls } from './helpers'
+import { AREAS, misalignedControls, presetControls } from './helpers'
 
 test.use({ viewport: { width: 800, height: 900 } })
 
@@ -55,4 +55,11 @@ test('entity view, history and alert detail fit and stack below 900 px', async (
   expect(await overflow(), 'alerts overflow horizontally').toBeLessThanOrEqual(0)
   const [table, detail] = await Promise.all(['.alert-list', '.alert-detail'].map((sel) => page.locator(sel).evaluate((el) => el.getBoundingClientRect())))
   expect(detail.top).toBeGreaterThan(table.top)
+})
+
+test('buttons next to inputs and selects are level with them', async ({ page }) => {
+  await presetControls(page, { authEnabled: false })
+  await page.goto('/')
+  await expect(page.getByRole('button', { name: 'Refresh now' })).toBeVisible()
+  expect(await misalignedControls(page)).toEqual([])
 })

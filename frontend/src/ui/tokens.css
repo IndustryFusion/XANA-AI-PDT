@@ -122,6 +122,8 @@
 
   --radius-sm: 4px;
   --radius: 8px;
+  --control-height: 2.5rem;
+  --control-height-sm: 2rem;
   --radius-lg: 12px;
 
   --header-height: 56px;
