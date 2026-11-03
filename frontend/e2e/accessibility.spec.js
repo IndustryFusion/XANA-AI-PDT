@@ -134,6 +134,11 @@ const EXPLORER_ALERT_STATES = [
     await page.getByRole('article', { name: 'Alert alert-001' }).getByRole('button', { name: 'Close…' }).click()
     await expect(page.getByRole('dialog')).toBeVisible()
   }],
+  ['alert row context menu', async (page) => {
+    await page.goto('/alerts')
+    await page.locator('tr[data-alert="alert-001"] td').nth(5).click({ button: 'right' })
+    await expect(page.getByRole('menu', { name: 'Actions for alert alert-001' })).toBeVisible()
+  }],
 ]
 
 for (const theme of ['dark', 'light']) {

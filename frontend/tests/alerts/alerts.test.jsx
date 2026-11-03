@@ -1,4 +1,4 @@
-import { act, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { paths } from '../../src/app/router'
 import { raiseAlert, store } from '../../src/data/sources/mock'
@@ -226,9 +226,82 @@ describe('alert detail and context', () => {
     const [alert] = withStatus('open')
     open(paths.alert(alert.id))
     const detail = await screen.findByRole('article', { name: `Alert ${alert.id}` })
-    await user.click(within(detail).getByRole('link', { name: 'Start new incident from this alert' }))
+    await user.click(within(detail).getByRole('link', { name: 'Start new incident' }))
     expect(await screen.findByRole('heading', { level: 1, name: 'Active incidents' })).toBeVisible()
     expect(await screen.findByLabelText('Machine ID')).toHaveValue(alert.resource)
     expect(screen.getByLabelText('Issue')).toHaveValue(alert.text)
+  })
+})
+
+describe('context menu and quick start', () => {
+  const menuItems = () => within(screen.getByRole('menu')).getAllByRole('menuitem').map((m) => m.textContent)
+
+  test('a right click on a row offers start incident, the context jumps and the actions for its status', async () => {
+    const user = userEvent.setup()
+    const [alert] = withStatus('open')
+    open()
+    await waitFor(() => expect(row(alert.id)).toBeTruthy())
+    fireEvent.contextMenu(within(row(alert.id)).getByText(alert.text))
+    const menu = screen.getByRole('menu', { name: `Actions for alert ${alert.id}` })
+    expect(menuItems()).toEqual([
+      'Start new incident', 'Open details', 'Open resource in the data explorer', 'Show active incidents', 'Show incident history',
+      'Acknowledge…', 'Shelve…', 'Close…', 'Copy alert ID',
+    ])
+    expect(within(menu).getByRole('menuitem', { name: 'Start new incident' })).toHaveFocus()
+    await user.click(within(menu).getByRole('menuitem', { name: 'Start new incident' }))
+    expect(await screen.findByLabelText('Machine ID')).toHaveValue(alert.resource)
+    expect(screen.getByLabelText('Issue')).toHaveValue(alert.text)
+  })
+
+  test('the keyboard opens the menu with Shift+F10, arrows move, Escape closes and returns focus', async () => {
+    const user = userEvent.setup()
+    const [alert] = withStatus('open')
+    open()
+    await waitFor(() => expect(row(alert.id)).toBeTruthy())
+    const checkbox = within(row(alert.id)).getByRole('checkbox')
+    checkbox.focus()
+    await user.keyboard('{Shift>}{F10}{/Shift}')
+    const menu = screen.getByRole('menu')
+    expect(within(menu).getByRole('menuitem', { name: 'Start new incident' })).toHaveFocus()
+    await user.keyboard('{ArrowDown}')
+    expect(within(menu).getByRole('menuitem', { name: 'Open details' })).toHaveFocus()
+    await user.keyboard('{End}')
+    expect(within(menu).getByRole('menuitem', { name: 'Copy alert ID' })).toHaveFocus()
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+    expect(checkbox).toHaveFocus()
+  })
+
+  test("the row's actions button opens the same menu, and an action opens its dialog", async () => {
+    const user = userEvent.setup()
+    const [alert] = withStatus('ack')
+    open()
+    await waitFor(() => expect(row(alert.id)).toBeTruthy())
+    await user.click(within(row(alert.id)).getByRole('button', { name: new RegExp(`^Actions for .*\\(${alert.id}\\)$`) }))
+    expect(menuItems()).toContain('Unacknowledge…')
+    await user.click(screen.getByRole('menuitem', { name: 'Unacknowledge…' }))
+    expect(screen.getByRole('dialog', { name: `Unacknowledge alert ${alert.id}` })).toBeVisible()
+  })
+
+  test('clicking a row opens its detail', async () => {
+    const user = userEvent.setup()
+    const [alert] = withStatus('open')
+    open()
+    await waitFor(() => expect(row(alert.id)).toBeTruthy())
+    await user.click(within(row(alert.id)).getByText(alert.text))
+    expect(await screen.findByRole('article', { name: `Alert ${alert.id}` })).toBeVisible()
+    expect(window.location.pathname).toBe(paths.alert(alert.id))
+  })
+
+  test('selecting a single alert offers to start an incident right away', async () => {
+    const user = userEvent.setup()
+    const [first, second] = withStatus('open')
+    open()
+    await waitFor(() => expect(row(first.id)).toBeTruthy())
+    await user.click(within(row(first.id)).getByRole('checkbox'))
+    const bar = screen.getByRole('region', { name: 'Selected alerts' })
+    expect(within(bar).getByRole('link', { name: 'Start new incident' })).toHaveAttribute('href', paths.newIncident(first.resource, first.text))
+    await user.click(within(row(second.id)).getByRole('checkbox'))
+    expect(within(bar).queryByRole('link', { name: 'Start new incident' })).not.toBeInTheDocument()
   })
 })

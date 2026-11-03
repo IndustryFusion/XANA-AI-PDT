@@ -1,13 +1,15 @@
 import { useCallback, useId, useState } from 'react'
 import { useData } from '../../data/useData'
 import { EntityRef } from '../../app/EntityRef'
-import { Link, useRoute } from '../../app/router'
-import { Button, Card, DataView, EmptyState, StatusBadge } from '../../ui/components'
+import { Link, paths, useRoute } from '../../app/router'
+import { Button, Card, DataView, EmptyState, StatusBadge, useToast } from '../../ui/components'
+import { ContextMenu, isMenuKey, menuPointFor } from '../../ui/ContextMenu'
+import { copyText } from '../../ui/clipboard'
 import { formatAge } from '../../ui/format'
 import { SEVERITY_ORDER } from '../../ui/status'
 import AlertActionDialog from './AlertActionDialog'
 import AlertDetail from './AlertDetail'
-import { ACTIONS, actionInfo, alertPath, alertsPath, readFilters, SORTS, STATUS_FILTERS, toRequest } from './model'
+import { ACTIONS, actionInfo, actionsFor, alertPath, alertsPath, readFilters, SORTS, STATUS_FILTERS, toRequest } from './model'
 import './alerts.css'
 
 export const REFRESH_KEY = 'xana.alerts.refreshMs'
@@ -131,6 +133,9 @@ export default function Alerts() {
   const [failures, setFailures] = useState({})
   const [pending, setPending] = useState(null)
   const [outcome, setOutcome] = useState(null)
+  const [menu, setMenu] = useState(null)
+  const closeMenu = useCallback(() => setMenu(null), [])
+  const notify = useToast()
   const result = useData('alerts', 'listAlerts', [toRequest(filters)], { refreshMs, refreshKey })
   const refresh = useCallback(() => setRefreshKey((k) => k + 1), [])
 
@@ -150,6 +155,28 @@ export default function Alerts() {
 
   const toggle = (id) => setSelection((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]))
   const counts = result.data?.bySeverity ?? {}
+  const single = selection.length === 1 ? result.data?.alerts.find((a) => a.id === selection[0]) : null
+
+  /** Everything the operator can do from one alert, most direct first. */
+  function menuItems(alert) {
+    return [
+      { label: 'Start new incident', primary: true, onSelect: () => navigate(paths.newIncident(alert.resource, alert.text)) },
+      { label: 'Open details', onSelect: () => navigate(alertPath(alert.id, filters)) },
+      { label: 'Open resource in the data explorer', onSelect: () => navigate(paths.entity(alert.resource)) },
+      { label: 'Show active incidents', onSelect: () => navigate(paths.activeIncidentsFor(alert.resource)) },
+      { label: 'Show incident history', onSelect: () => navigate(paths.historyFor(alert.resource)) },
+      { separator: true },
+      ...actionsFor(alert.status).map((a) => ({ label: `${a.label}…`, onSelect: () => setPending({ action: a.action, ids: [alert.id] }) })),
+      { separator: true },
+      {
+        label: 'Copy alert ID',
+        onSelect: async () => {
+          const ok = await copyText(alert.id)
+          notify(ok ? `Copied ${alert.id}` : 'Could not copy to the clipboard.', ok ? 'success' : 'danger')
+        },
+      },
+    ]
+  }
 
   return (
     <section className="page alerts" aria-labelledby="page-title">
@@ -166,6 +193,7 @@ export default function Alerts() {
       {selection.length > 0 && (
         <div className="bulk-bar" role="region" aria-label="Selected alerts">
           <strong>{selection.length} selected</strong>
+          {single && <Link to={paths.newIncident(single.resource, single.text)} className="btn btn--primary btn--sm">Start new incident</Link>}
           {ACTIONS.map((a) => <Button key={a.action} size="sm" onClick={() => setPending({ action: a.action, ids: selection })}>{a.label}…</Button>)}
           <Button size="sm" variant="ghost" onClick={() => { setSelection([]); setFailures({}) }}>Clear selection</Button>
         </div>
@@ -184,6 +212,8 @@ export default function Alerts() {
                 alerts={data.alerts} filters={filters} selected={selectedAlert}
                 selection={selection} failures={failures} onToggle={toggle}
                 onToggleAll={(all) => setSelection(all ? data.alerts.map((a) => a.id) : [])}
+                onOpen={(alert) => navigate(alertPath(alert.id, filters))}
+                onMenu={(alert, at) => setMenu({ alert, at })}
               />
             )}
           </DataView>
@@ -200,12 +230,19 @@ export default function Alerts() {
         )}
       </div>
 
+      {menu && <ContextMenu at={menu.at} label={`Actions for alert ${menu.alert.id}`} items={menuItems(menu.alert)} onClose={closeMenu} />}
       <AlertActionDialog open={!!pending} action={pending?.action} ids={pending?.ids ?? []} onClose={() => setPending(null)} onDone={done} />
     </section>
   )
 }
 
-function AlertTable({ alerts, filters, selected, selection, failures, onToggle, onToggleAll }) {
+const INTERACTIVE = 'a, button, input, select, textarea, label'
+
+/**
+ * The alert list. Selecting a row opens its detail; a right click, the
+ * menu key, Shift+F10 or the row's actions button open its context menu.
+ */
+function AlertTable({ alerts, filters, selected, selection, failures, onToggle, onToggleAll, onOpen, onMenu }) {
   const allSelected = alerts.length > 0 && alerts.every((a) => selection.includes(a.id))
   return (
     <div className="table-wrap">
@@ -221,11 +258,18 @@ function AlertTable({ alerts, filters, selected, selection, failures, onToggle, 
             <th scope="col">Text</th>
             <th scope="col">Service</th>
             <th scope="col">Age</th>
+            <th scope="col"><span className="visually-hidden">Actions</span></th>
           </tr>
         </thead>
         <tbody>
           {alerts.map((a) => (
-            <tr key={a.id} aria-current={selected === a.id ? 'true' : undefined} data-alert={a.id}>
+            <tr
+              key={a.id} aria-current={selected === a.id ? 'true' : undefined} data-alert={a.id}
+              className="alert-table__row"
+              onClick={(e) => { if (!e.target.closest(INTERACTIVE)) onOpen(a) }}
+              onContextMenu={(e) => { e.preventDefault(); onMenu(a, { x: e.clientX, y: e.clientY }) }}
+              onKeyDown={(e) => { if (isMenuKey(e)) { e.preventDefault(); onMenu(a, menuPointFor(e.target)) } }}
+            >
               <td><input type="checkbox" aria-label={`Select ${a.id}`} checked={selection.includes(a.id)} onChange={() => onToggle(a.id)} /></td>
               <td><StatusBadge kind="severity" value={a.severity} /></td>
               <td><StatusBadge kind="alert" value={a.status} /></td>
@@ -237,6 +281,15 @@ function AlertTable({ alerts, filters, selected, selection, failures, onToggle, 
               </td>
               <td>{a.service.join(', ')}</td>
               <td><time dateTime={a.createTime}>{formatAge(a.createTime)}</time></td>
+              <td>
+                <button
+                  type="button" className="alert-table__menu" aria-haspopup="menu"
+                  aria-label={`Actions for ${a.event} (${a.id})`}
+                  onClick={(e) => onMenu(a, menuPointFor(e.currentTarget))}
+                >
+                  ⋯
+                </button>
+              </td>
             </tr>
           ))}
         </tbody>

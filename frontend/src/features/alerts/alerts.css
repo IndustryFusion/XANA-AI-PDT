@@ -39,6 +39,25 @@
 .alerts__layout--detail { grid-template-columns: minmax(0, 1fr) minmax(320px, 420px); }
 
 .alert-table tr[aria-current='true'] td { background: var(--surface-2); }
+.alert-table__row { cursor: pointer; }
+.alert-table th:last-child { position: relative; }
+.alert-table__row:hover td { background: var(--surface-hover); }
+
+.alert-table__menu {
+  min-width: 2rem;
+  padding: 0 var(--space-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--text-md);
+  line-height: 1.6;
+  cursor: pointer;
+}
+
+.alert-table__menu:hover,
+.alert-table__menu:focus-visible { border-color: var(--border-strong); background: var(--surface-2); }
 .alert-table td:first-child, .alert-table th:first-child { width: 2rem; }
 .alert-table__failure { display: block; }
 
