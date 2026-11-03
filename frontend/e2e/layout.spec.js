@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { AREAS, presetControls } from './helpers'
+import { AREAS, misalignedControls, presetControls } from './helpers'
 
 test.use({ viewport: { width: 800, height: 900 } })
 
@@ -77,3 +77,36 @@ test('dataspace and system sections stack below 900 px', async ({ page }) => {
   expect(settings.top).toBeGreaterThan(health.top)
   expect(Math.round(settings.left)).toBe(Math.round(health.left))
 })
+
+test('buttons next to inputs and selects are level with them', async ({ page }) => {
+  await presetControls(page, { authEnabled: false })
+  await page.goto('/')
+  await expect(page.getByRole('button', { name: 'Refresh now' })).toBeVisible()
+  expect(await misalignedControls(page)).toEqual([])
+})
+
+for (const [name, path, open] of [
+  ['explorer toolbar and query conditions', '/explorer?type=Machine', async (page) => page.getByRole('button', { name: 'Add condition' }).click()],
+  ['explorer value editor', '/explorer/urn%3Angsi-ld%3AMachine%3Apress-brake-01?type=Machine', async (page) => page.getByRole('button', { name: /^Edit status/ }).first().click()],
+  ['import from a URL', '/explorer', async (page) => {
+    await page.getByRole('button', { name: 'Import…' }).click()
+    await page.getByRole('dialog').getByLabel('URL', { exact: true }).check()
+    await expect(page.getByRole('button', { name: 'Fetch' })).toBeVisible()
+  }],
+  ['alert filters', '/alerts', async (page) => expect(page.locator('tbody tr').first()).toBeVisible()],
+  ['knowledge-base test query and system forms', '/system', async (page) => expect(page.getByRole('button', { name: 'Run test query' })).toBeVisible()],
+  ['dataspace', '/dataspace?peer=peer-formwerk', async (page) => expect(page.getByRole('table', { name: 'What Formwerk Press Technology may access here' })).toBeVisible()],
+  ['dataspace connect form', '/dataspace', async (page) => {
+    await page.getByRole('button', { name: 'Disconnect…' }).click()
+    await page.getByRole('dialog').getByRole('button', { name: 'Disconnect' }).click()
+    await expect(page.getByRole('form', { name: 'Connect to the dataspace' })).toBeVisible()
+  }],
+]) {
+  test(`${name}: buttons are level with the inputs next to them`, async ({ page }) => {
+    await presetControls(page, { authEnabled: false, newAlerts: false })
+    await page.goto(path)
+    await open(page)
+    await expect(page.getByText(/^Loading/)).toHaveCount(0)
+    expect(await misalignedControls(page)).toEqual([])
+  })
+}

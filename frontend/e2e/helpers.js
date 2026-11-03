@@ -80,3 +80,34 @@ export async function sendAct(page, act, { text, outcome } = {}) {
 
 export const panel = (page, name) => page.getByRole('region', { name, exact: true })
 export const thread = (page) => page.getByRole('region', { name: 'Message thread' })
+
+/**
+ * Buttons that sit in the same row as a text input or select but are not
+ * level with it (top or bottom edge off by more than 1 px). Returns a short
+ * description of each, so a failing test names the culprits.
+ */
+export function misalignedControls(page) {
+  return page.evaluate(() => {
+    const CONTROL = 'input:not([type=checkbox]):not([type=radio]):not([type=file]):not([type=range]), select'
+    const shown = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0 }
+    const found = []
+    for (const row of document.querySelectorAll('body *')) {
+      const style = getComputedStyle(row)
+      if (!(style.display.includes('flex') && !style.flexDirection.startsWith('column')) && !style.display.includes('grid')) continue
+      const kids = [...row.children].filter(shown)
+      const controls = kids.flatMap((k) => (k.matches(CONTROL) ? [k] : (k.querySelectorAll(CONTROL).length === 1 && !k.querySelector('button') ? [k.querySelector(CONTROL)] : [])))
+      const buttons = kids.filter((k) => k.matches('button, .btn'))
+      for (const b of buttons) {
+        const br = b.getBoundingClientRect()
+        for (const c of controls.filter(shown)) {
+          const cr = c.getBoundingClientRect()
+          if (!(br.top < cr.bottom && cr.top < br.bottom)) continue
+          if (Math.abs(br.top - cr.top) > 1 || Math.abs(br.bottom - cr.bottom) > 1) {
+            found.push(`"${(b.textContent || b.getAttribute('aria-label') || '').trim()}" vs "${(c.labels?.[0]?.textContent || c.getAttribute('aria-label') || c.name || '').trim()}"`)
+          }
+        }
+      }
+    }
+    return [...new Set(found)]
+  })
+}
