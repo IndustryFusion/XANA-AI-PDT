@@ -1,4 +1,4 @@
-import { buildSeed } from './seed'
+import { buildSeed, SEED_VERSION } from './seed'
 
 /**
  * In-memory store of the mock source, mirrored to sessionStorage: a reload
@@ -9,6 +9,7 @@ export const STORE_KEY = 'xana.mock.store.v1'
 export function createStore({ storage = globalThis.sessionStorage, now } = {}) {
   let state = load(storage) ?? buildSeed({ now })
   save(storage, state)
+  const resetListeners = new Set()
 
   return {
     get: () => state,
@@ -20,6 +21,11 @@ export function createStore({ storage = globalThis.sessionStorage, now } = {}) {
     reset() {
       state = buildSeed({ now })
       save(storage, state)
+      resetListeners.forEach((l) => l())
+    },
+    onReset(listener) {
+      resetListeners.add(listener)
+      return () => resetListeners.delete(listener)
     },
   }
 }
@@ -28,7 +34,7 @@ function load(storage) {
   try {
     const raw = storage?.getItem(STORE_KEY)
     const parsed = raw ? JSON.parse(raw) : null
-    return parsed?.version === 1 ? parsed : null
+    return parsed?.version === SEED_VERSION ? parsed : null
   } catch {
     return null
   }

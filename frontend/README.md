@@ -48,7 +48,29 @@ In development builds a **Mock data controls** button (bottom left) opens a pane
 - add latency or force a failure per interface area, to see loading and error states;
 - switch sign-in on or off, or expire the current session;
 - set the dataspace connection state;
+- choose the **scenario** of the next started run and the **playback speed** of simulated runs;
+- interrupt and restore the live connection of an open run, to see the run view reconnect;
 - reset the mock data to its seed.
+
+### Simulated runs
+
+A run engine in the mock plays the agent workflow with realistic delays (divided by the playback speed) and a simulated machine builder that answers escalations and acts. Started runs follow the scenario chosen in the controls (default: happy path):
+
+| Scenario | Operator actions | Run states |
+|---|---|---|
+| Happy path | Confirm | running → awaiting_confirmation → running → completed |
+| Low confidence | Clarify, confirm | running → awaiting_input → running → awaiting_confirmation → running → completed |
+| Rejected resolution | Reject with reason, confirm | running → awaiting_confirmation → running → awaiting_confirmation → running → completed |
+| Escalation within tier | Escalate, send a request | running → awaiting_input → awaiting_machine_builder |
+| Request beyond tier | Escalate, approve or decline | … → awaiting_machine_builder → awaiting_operator_approval → awaiting_machine_builder |
+| Machine-builder recommendation | Escalate, answer "resolved" | … → awaiting_machine_builder → awaiting_recommendation_review → completed |
+| Machine builder closes | Escalate, check status | … → awaiting_machine_builder → mb_closed |
+| Stop and reopen | Escalate, stop, reopen | … → awaiting_machine_builder → stopped → awaiting_machine_builder |
+| Direct contact | Escalate, ask for direct contact, close as escalated | … → awaiting_machine_builder → stopped (not reopenable) |
+| Failure | — | running → failed |
+| Degraded data | Confirm | running (time-series database unavailable) → awaiting_confirmation → running → completed |
+
+The seeded open runs and the twelve past incidents are produced by the same engine. The scenarios are defined as data in `src/data/sources/mock/scenarios/`.
 
 Settings are stored in `localStorage` (`xana.mock.controls`); operator changes to mock data live in `sessionStorage` for the current tab. Production builds do not contain the controls.
 
@@ -59,7 +81,7 @@ src/
   app/        shell: router, session gate, sign-in, header, entity references, placeholders
   ui/         design tokens, themes and shared components
   data/       UI data interface, facade, mock data source
-  features/   one folder per area (dashboard so far)
+  features/   one folder per area (dashboard, incidents, history so far)
 tests/        Vitest tests, mirroring src/
 e2e/          Playwright tests
 docs/         data-interface.md

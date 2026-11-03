@@ -1,0 +1,48 @@
+import { test, expect } from '@playwright/test'
+import { presetControls } from './helpers'
+
+/** Selecting an item while scrolled down shows its detail without jumping to the top. */
+test.beforeEach(async ({ page }) => {
+  await presetControls(page, { authEnabled: false, newAlerts: false })
+})
+
+const inView = (locator) => locator.evaluate((el) => {
+  const r = el.getBoundingClientRect()
+  return r.top >= 0 && r.bottom <= window.innerHeight
+})
+
+for (const viewport of [{ width: 1400, height: 800 }, { width: 800, height: 800 }]) {
+  test(`incident history at ${viewport.width} px: selecting while scrolled down shows the incident and the page does not return to the top`, async ({ page }) => {
+    await page.setViewportSize(viewport)
+    await page.goto('/history')
+    const items = page.locator('.run-list__link')
+    await items.nth(1).click()
+    await expect(page.getByRole('heading', { level: 2, name: /^Incident #/ })).toBeVisible()
+    await page.mouse.wheel(0, 900)
+    const target = items.nth(6)
+    await target.scrollIntoViewIfNeeded()
+    const number = (await target.textContent()).match(/#(\d+)/)[1]
+    await target.click()
+    const heading = page.getByRole('heading', { level: 2, name: `Incident #${number}` })
+    await expect(heading).toBeVisible()
+    await expect.poll(() => inView(heading)).toBe(true)
+    // Side by side, the list stays where it was; stacked, the incident below the list is shown.
+    if (viewport.width >= 900) expect(await inView(target)).toBe(true)
+  })
+}
+
+test('active incidents: the open runs list stays in view next to a long run', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 700 })
+  await page.goto('/incidents')
+  const items = page.locator('.run-list__link')
+  await items.nth(2).click()
+  await expect(page.getByRole('heading', { level: 2, name: 'Incident #44' })).toBeVisible()
+  await page.mouse.move(900, 400)
+  await page.mouse.wheel(0, 900)
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(300)
+  await expect.poll(() => inView(items.nth(3))).toBe(true)
+  await items.nth(3).click()
+  const heading = page.getByRole('heading', { level: 2, name: 'Incident #43' })
+  await expect(heading).toBeVisible()
+  await expect.poll(() => inView(heading)).toBe(true)
+})
