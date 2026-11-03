@@ -17,7 +17,7 @@ test('every area is reachable from the navigation and marked as current', async 
 })
 
 test('areas of later changes show a placeholder', async ({ page }) => {
-  for (const [path, label] of AREAS.filter(([p]) => !['/', '/incidents', '/history'].includes(p))) {
+  for (const [path, label] of AREAS.filter(([p]) => ['/dataspace', '/system'].includes(p))) {
     await page.goto(path)
     await expect(page.getByText(`${label} is not available yet.`)).toBeVisible()
   }
@@ -25,10 +25,13 @@ test('areas of later changes show a placeholder', async ({ page }) => {
 
 test('opening an item URL directly and reloading keeps the view', async ({ page }) => {
   const id = 'urn:ngsi-ld:Machine:press-brake-02'
-  await page.goto(`/explorer/${encodeURIComponent(id)}`)
-  await expect(page.getByText(id)).toBeVisible()
+  await page.goto(`/explorer/${encodeURIComponent(id)}?type=Machine`)
+  const toggle = page.getByRole('region', { name: 'Entities' }).getByRole('button', { name: 'Press brake 02', exact: true })
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+  await expect(page.locator(`[data-entity="${id}"]`).getByRole('link', { name: id, exact: true })).toBeVisible()
   await page.reload()
-  await expect(page.getByText(id)).toBeVisible()
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+  await expect(page.locator(`[data-entity="${id}"] [data-attribute="status"]`)).toBeVisible()
   await expect(page.getByRole('link', { name: 'Data explorer' })).toHaveAttribute('aria-current', 'page')
 })
 

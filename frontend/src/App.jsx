@@ -4,7 +4,9 @@ import Header from './app/Header'
 import { RouterProvider, useRoute } from './app/router'
 import { SessionGate } from './app/session'
 import { ConfigError, NotFound, Placeholder } from './app/views'
+import Alerts from './features/alerts/Alerts'
 import Dashboard from './features/dashboard/Dashboard'
+import DataExplorer from './features/explorer/DataExplorer'
 import IncidentHistory from './features/history/IncidentHistory'
 import ActiveIncidents from './features/incidents/ActiveIncidents'
 import { ToastProvider } from './ui/components'
@@ -27,6 +29,8 @@ function AreaContent() {
   if (area === 'dashboard') return <Dashboard />
   if (area === 'incidents') return <ActiveIncidents />
   if (area === 'history') return <IncidentHistory />
+  if (area === 'explorer') return <DataExplorer />
+  if (area === 'alerts') return <Alerts />
   if (area) return <Placeholder />
   return <NotFound />
 }

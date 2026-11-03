@@ -4,7 +4,7 @@
  * backend.
  */
 import { MOCK_CREDENTIALS } from './areas'
-import { areas, engine, store } from './instance'
+import { areas, engine, raiseAlert, store } from './instance'
 import DevControlsPanel from './DevControls'
 
 export const info = {
@@ -14,8 +14,8 @@ export const info = {
 
 export const { session, runs, incidents, alerts, entities, dataspace, system } = areas
 
-/** The mock's store and run engine, for tests that need to arrange data. */
-export { store, engine }
+/** The mock's store, run engine and alert generator, for tests that need to arrange data. */
+export { store, engine, raiseAlert }
 
 // Resolved at build time so production bundles do not contain the panel.
 export const DevControls = import.meta.env.DEV ? DevControlsPanel : null

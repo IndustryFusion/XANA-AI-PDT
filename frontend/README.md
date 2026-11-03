@@ -24,7 +24,7 @@ The development server listens on all network interfaces (port 5173, or the next
 | `npm run preview` | Serves the production build |
 | `npm run lint` | ESLint, including the data-boundary rules |
 | `npm test` | Unit, component and data-interface tests (Vitest) |
-| `npm run test:bundle` | Checks that the production build contains no development-only controls (run after `build`) |
+| `npm run test:bundle` | Checks that the production build contains no development-only controls and loads the chart library only on demand (run after `build`) |
 | `npm run test:e2e` | End-to-end and accessibility tests (Playwright); starts the dev server itself |
 
 The first end-to-end run needs a browser: `npx playwright install chromium`.
@@ -50,6 +50,8 @@ In development builds a **Mock data controls** button (bottom left) opens a pane
 - set the dataspace connection state;
 - choose the **scenario** of the next started run and the **playback speed** of simulated runs;
 - interrupt and restore the live connection of an open run, to see the run view reconnect;
+- make live entity updates in the data explorer unavailable;
+- switch off the occasional new alerts raised while the Alerts area is open;
 - reset the mock data to its seed.
 
 ### Simulated runs
@@ -72,6 +74,10 @@ A run engine in the mock plays the agent workflow with realistic delays (divided
 
 The seeded open runs and the twelve past incidents are produced by the same engine. The scenarios are defined as data in `src/data/sources/mock/scenarios/`.
 
+### Entities and alerts
+
+The mock entities are NGSI-LD entities of one factory (lines, machines, components, sensors) with every attribute kind: properties with units, observation times and sub-attributes, relationships, IRI values, geo, JSON, language, list and vocabulary properties. Sensor values and machine states have a deterministic history over the 7 days before the mock data was created, which also drives time-shift and live updates (every 5 s divided by the playback speed). Importing from a URL works with the sample documents listed in [`docs/data-interface.md`](docs/data-interface.md); the mock makes no network requests. Sixteen seeded alerts in two environments reference the factory's machines.
+
 Settings are stored in `localStorage` (`xana.mock.controls`); operator changes to mock data live in `sessionStorage` for the current tab. Production builds do not contain the controls.
 
 ## Structure
@@ -81,10 +87,12 @@ src/
   app/        shell: router, session gate, sign-in, header, entity references, placeholders
   ui/         design tokens, themes and shared components
   data/       UI data interface, facade, mock data source
-  features/   one folder per area (dashboard, incidents, history so far)
+  features/   one folder per area (dashboard, incidents, history, explorer, alerts so far)
 tests/        Vitest tests, mirroring src/
 e2e/          Playwright tests
 docs/         data-interface.md
 ```
+
+Runtime dependencies: `react`, `react-dom`, and `recharts` for attribute-history charts in the data explorer (loaded on demand, not part of the other areas' code).
 
 Rules enforced by lint: screens import data only from `src/data` (never from `src/data/sources/`), and only data sources may use `fetch`, `WebSocket`, `EventSource` or `XMLHttpRequest`.

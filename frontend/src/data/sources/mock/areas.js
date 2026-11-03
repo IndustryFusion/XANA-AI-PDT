@@ -3,11 +3,11 @@ import { applyControls, currentControls } from './controls'
 import { urn } from './catalog'
 import { AGENT_ANSWER_MS, createRunRecord, FINISHED_STATES, incidentFromRun, preflight, summarize } from './runCore'
 import { createRunEngine } from './runEngine'
+import { createAlertsArea } from './alertsArea'
+import { createEntitiesArea } from './entitiesArea'
 
 /** Mock credentials, shown as a hint on the sign-in screen. */
 export const MOCK_CREDENTIALS = { username: 'operator', password: 'operator' }
-
-const ACTIVE_ALERT_STATUSES = ['open', 'ack']
 
 /** Builds the mock implementations of the interface areas on top of a store. */
 export function createAreas(store) {
@@ -189,21 +189,11 @@ export function createAreas(store) {
     }),
   }
 
-  const alerts = {
-    countAlerts: withControls('alerts', ({ status = ACTIVE_ALERT_STATUSES } = {}) => {
-      const wanted = new Set(status)
-      const bySeverity = {}
-      let total = 0
-      for (const a of store.get().alerts) {
-        if (!wanted.has(a.status)) continue
-        bySeverity[a.severity] = (bySeverity[a.severity] ?? 0) + 1
-        total++
-      }
-      return { total, bySeverity }
-    }),
-  }
+  const { raiseAlert, ...alerts } = createAlertsArea(store)
+  const baseEntities = createEntitiesArea(store)
 
   const entities = {
+    ...baseEntities,
     getStats: withControls('entities', () => {
       const counts = {}
       for (const e of store.get().entities) counts[e.type] = (counts[e.type] ?? 0) + 1
@@ -252,5 +242,5 @@ export function createAreas(store) {
     }),
   }
 
-  return { session, runs, incidents, alerts, entities, dataspace, system, engine }
+  return { session, runs, incidents, alerts, entities, dataspace, system, engine, raiseAlert }
 }

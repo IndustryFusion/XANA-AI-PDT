@@ -128,15 +128,23 @@
   min-width: 220px;
 }
 
-.entity-ref__menu a {
+.entity-ref__menu a,
+.entity-ref__menu button {
   display: block;
+  width: 100%;
+  border: 0;
+  background: none;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
   padding: var(--space-2) var(--space-3);
   color: var(--text);
   text-decoration: none;
   font-size: var(--text-sm);
 }
 
-.entity-ref__menu a:hover { background: var(--surface-2); }
+.entity-ref__menu a:hover,
+.entity-ref__menu button:hover { background: var(--surface-2); }
 
 /* ── Pages ──────────────────────────────────────────────────────────────── */
 

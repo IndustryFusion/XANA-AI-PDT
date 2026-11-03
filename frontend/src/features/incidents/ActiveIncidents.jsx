@@ -58,10 +58,10 @@ export function RunList({ selected, machine, refreshKey }) {
   )
 }
 
-/** Machine ID and issue; starts a run and opens its run view. */
-export function NewIncidentForm({ machineId = '', onStarted }) {
+/** Machine ID and issue (both may be proposed); starts a run and opens its run view. */
+export function NewIncidentForm({ machineId = '', issue: proposedIssue = '', onStarted }) {
   const [machine, setMachine] = useState(machineId)
-  const [issue, setIssue] = useState('')
+  const [issue, setIssue] = useState(proposedIssue)
   const [missing, setMissing] = useState({})
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
@@ -136,7 +136,7 @@ export default function ActiveIncidents() {
   }
 
   let main
-  if (creating) main = <NewIncidentForm key={query.machine ?? ''} machineId={query.machine ?? ''} onStarted={started} />
+  if (creating) main = <NewIncidentForm key={`${query.machine ?? ''}|${query.issue ?? ''}`} machineId={query.machine ?? ''} issue={query.issue ?? ''} onStarted={started} />
   else if (params.runId) main = <RunView key={params.runId} runId={params.runId} onStatusChange={refreshList} onArchived={refreshList} />
   else {
     main = (

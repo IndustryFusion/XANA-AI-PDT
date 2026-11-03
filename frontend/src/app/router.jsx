@@ -37,7 +37,7 @@ export const paths = {
   dashboard: () => '/',
   incidents: () => '/incidents',
   run: (runId) => `/incidents/${enc(runId)}`,
-  newIncident: (machineId) => (machineId ? `/incidents?new=1&machine=${enc(machineId)}` : '/incidents?new=1'),
+  newIncident: (machineId, issue) => `/incidents?new=1${machineId ? `&machine=${enc(machineId)}` : ''}${issue ? `&issue=${enc(issue)}` : ''}`,
   activeIncidentsFor: (machineId) => `/incidents?machine=${enc(machineId)}`,
   history: () => '/history',
   incident: (incidentId) => `/history/${enc(incidentId)}`,

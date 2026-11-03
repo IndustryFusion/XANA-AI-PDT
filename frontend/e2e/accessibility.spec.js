@@ -75,6 +75,116 @@ const RUN_STATES = [
   }],
 ]
 
+const SENSOR = '/explorer/urn%3Angsi-ld%3ASensor%3Achiller-01-flow?type=Sensor'
+
+/** Data explorer and alerts views checked in both themes. */
+const EXPLORER_ALERT_STATES = [
+  ['explorer entity node with query builder', async (page) => {
+    await page.goto('/explorer/urn%3Angsi-ld%3AFactory%3Aplant-north?type=Machine&q=status%3D%3D%22running%22')
+    await expect(page.getByRole('button', { name: 'Plant North', expanded: true })).toBeVisible()
+    await expect(page.locator('[data-attribute="location"]')).toBeVisible()
+  }],
+  ['explorer in-place editor with suggestions and context menu', async (page) => {
+    await page.goto('/explorer/urn%3Angsi-ld%3AMachine%3Apress-brake-01?type=Machine')
+    await page.getByRole('button', { name: /^Value of status:/ }).click()
+    await expect(page.getByRole('listbox', { name: 'Suggested values' })).toBeVisible()
+    await page.getByRole('combobox', { name: 'New value of status' }).press('ArrowDown')
+    await page.locator('[data-attribute="partOf"]').getByRole('button', { name: 'Actions for urn:ngsi-ld:ProductionLine:line-b' }).click()
+  }],
+  ['explorer rejected change', async (page) => {
+    await page.goto(SENSOR)
+    await page.getByRole('button', { name: 'Edit value' }).click()
+    await page.getByRole('combobox', { name: 'New value of value' }).fill('high')
+    await page.getByRole('button', { name: 'Save value' }).click()
+    await expect(page.getByText('Not saved: value must be a number.')).toBeVisible()
+  }],
+  ['explorer nested relationship and sub-attributes', async (page) => {
+    await page.goto(SENSOR)
+    await page.getByRole('button', { name: '2 sub-attributes of value' }).click()
+    await page.getByRole('button', { name: 'Expand urn:ngsi-ld:Machine:chiller-01 in place' }).click()
+    const nested = page.locator('.attr-line__nested [data-entity="urn:ngsi-ld:Machine:chiller-01"]')
+    await nested.getByRole('button', { name: 'Expand urn:ngsi-ld:ProductionLine:line-a in place' }).click()
+    await expect(nested.getByRole('heading', { level: 5, name: /Line A/ })).toBeVisible()
+    await expect(page.locator('[data-attribute="value.accuracy"]')).toBeVisible()
+  }],
+  ['explorer inline add-attribute forms', async (page) => {
+    await page.goto('/explorer/urn%3Angsi-ld%3AMachine%3Apress-brake-01')
+    await page.getByRole('button', { name: 'Add attribute to Press brake 01' }).click()
+    await page.getByRole('button', { name: 'Add sub-attribute to status' }).click()
+    await expect(page.getByRole('form', { name: 'Add a sub-attribute to status' })).toBeVisible()
+  }],
+  ['explorer raw JSON editor with an error', async (page) => {
+    await page.goto(SENSOR)
+    await page.getByRole('button', { name: 'Raw JSON of Process chiller 01 flow' }).click()
+    await page.getByLabel('Entity JSON').fill('{')
+    await page.getByRole('button', { name: 'Save JSON' }).click()
+    await expect(page.getByText('The JSON is not valid', { exact: false })).toBeVisible()
+  }],
+  ['explorer history with chart and table', async (page) => {
+    await page.goto(SENSOR)
+    await page.getByRole('button', { name: 'History of value' }).click()
+    await expect(page.getByRole('region', { name: 'History of value' }).locator('.recharts-line-curve')).toBeVisible()
+  }],
+  ['explorer historical view', async (page) => {
+    await page.goto(`${SENSOR}&at=${encodeURIComponent(new Date(Date.now() - 2 * 864e5).toISOString())}`)
+    await expect(page.getByRole('region', { name: 'Historical view' })).toBeVisible()
+    await expect(page.locator('[data-attribute="value"]').first()).toBeVisible()
+    await page.getByRole('button', { name: 'Raw JSON of Process chiller 01 flow' }).click()
+    await expect(page.getByLabel('Entity JSON')).toBeVisible()
+  }],
+  ['explorer import preview dialog', async (page) => {
+    await page.goto('/explorer')
+    await page.getByRole('button', { name: 'Import…' }).click()
+    await page.getByRole('dialog').getByLabel('File with NGSI-LD entities (JSON)').setInputFiles({ name: 'x.json', mimeType: 'application/json', buffer: Buffer.from('[{"id":"urn:ngsi-ld:Machine:x","type":"Machine"}]') })
+    await expect(page.getByRole('dialog').getByRole('region', { name: 'Preview' })).toBeVisible()
+  }],
+  ['explorer delete-by-type dialog', async (page) => {
+    await page.goto('/explorer')
+    await page.getByRole('button', { name: 'Delete by type…' }).click()
+    await expect(page.getByRole('dialog').getByLabel('Sensor')).toBeVisible()
+  }],
+  ['explorer delete confirmation', async (page) => {
+    await page.goto(SENSOR)
+    await page.getByRole('button', { name: '2 sub-attributes of value' }).click()
+    await page.getByRole('button', { name: 'Delete sub-attribute accuracy of value' }).click()
+    await expect(page.getByRole('dialog')).toBeVisible()
+  }],
+  ['alerts list with selection and summary filter', async (page) => {
+    await page.goto('/alerts?severity=minor')
+    await page.getByLabel('Select all listed alerts').check()
+    await expect(page.getByRole('region', { name: 'Selected alerts' })).toBeVisible()
+  }],
+  ['alert detail with history', async (page) => {
+    await page.goto('/alerts/alert-001?status=open%2Cack%2Cshelved%2Cclosed')
+    await expect(page.getByRole('article', { name: 'Alert alert-001' })).toBeVisible()
+  }],
+  ['alert action dialog', async (page) => {
+    await page.goto('/alerts/alert-001')
+    await page.getByRole('article', { name: 'Alert alert-001' }).getByRole('button', { name: 'Close…' }).click()
+    await expect(page.getByRole('dialog')).toBeVisible()
+  }],
+  ['alert row context menu', async (page) => {
+    await page.goto('/alerts')
+    await page.locator('tr[data-alert="alert-001"] td').nth(5).click({ button: 'right' })
+    await expect(page.getByRole('menu', { name: 'Actions for alert alert-001' })).toBeVisible()
+  }],
+]
+
+for (const theme of ['dark', 'light']) {
+  test.describe(`${theme} theme: data explorer and alerts`, () => {
+    test.use({ colorScheme: theme })
+
+    for (const [name, arrange] of EXPLORER_ALERT_STATES) {
+      test(`${name} has no accessibility violations`, async ({ page }) => {
+        await presetControls(page, { authEnabled: false, newAlerts: false, liveUpdates: 'unavailable' })
+        await arrange(page)
+        await expect(page.getByText(/^Loading/)).toHaveCount(0)
+        expect(await violations(page)).toEqual([])
+      })
+    }
+  })
+}
+
 for (const theme of ['dark', 'light']) {
   test.describe(`${theme} theme: incident workflow`, () => {
     test.use({ colorScheme: theme })
@@ -198,4 +308,69 @@ test('keyboard only: clarify, open and leave the escalation dialog, and use the 
   await expect(page.getByRole('region', { name: 'Message thread' })).toContainText('May our technician open a remote session')
   const outline = await page.getByRole('button', { name: 'Send' }).evaluate((el) => { el.focus(); return getComputedStyle(el).outlineStyle })
   expect(outline).not.toBe('none')
+})
+
+test('keyboard only: query, expand an entity, edit with a suggestion, cancel, and act on an alert', async ({ page }) => {
+  await presetControls(page, { authEnabled: false, newAlerts: false })
+  await page.goto('/explorer')
+  const type = page.getByLabel('Entity type')
+  await expect(type.locator('option', { hasText: 'Machine' })).toHaveCount(1)
+  await type.focus()
+  await page.keyboard.press('M')
+  await expect(type).toHaveValue('Machine')
+  await page.getByRole('button', { name: 'Apply query' }).focus()
+  await page.keyboard.press('Enter')
+  const toggle = page.getByRole('region', { name: 'Entities' }).getByRole('button', { name: 'Press brake 01', exact: true })
+  await toggle.focus()
+  expect(await toggle.evaluate((el) => getComputedStyle(el).outlineStyle)).not.toBe('none')
+  await page.keyboard.press('Enter')
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+  const status = page.locator('[data-attribute="status"]').first()
+  const valueButton = status.getByRole('button', { name: /^Value of status:/ })
+  const before = (await status.locator('.attr-line__value').textContent()).replace('Value of status: ', '')
+
+  await valueButton.focus()
+  await page.keyboard.press('Enter')
+  const input = page.getByRole('combobox', { name: 'New value of status' })
+  await expect(input).toBeFocused()
+  const first = page.getByRole('listbox', { name: 'Suggested values' }).getByRole('option').first()
+  await expect(first).toBeVisible()
+  await page.keyboard.press('ArrowDown')
+  await expect(first).toHaveAttribute('aria-selected', 'true')
+  await page.keyboard.press('Escape')
+  await expect(input).toHaveCount(0)
+  await expect(status.locator('.attr-line__value')).toContainText(before)
+
+  await valueButton.focus()
+  await page.keyboard.press(' ')
+  await expect(input).toBeFocused()
+  await expect(first).toBeVisible()
+  await page.keyboard.press('ArrowDown')
+  const value = await first.textContent()
+  await page.keyboard.press('Enter')
+  await expect(input).toHaveValue(value)
+  await page.keyboard.press('Enter')
+  await expect(input).toHaveCount(0)
+  await expect(status).toContainText(`"${value}"`)
+
+  await page.goto('/alerts/alert-001')
+  const detail = page.getByRole('article', { name: 'Alert alert-001' })
+  const close = detail.getByRole('button', { name: 'Close…' })
+  await close.focus()
+  await page.keyboard.press('Enter')
+  const dialog = page.getByRole('dialog', { name: 'Close alert alert-001' })
+  await expect(dialog.getByRole('button', { name: 'Close dialog' })).toBeFocused()
+  await page.keyboard.press('Tab')
+  await expect(dialog.getByLabel('Note (optional)')).toBeFocused()
+  await page.keyboard.type('Resolved on site.')
+  await page.keyboard.press('Tab')
+  await page.keyboard.press('Tab')
+  await page.keyboard.press('Enter')
+  await expect(dialog).toHaveCount(0)
+  await expect(detail.getByRole('region', { name: 'History' }).getByRole('listitem').last()).toContainText('Resolved on site.')
+  const summary = page.getByRole('group', { name: 'Alerts by severity' }).getByRole('button').first()
+  await summary.focus()
+  await page.keyboard.press('Enter')
+  await expect(summary).toHaveAttribute('aria-pressed', 'true')
+  expect(await summary.evaluate((el) => getComputedStyle(el).outlineStyle)).not.toBe('none')
 })

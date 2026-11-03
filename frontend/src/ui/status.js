@@ -72,6 +72,33 @@ export const INCIDENT_OUTCOME = {
   failed: { label: 'Failed', tone: 'danger' },
 }
 
+/** Status of an alert. */
+export const ALERT_STATUS = {
+  open: { label: 'Open', tone: 'attention' },
+  ack: { label: 'Acknowledged', tone: 'info' },
+  shelved: { label: 'Shelved', tone: 'neutral' },
+  closed: { label: 'Closed', tone: 'success' },
+  expired: { label: 'Expired', tone: 'neutral' },
+  blackout: { label: 'Blackout', tone: 'neutral' },
+  unknown: { label: 'Unknown', tone: 'neutral' },
+}
+
+/** Live entity updates in the data explorer. */
+export const LIVE_UPDATES = {
+  ok: { label: 'Live updates working', tone: 'success' },
+  connecting: { label: 'Live updates connecting', tone: 'progress' },
+  unavailable: { label: 'Live updates unavailable', tone: 'danger' },
+  off: { label: 'Live updates off', tone: 'neutral' },
+  paused: { label: 'Live updates paused (historical view)', tone: 'neutral' },
+}
+
+/** Per-entity result of an import. */
+export const IMPORT_RESULT = {
+  created: { label: 'Created', tone: 'success' },
+  updated: { label: 'Updated', tone: 'info' },
+  failed: { label: 'Failed', tone: 'danger' },
+}
+
 /** Confidence bands of agent output; the level label always accompanies the percentage. */
 export const CONFIDENCE = {
   high: { label: 'High', tone: 'success', min: 0.7 },
@@ -91,7 +118,8 @@ export function confidenceTone(value) {
 
 export const STATUS_KINDS = {
   run: RUN_STATUS, severity: SEVERITY, health: HEALTH, connection: CONNECTION,
-  delivery: DELIVERY, conversation: CONVERSATION, outcome: INCIDENT_OUTCOME, confidence: CONFIDENCE,
+  delivery: DELIVERY, conversation: CONVERSATION, outcome: INCIDENT_OUTCOME,
+  alert: ALERT_STATUS, live: LIVE_UPDATES, import: IMPORT_RESULT, confidence: CONFIDENCE,
 }
 
 export function describeStatus(kind, value) {

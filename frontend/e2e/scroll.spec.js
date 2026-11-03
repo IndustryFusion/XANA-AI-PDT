@@ -46,3 +46,20 @@ test('active incidents: the open runs list stays in view next to a long run', as
   await expect(heading).toBeVisible()
   await expect.poll(() => inView(heading)).toBe(true)
 })
+
+for (const viewport of [{ width: 1400, height: 800 }, { width: 800, height: 800 }]) {
+  test(`alerts at ${viewport.width} px: opening an alert far down the list shows its detail without jumping to the top`, async ({ page }) => {
+    await page.setViewportSize(viewport)
+    await page.goto('/alerts')
+    const row = page.locator('tbody tr').nth(12)
+    await row.scrollIntoViewIfNeeded()
+    const id = await row.getAttribute('data-alert')
+    await row.locator('td').nth(5).click()
+    const heading = page.getByRole('heading', { name: `Alert ${id}` })
+    await expect(heading).toBeVisible()
+    await expect.poll(() => inView(heading)).toBe(true)
+    // Side by side, the selected row stays in view too.
+    if (viewport.width >= 900) await expect.poll(() => inView(page.locator(`tr[data-alert="${id}"]`))).toBe(true)
+    expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(0)
+  })
+}
