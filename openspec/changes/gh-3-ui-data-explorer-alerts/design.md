@@ -20,9 +20,9 @@ See proposal.md → Why. Builds on `gh-3-ui-foundation` (shell, data layer, comp
 Explorer query (type, id, pattern, filters, limit, time-shift moment) and alert filters live in the URL query string; components read them through the router. Back/forward and sharing a link reproduce the view.
 *Alternatives:* local component state loses the query on reload and cannot be shared.
 
-### 2. Attribute rendering by kind
-One `AttributeRow` dispatches on the NGSI-LD kind (`Property`, `Relationship`, `GeoProperty`, `JsonProperty`, `LanguageProperty`, `ListProperty`, `VocabularyProperty`, and IRI-valued properties) with a generic fallback. Sub-attributes render recursively; metadata (`observedAt`, `unitCode`, `datasetId`) is shown compactly. Relationship and IRI values use the shared `EntityRef` from the foundation, extended with "copy".
-*Alternatives:* a JSON tree viewer would be simpler but hides the semantics operators need.
+### 2. Entities as an editable document tree
+Results are a list of collapsible entity nodes; an expanded node reads like the entity's JSON in its own attribute order, one line per attribute: kind label, name, `=`, value. One `AttributeRow` dispatches on the NGSI-LD kind (`Property`, `Relationship`, `GeoProperty`, `JsonProperty`, `LanguageProperty`, `ListProperty`, `VocabularyProperty`, and IRI-valued properties) with a generic fallback and syntax-coloured values. Selecting a value edits it in place; sub-attributes collapse under their attribute; metadata (`observedAt`, `unitCode`, `datasetId`) is shown compactly. Relationship targets expand as nested entity nodes (indented, with a cycle guard) and also offer the shared `EntityRef` menu, extended with "copy". The raw JSON view is editable; saving computes the difference and applies it with `updateAttributes`, `appendAttributes` and `deleteAttribute`, so no new interface operation is needed.
+*Alternatives:* attributes grouped by kind in cards with an edit dialog (first implementation) separated the value from where it is edited and lost the entity's shape; a plain JSON viewer hides the kind semantics operators need.
 
 ### 3. Query builder
 Rows of attribute–operator–value conditions combined with AND or OR, rendered to an NGSI-LD `q` expression shown read-only below the builder; the expression is what the data source receives.

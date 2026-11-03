@@ -30,6 +30,11 @@
 - [x] 4.2 Extend the accessibility suite to the explorer (entity view, history, dialogs) and alerts (list, detail) in both themes; verify zero axe violations and keyboard operation
 - [x] 4.3 Run `openspec validate gh-3-ui-data-explorer-alerts --strict` and the Frontend CI; verify both pass and record per-scenario results in the Pull Request
 
+## 5. Review follow-up
+
+- [ ] 5.1 Rework the explorer into collapsible entity nodes with the in-order attribute document, in-place value editing with suggestions, collapsible sub-attributes, nested relationship expansion with a cycle guard, and editable raw JSON; verify component tests and update the end-to-end and accessibility tests (spec: data-explorer → Entity view, Relationship and IRI navigation, Edit attributes)
+- [ ] 5.2 Add the alert row context menu (right click, context-menu key, Shift+F10 and a row actions button) and a direct start-new-incident action for a single selected alert; verify component, end-to-end and accessibility tests (spec: alerts → From an alert to its context)
+
 ## Workflow follow-up
 
 - A maintainer adds the `spec-approved` label before any task above starts.

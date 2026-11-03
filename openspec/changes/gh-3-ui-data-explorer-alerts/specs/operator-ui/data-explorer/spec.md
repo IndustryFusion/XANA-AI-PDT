@@ -26,7 +26,7 @@ The Data explorer SHALL let the operator query entities by type, entity ID, ID p
 - **THEN** the reason is shown next to the query bar and the previous results stay
 
 ### Requirement: Entity view
-Selecting an entity SHALL show its attributes grouped by kind with values, units, observation times, sub-attributes and metadata, with a toggle to the raw JSON, and update the URL to that entity.
+Selecting an entity SHALL expand it in the result list as a structured document in the entity's own attribute order: one line per attribute with a kind label, name and value, plus units, observation times, sub-attributes (collapsible) and metadata, with a toggle to an editable raw JSON; the URL SHALL identify the expanded entity.
 
 #### Scenario: Typed attributes
 - **WHEN** an entity with properties, relationships, geo, JSON, language, list and vocabulary attributes is shown
@@ -36,27 +36,35 @@ Selecting an entity SHALL show its attributes grouped by kind with values, units
 - **WHEN** the operator switches to the raw view
 - **THEN** the entity's JSON is shown and can be copied
 
+#### Scenario: Edit the raw JSON
+- **WHEN** the operator changes the raw JSON and saves it
+- **THEN** added, changed and removed attributes are applied to the entity, and invalid JSON is reported without saving
+
 #### Scenario: Entity not found
 - **WHEN** the URL names an entity that does not exist
 - **THEN** the view states that the entity was not found and keeps the query bar usable
 
 ### Requirement: Relationship and IRI navigation
-Relationship targets and IRI values SHALL be navigable, each offering a context menu to open, copy, start an incident for it, and show its active incidents or history.
+Relationship targets and IRI values SHALL be navigable, each offering a context menu to open, copy, start an incident for it, and show its active incidents or history; relationship targets SHALL also expand in place, nested under the attribute.
 
 #### Scenario: Follow a relationship
 - **WHEN** the operator selects a relationship target
 - **THEN** the target entity opens and the browser back button returns to the previous entity
+
+#### Scenario: Expand a relationship in place
+- **WHEN** the operator expands a relationship target
+- **THEN** the target entity is shown nested and indented under the attribute, and a target already shown above it in the same tree is marked instead of expanded again
 
 #### Scenario: Context menu on an IRI
 - **WHEN** the operator opens the context menu of an IRI value
 - **THEN** open, copy, start incident, show active incidents and show history are offered
 
 ### Requirement: Edit attributes
-The operator SHALL be able to change attribute values, add attributes, and delete attributes, sub-attributes and entities, with suggested values where the data model provides them and confirmation before deleting.
+The operator SHALL be able to change attribute values in place on the attribute's line, add attributes, and delete attributes, sub-attributes and entities, with suggested values where the data model provides them and confirmation before deleting.
 
 #### Scenario: Change a value with suggestions
-- **WHEN** the operator edits an attribute that has suggested values
-- **THEN** the suggestions are offered, and saving updates the value shown
+- **WHEN** the operator selects the value of an attribute that has suggested values
+- **THEN** the value becomes an input in place offering the suggestions, Enter saves and updates the value shown, and Escape cancels
 
 #### Scenario: Rejected change
 - **WHEN** a change is rejected
