@@ -87,6 +87,7 @@ export function ClarificationPanel({ run }) {
 
 export function ResolutionPanel({ run }) {
   const [rejecting, setRejecting] = useState(false)
+  const [escalating, setEscalating] = useState(false)
   const [reason, setReason] = useState('')
   const [files, setFiles] = useState([])
   const [missing, setMissing] = useState(false)
@@ -124,6 +125,7 @@ export function ResolutionPanel({ run }) {
               Confirm resolution
             </Button>
             <Button disabled={action.busy} onClick={() => setRejecting(true)}>Reject…</Button>
+            <Button disabled={action.busy} onClick={() => setEscalating(true)}>Escalate to machine builder…</Button>
           </div>
         )}
         {rejecting && (
@@ -138,6 +140,7 @@ export function ResolutionPanel({ run }) {
         )}
         <ActionError error={action.error} />
       </div>
+      <EscalationDialog open={escalating} runId={run.runId} onClose={() => setEscalating(false)} />
     </Card>
   )
 }

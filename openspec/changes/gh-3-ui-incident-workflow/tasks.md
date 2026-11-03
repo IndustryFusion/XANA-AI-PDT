@@ -51,6 +51,8 @@
 
 - [x] 8.1 Colour-code runs and confidence: status stripe on open runs, past incidents, dashboard entries and the run header, pulsing badge for runs in progress or waiting for input, confidence bands high (≥ 70 %, green), medium (≥ 40 %, amber) and low (red) with the level as text on hypotheses, decisions, panels and steps; verify component tests and zero axe violations in both themes (spec: visual-system → Readable status, Contrast; run-view → Hypotheses, Decision)
 
+- [x] 8.2 Show the agent steps first, then the hypotheses and the decision; offer escalation to the machine builder (with the pre-flight dialog) while a resolution waits for confirmation, also in the mock; verify component, data-interface and end-to-end tests (spec: run-view → State panels, Confirm resolution)
+
 ## Workflow follow-up
 
 - A maintainer adds the `spec-approved` label before any task above starts.

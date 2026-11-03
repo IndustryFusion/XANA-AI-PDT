@@ -169,6 +169,26 @@ describe('state panels', () => {
     expect(within(next).getByText('Powder hose partly blocked')).toBeVisible()
   })
 
+  test('diagnostics show the agent steps first, then the hypotheses, then the decision', async () => {
+    openRun('run-1004')
+    await panel('Confirm the proposed resolution')
+    const headings = screen.getAllByRole('heading', { level: 3 }).map((h) => h.textContent)
+    const order = ['Agent steps', 'Validated hypotheses', 'Decision'].map((t) => headings.indexOf(t))
+    expect(order.every((i) => i >= 0)).toBe(true)
+    expect([...order].sort((a, b) => a - b)).toEqual(order)
+  })
+
+  test('while a resolution waits for confirmation the operator can escalate to the machine builder', async () => {
+    const user = userEvent.setup()
+    openRun('run-1004')
+    const p = await panel('Confirm the proposed resolution')
+    await user.click(within(p).getByRole('button', { name: 'Escalate to machine builder…' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Escalate to the machine builder' })
+    await user.click(await within(dialog).findByRole('button', { name: 'Escalate' }))
+    expect(await screen.findByText(/^Escalated as/)).toBeVisible()
+    expect(screen.queryByRole('region', { name: 'Confirm the proposed resolution' })).not.toBeInTheDocument()
+  })
+
   test('recommendation review shows summary and ordered actions; resolved completes the run', async () => {
     const user = userEvent.setup()
     openNew({ scenario: 'mb_recommendation', machine: 'chiller-01', actions: [['escalate']] })

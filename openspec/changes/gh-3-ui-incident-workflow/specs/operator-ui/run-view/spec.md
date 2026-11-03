@@ -59,7 +59,7 @@ For each waiting state the run view SHALL show one panel with the information th
 
 #### Scenario: Confirm resolution
 - **WHEN** the run is in `awaiting_confirmation`
-- **THEN** a panel shows root cause, recommended action and previously rejected resolutions, and lets the operator confirm, or reject with a reason and optional files
+- **THEN** a panel shows root cause, recommended action and previously rejected resolutions, and lets the operator confirm, reject with a reason and optional files, or escalate to the machine builder
 
 #### Scenario: Reject resolution
 - **WHEN** the operator rejects the proposed resolution with a reason
