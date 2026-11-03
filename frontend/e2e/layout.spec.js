@@ -40,12 +40,15 @@ test('entity view, history and alert detail fit and stack below 900 px', async (
   const overflow = () => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
 
   await page.goto('/explorer/urn%3Angsi-ld%3ASensor%3Achiller-01-flow?type=Sensor')
+  await page.getByRole('button', { name: '2 sub-attributes of value' }).click()
+  await page.getByRole('button', { name: 'Expand urn:ngsi-ld:Machine:chiller-01 in place' }).click()
+  await expect(page.locator('.attr-line__nested [data-entity="urn:ngsi-ld:Machine:chiller-01"] [data-attribute="status"]')).toBeVisible()
   await page.getByRole('button', { name: 'History of value' }).click()
   await expect(page.getByRole('region', { name: 'History of value' }).getByRole('table')).toBeVisible()
   expect(await overflow(), 'entity view overflows horizontally').toBeLessThanOrEqual(0)
-  const [list, main] = await Promise.all(['.split__side', '.split__main'].map((sel) => page.locator(sel).evaluate((el) => el.getBoundingClientRect())))
-  expect(main.top).toBeGreaterThan(list.top)
-  expect(Math.round(main.left)).toBe(Math.round(list.left))
+  const [query, list] = await Promise.all(['.query-bar', '.entity-list'].map((sel) => page.locator(sel).first().evaluate((el) => el.getBoundingClientRect())))
+  expect(list.top).toBeGreaterThan(query.top)
+  expect(Math.round(list.left)).toBe(Math.round(query.left))
 
   await page.goto('/alerts/alert-001')
   await expect(page.getByRole('article', { name: 'Alert alert-001' })).toBeVisible()

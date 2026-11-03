@@ -1,6 +1,6 @@
-import { useEffect, useId, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { entities } from '../../data'
-import { Button, Dialog } from '../../ui/components'
+import { Button } from '../../ui/components'
 
 const toValue = (text) => {
   const t = text.trim()
@@ -10,21 +10,17 @@ const toValue = (text) => {
 }
 
 /**
- * Adds an attribute to an entity, or a sub-attribute to one of its
- * attributes when `parent` is given. Errors keep the dialog open.
+ * Inline form that adds an attribute to an entity, or a sub-attribute to one
+ * of its attributes when `parent` is given. Errors keep the form open.
  */
-export default function AddAttributeDialog({ open, entityId, parent, onClose, onAdded }) {
+export default function AddAttributeForm({ entityId, parent, label, onAdded, onCancel }) {
   const [form, setForm] = useState({ name: '', kind: 'Property', value: '', unit: '' })
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
-  const ids = { form: useId(), name: useId(), kind: useId(), value: useId(), unit: useId() }
+  const nameRef = useRef(null)
+  const ids = { name: useId(), kind: useId(), value: useId(), unit: useId(), error: useId() }
 
-  useEffect(() => {
-    if (open) {
-      setForm({ name: '', kind: 'Property', value: '', unit: '' })
-      setError(null)
-    }
-  }, [open])
+  useEffect(() => { nameRef.current?.focus() }, [])
 
   const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }))
 
@@ -39,9 +35,7 @@ export default function AddAttributeDialog({ open, entityId, parent, onClose, on
     try {
       if (parent) await entities.updateAttributes(entityId, { [parent]: { [name]: attr } })
       else await entities.appendAttributes(entityId, { [name]: attr })
-      setBusy(false)
       onAdded(parent ?? name)
-      onClose()
     } catch (err) {
       setError(err)
       setBusy(false)
@@ -49,22 +43,11 @@ export default function AddAttributeDialog({ open, entityId, parent, onClose, on
   }
 
   return (
-    <Dialog
-      open={open}
-      title={parent ? `Add a sub-attribute to ${parent}` : 'Add an attribute'}
-      busy={busy}
-      onClose={onClose}
-      footer={(
-        <>
-          <Button onClick={onClose} disabled={busy}>Cancel</Button>
-          <Button type="submit" form={ids.form} variant="primary" disabled={busy}>{busy ? 'Adding…' : 'Add'}</Button>
-        </>
-      )}
-    >
-      <form id={ids.form} onSubmit={submit} className="stack">
+    <form className="add-attr" onSubmit={submit} aria-label={label} onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); onCancel() } }}>
+      <fieldset className="plain-fieldset add-attr__fields" disabled={busy}>
         <div className="field">
           <label className="field__label" htmlFor={ids.name}>Name</label>
-          <input id={ids.name} value={form.name} onChange={set('name')} autoComplete="off" />
+          <input id={ids.name} ref={nameRef} value={form.name} onChange={set('name')} autoComplete="off" className="mono" />
         </div>
         <div className="field">
           <label className="field__label" htmlFor={ids.kind}>Kind</label>
@@ -75,16 +58,20 @@ export default function AddAttributeDialog({ open, entityId, parent, onClose, on
         </div>
         <div className="field">
           <label className="field__label" htmlFor={ids.value}>{form.kind === 'Relationship' ? 'Target entity ID' : 'Value'}</label>
-          <input id={ids.value} value={form.value} onChange={set('value')} />
+          <input id={ids.value} value={form.value} onChange={set('value')} aria-describedby={error ? ids.error : undefined} />
         </div>
         {form.kind === 'Property' && (
-          <div className="field">
+          <div className="field add-attr__unit">
             <label className="field__label" htmlFor={ids.unit}>Unit (optional)</label>
             <input id={ids.unit} value={form.unit} onChange={set('unit')} />
           </div>
         )}
-        {error && <p className="form-error" role="alert">Not added: {error.message}</p>}
-      </form>
-    </Dialog>
+        <div className="row add-attr__buttons">
+          <Button type="submit" variant="primary" size="sm">{busy ? 'Adding…' : 'Add'}</Button>
+          <Button size="sm" onClick={onCancel}>Cancel</Button>
+        </div>
+      </fieldset>
+      {error && <p id={ids.error} className="form-error" role="alert">Not added: {error.message}</p>}
+    </form>
   )
 }

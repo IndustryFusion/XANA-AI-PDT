@@ -79,20 +79,46 @@ const SENSOR = '/explorer/urn%3Angsi-ld%3ASensor%3Achiller-01-flow?type=Sensor'
 
 /** Data explorer and alerts views checked in both themes. */
 const EXPLORER_ALERT_STATES = [
-  ['explorer entity view with query builder', async (page) => {
+  ['explorer entity node with query builder', async (page) => {
     await page.goto('/explorer/urn%3Angsi-ld%3AFactory%3Aplant-north?type=Machine&q=status%3D%3D%22running%22')
-    await expect(page.getByRole('heading', { level: 2, name: 'Plant North' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Plant North', expanded: true })).toBeVisible()
+    await expect(page.locator('[data-attribute="location"]')).toBeVisible()
   }],
-  ['explorer attribute editor with suggestions and context menu', async (page) => {
-    await page.goto('/explorer/urn%3Angsi-ld%3AMachine%3Apress-brake-01')
-    await page.getByRole('button', { name: 'Edit status' }).click()
-    await expect(page.getByRole('group', { name: 'Suggested values' })).toBeVisible()
-    await page.getByRole('button', { name: 'Actions for urn:ngsi-ld:ProductionLine:line-b' }).click()
+  ['explorer in-place editor with suggestions and context menu', async (page) => {
+    await page.goto('/explorer/urn%3Angsi-ld%3AMachine%3Apress-brake-01?type=Machine')
+    await page.getByRole('button', { name: /^Value of status:/ }).click()
+    await expect(page.getByRole('listbox', { name: 'Suggested values' })).toBeVisible()
+    await page.getByRole('combobox', { name: 'New value of status' }).press('ArrowDown')
+    await page.locator('[data-attribute="partOf"]').getByRole('button', { name: 'Actions for urn:ngsi-ld:ProductionLine:line-b' }).click()
   }],
-  ['explorer raw JSON', async (page) => {
+  ['explorer rejected change', async (page) => {
     await page.goto(SENSOR)
-    await page.getByRole('tab', { name: 'Raw JSON' }).click()
-    await expect(page.getByLabel('Entity JSON')).toBeVisible()
+    await page.getByRole('button', { name: 'Edit value' }).click()
+    await page.getByRole('combobox', { name: 'New value of value' }).fill('high')
+    await page.getByRole('button', { name: 'Save value' }).click()
+    await expect(page.getByText('Not saved: value must be a number.')).toBeVisible()
+  }],
+  ['explorer nested relationship and sub-attributes', async (page) => {
+    await page.goto(SENSOR)
+    await page.getByRole('button', { name: '2 sub-attributes of value' }).click()
+    await page.getByRole('button', { name: 'Expand urn:ngsi-ld:Machine:chiller-01 in place' }).click()
+    const nested = page.locator('.attr-line__nested [data-entity="urn:ngsi-ld:Machine:chiller-01"]')
+    await nested.getByRole('button', { name: 'Expand urn:ngsi-ld:ProductionLine:line-a in place' }).click()
+    await expect(nested.getByRole('heading', { level: 5, name: /Line A/ })).toBeVisible()
+    await expect(page.locator('[data-attribute="value.accuracy"]')).toBeVisible()
+  }],
+  ['explorer inline add-attribute forms', async (page) => {
+    await page.goto('/explorer/urn%3Angsi-ld%3AMachine%3Apress-brake-01')
+    await page.getByRole('button', { name: 'Add attribute to Press brake 01' }).click()
+    await page.getByRole('button', { name: 'Add sub-attribute to status' }).click()
+    await expect(page.getByRole('form', { name: 'Add a sub-attribute to status' })).toBeVisible()
+  }],
+  ['explorer raw JSON editor with an error', async (page) => {
+    await page.goto(SENSOR)
+    await page.getByRole('button', { name: 'Raw JSON of Process chiller 01 flow' }).click()
+    await page.getByLabel('Entity JSON').fill('{')
+    await page.getByRole('button', { name: 'Save JSON' }).click()
+    await expect(page.getByText('The JSON is not valid', { exact: false })).toBeVisible()
   }],
   ['explorer history with chart and table', async (page) => {
     await page.goto(SENSOR)
@@ -102,7 +128,9 @@ const EXPLORER_ALERT_STATES = [
   ['explorer historical view', async (page) => {
     await page.goto(`${SENSOR}&at=${encodeURIComponent(new Date(Date.now() - 2 * 864e5).toISOString())}`)
     await expect(page.getByRole('region', { name: 'Historical view' })).toBeVisible()
-    await expect(page.getByRole('heading', { level: 2, name: 'Process chiller 01 flow' })).toBeVisible()
+    await expect(page.locator('[data-attribute="value"]').first()).toBeVisible()
+    await page.getByRole('button', { name: 'Raw JSON of Process chiller 01 flow' }).click()
+    await expect(page.getByLabel('Entity JSON')).toBeVisible()
   }],
   ['explorer import preview dialog', async (page) => {
     await page.goto('/explorer')
@@ -117,6 +145,7 @@ const EXPLORER_ALERT_STATES = [
   }],
   ['explorer delete confirmation', async (page) => {
     await page.goto(SENSOR)
+    await page.getByRole('button', { name: '2 sub-attributes of value' }).click()
     await page.getByRole('button', { name: 'Delete sub-attribute accuracy of value' }).click()
     await expect(page.getByRole('dialog')).toBeVisible()
   }],
@@ -281,7 +310,7 @@ test('keyboard only: clarify, open and leave the escalation dialog, and use the 
   expect(outline).not.toBe('none')
 })
 
-test('keyboard only: query, open an entity, edit with a suggestion, and act on an alert', async ({ page }) => {
+test('keyboard only: query, expand an entity, edit with a suggestion, cancel, and act on an alert', async ({ page }) => {
   await presetControls(page, { authEnabled: false, newAlerts: false })
   await page.goto('/explorer')
   const type = page.getByLabel('Entity type')
@@ -291,22 +320,38 @@ test('keyboard only: query, open an entity, edit with a suggestion, and act on a
   await expect(type).toHaveValue('Machine')
   await page.getByRole('button', { name: 'Apply query' }).focus()
   await page.keyboard.press('Enter')
-  const link = page.getByRole('region', { name: 'Entities' }).getByRole('link', { name: /Press brake 01/ })
-  await link.focus()
+  const toggle = page.getByRole('region', { name: 'Entities' }).getByRole('button', { name: 'Press brake 01', exact: true })
+  await toggle.focus()
+  expect(await toggle.evaluate((el) => getComputedStyle(el).outlineStyle)).not.toBe('none')
   await page.keyboard.press('Enter')
-  await expect(page.getByRole('heading', { level: 2, name: 'Press brake 01' })).toBeVisible()
-  await page.getByRole('button', { name: 'Edit status' }).focus()
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+  const status = page.locator('[data-attribute="status"]').first()
+  const valueButton = status.getByRole('button', { name: /^Value of status:/ })
+  const before = (await status.locator('.attr-line__value').textContent()).replace('Value of status: ', '')
+
+  await valueButton.focus()
   await page.keyboard.press('Enter')
-  await expect(page.getByLabel('New value of status')).toBeFocused()
-  await expect(page.getByRole('group', { name: 'Suggested values' })).toBeVisible()
-  await page.keyboard.press('Tab')
-  const suggestion = page.getByRole('group', { name: 'Suggested values' }).getByRole('button').first()
-  await expect(suggestion).toBeFocused()
-  const value = await suggestion.textContent()
+  const input = page.getByRole('combobox', { name: 'New value of status' })
+  await expect(input).toBeFocused()
+  const first = page.getByRole('listbox', { name: 'Suggested values' }).getByRole('option').first()
+  await expect(first).toBeVisible()
+  await page.keyboard.press('ArrowDown')
+  await expect(first).toHaveAttribute('aria-selected', 'true')
+  await page.keyboard.press('Escape')
+  await expect(input).toHaveCount(0)
+  await expect(status.locator('.attr-line__value')).toContainText(before)
+
+  await valueButton.focus()
+  await page.keyboard.press(' ')
+  await expect(input).toBeFocused()
+  await expect(first).toBeVisible()
+  await page.keyboard.press('ArrowDown')
+  const value = await first.textContent()
   await page.keyboard.press('Enter')
-  await expect(page.getByLabel('New value of status')).toHaveValue(value)
-  await page.getByLabel('New value of status').press('Enter')
-  await expect(page.locator('[data-attribute="status"]')).toContainText(value)
+  await expect(input).toHaveValue(value)
+  await page.keyboard.press('Enter')
+  await expect(input).toHaveCount(0)
+  await expect(status).toContainText(`"${value}"`)
 
   await page.goto('/alerts/alert-001')
   const detail = page.getByRole('article', { name: 'Alert alert-001' })

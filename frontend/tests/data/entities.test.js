@@ -83,6 +83,12 @@ describe('edit', () => {
     expect(Date.now() - Date.parse(machine.status.observedAt)).toBeLessThan(5000)
   })
 
+  test('keeps an observation time the fragment names', async () => {
+    const observedAt = '2026-01-02T03:04:05.000Z'
+    await entities.updateAttributes(MACHINE, { status: { value: 'idle', observedAt } })
+    expect((await entities.getEntity(MACHINE)).status).toMatchObject({ value: 'idle', observedAt })
+  })
+
   test('rejects a text for a numeric value and unknown attributes', async () => {
     await expect(entities.updateAttributes(SENSOR, { value: { value: 'high' } })).rejects.toMatchObject({ kind: 'invalid', message: 'value must be a number.' })
     await expect(entities.updateAttributes(SENSOR, { nope: { value: 1 } })).rejects.toMatchObject({ kind: 'not_found' })

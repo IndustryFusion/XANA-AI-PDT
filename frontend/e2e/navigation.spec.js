@@ -26,11 +26,12 @@ test('areas of later changes show a placeholder', async ({ page }) => {
 test('opening an item URL directly and reloading keeps the view', async ({ page }) => {
   const id = 'urn:ngsi-ld:Machine:press-brake-02'
   await page.goto(`/explorer/${encodeURIComponent(id)}?type=Machine`)
-  await expect(page.getByRole('heading', { level: 2, name: 'Press brake 02' })).toBeVisible()
-  await expect(page.getByRole('article').getByText(id, { exact: true })).toBeVisible()
+  const toggle = page.getByRole('region', { name: 'Entities' }).getByRole('button', { name: 'Press brake 02', exact: true })
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+  await expect(page.locator(`[data-entity="${id}"]`).getByRole('link', { name: id, exact: true })).toBeVisible()
   await page.reload()
-  await expect(page.getByRole('heading', { level: 2, name: 'Press brake 02' })).toBeVisible()
-  await expect(page.getByRole('region', { name: 'Entities' }).getByRole('link', { name: /Press brake 02/ })).toHaveAttribute('aria-current', 'true')
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+  await expect(page.locator(`[data-entity="${id}"] [data-attribute="status"]`)).toBeVisible()
   await expect(page.getByRole('link', { name: 'Data explorer' })).toHaveAttribute('aria-current', 'page')
 })
 
