@@ -45,6 +45,7 @@ export default function AlertDetail({ id, refreshKey, onAction, onClose }) {
         <p className="alert-detail__text">{alert.text}</p>
 
         <div className="row" role="group" aria-label="Actions">
+          <Link to={paths.newIncident(alert.resource, alert.text)} className="btn btn--primary btn--sm">Start new incident</Link>
           {actionsFor(alert.status).map((a) => <Button key={a.action} size="sm" onClick={() => onAction(a.action, [alert.id])}>{a.label}…</Button>)}
         </div>
 
@@ -54,7 +55,6 @@ export default function AlertDetail({ id, refreshKey, onAction, onClose }) {
             <li><Link to={paths.entity(alert.resource)}>Open {alert.resource} in the data explorer</Link></li>
             <li><Link to={paths.activeIncidentsFor(alert.resource)}>Show active incidents of this machine</Link></li>
             <li><Link to={paths.historyFor(alert.resource)}>Show incident history of this machine</Link></li>
-            <li><Link to={paths.newIncident(alert.resource, alert.text)} className="btn btn--primary btn--sm">Start new incident from this alert</Link></li>
           </ul>
         </section>
 

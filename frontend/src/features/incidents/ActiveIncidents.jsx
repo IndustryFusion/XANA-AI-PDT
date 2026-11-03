@@ -5,6 +5,7 @@ import { EntityRef, entityLabel } from '../../app/EntityRef'
 import { Link, paths, useRoute } from '../../app/router'
 import { Button, Card, DataView, EmptyState, StatusBadge } from '../../ui/components'
 import { formatAge } from '../../ui/format'
+import { toneOf } from '../../ui/status'
 import RunView from './RunView'
 import './incidents.css'
 
@@ -37,7 +38,7 @@ export function RunList({ selected, machine, refreshKey }) {
         {(list) => (
           <ul className="run-list__items">
             {filter(list).map((r) => (
-              <li key={r.runId} className="run-list__item">
+              <li key={r.runId} className={`run-list__item toned toned--${toneOf('run', r.status)}`} data-status={r.status}>
                 <Link to={runPath(r.runId, machine)} className="run-list__link" aria-current={selected === r.runId ? 'true' : undefined}>
                   <span className="run-list__issue">{r.issue}</span>
                   <span className="run-list__meta">

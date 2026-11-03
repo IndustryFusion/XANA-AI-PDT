@@ -1,19 +1,19 @@
 /**
- * NGSI-LD attribute model of the explorer: which kind an attribute is, how
- * attributes are grouped, and which members are metadata or sub-attributes.
+ * NGSI-LD attribute model of the explorer: which kind an attribute is, its
+ * instances, and which members are metadata or sub-attributes.
  */
 
-/** Attribute kinds in display order, with group headings and labels. */
+/** Attribute kinds with their short labels and badge tones. */
 export const KINDS = [
-  { kind: 'property', label: 'Property', group: 'Properties' },
-  { kind: 'iri', label: 'IRI', group: 'IRI values' },
-  { kind: 'relationship', label: 'Relationship', group: 'Relationships' },
-  { kind: 'geo', label: 'Geo', group: 'Geo properties' },
-  { kind: 'json', label: 'JSON', group: 'JSON properties' },
-  { kind: 'language', label: 'Language', group: 'Language properties' },
-  { kind: 'list', label: 'List', group: 'List properties' },
-  { kind: 'vocabulary', label: 'Vocabulary', group: 'Vocabulary properties' },
-  { kind: 'other', label: 'Other', group: 'Other attributes' },
+  { kind: 'property', label: 'Property', tone: 'progress' },
+  { kind: 'iri', label: 'IRI', tone: 'info' },
+  { kind: 'relationship', label: 'Relationship', tone: 'special' },
+  { kind: 'geo', label: 'Geo', tone: 'success' },
+  { kind: 'json', label: 'JSON', tone: 'warning' },
+  { kind: 'language', label: 'Language', tone: 'info' },
+  { kind: 'list', label: 'List', tone: 'attention' },
+  { kind: 'vocabulary', label: 'Vocabulary', tone: 'danger' },
+  { kind: 'other', label: 'Other', tone: 'neutral' },
 ]
 export const kindInfo = (kind) => KINDS.find((k) => k.kind === kind) ?? KINDS.at(-1)
 
@@ -51,18 +51,17 @@ export function attributeKind(attr) {
 
 const isAttribute = (v) => v && typeof v === 'object' && !Array.isArray(v) && typeof v.type === 'string'
 
-/** `[name, attribute]` pairs of an entity's attributes. */
+/** `[name, attribute]` pairs of an entity's attributes, in the entity's own order. */
 export const attributesOf = (entity) => Object.entries(entity).filter(([k]) => !NOT_ATTRIBUTES.includes(k))
 
 /** `[name, sub-attribute]` pairs of an attribute. */
 export const subAttributesOf = (attr) => Object.entries(attr).filter(([k, v]) => !VALUE_MEMBERS.includes(k) && isAttribute(v))
 
-/** Attributes grouped by kind, in display order: `[{ kind, label, group, attributes: [[name, attr]] }]`. */
-export function groupAttributes(entity) {
-  const groups = KINDS.map((k) => ({ ...k, attributes: [] }))
-  for (const [name, attr] of attributesOf(entity)) groups.find((g) => g.kind === attributeKind(attr)).attributes.push([name, attr])
-  return groups.filter((g) => g.attributes.length > 0)
-}
+/** Instances of an attribute: one per array element (multi-attribute), else the attribute itself. */
+export const instancesOf = (attr) => (Array.isArray(attr) ? attr : [attr])
+
+/** Entity IDs a relationship instance points to. */
+export const targetsOf = (attr) => [].concat(attr?.object ?? attr?.objectList?.map((o) => o.object ?? o) ?? [])
 
 /** Human-readable name of an entity: its `name` value (English preferred) or null. */
 export function displayName(entity) {

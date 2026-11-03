@@ -112,7 +112,7 @@ Entities are NGSI-LD entities in compacted form: `id`, `type` and one member per
 | `listAttributes()` | — | attribute names, sorted | `unavailable` |
 | `queryEntities({ type, id, idPattern, q, limit })` | type(s) and ID(s) (comma-separated), ID regular expression, NGSI-LD query expression `q`, result limit 1–1000 (default 100) | entities | `invalid` (with the reason), `unavailable` |
 | `getEntity(id)` | entity ID | entity | `not_found` |
-| `updateAttributes(id, attrs)` | `{ [name]: fragment }`; each fragment is merged into the existing attribute (`{ value }` changes the value, an attribute-valued member adds a sub-attribute) | nothing | `not_found` (entity or attribute), `invalid` (with the reason, e.g. text for a numeric value) |
+| `updateAttributes(id, attrs)` | `{ [name]: fragment }`; each fragment is merged into the existing attribute (`{ value }` changes the value and, unless the fragment sets `observedAt`, stamps the observation time; an attribute-valued member adds or replaces a sub-attribute) | nothing | `not_found` (entity or attribute), `invalid` (with the reason, e.g. text for a numeric value) |
 | `appendAttributes(id, attrs)` | `{ [name]: attribute }` new attributes | nothing | `not_found`, `conflict` (name exists), `invalid` |
 | `deleteAttribute(id, name, { subAttribute })` | attribute, or one of its sub-attributes | nothing | `not_found` |
 | `deleteEntity(id)` | entity ID | nothing | `not_found` |

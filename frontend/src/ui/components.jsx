@@ -14,7 +14,7 @@ export function StatusBadge({ kind, value, label, tone, className = '' }) {
   const described = describeStatus(kind, value)
   const text = label ?? described.label
   return (
-    <span className={`badge badge--${tone ?? described.tone} ${className}`.trim()} data-status={value}>
+    <span className={`badge badge--${tone ?? described.tone}${described.pulse ? ' badge--pulse' : ''} ${className}`.trim()} data-status={value}>
       <span className="badge__dot" aria-hidden="true" />
       {text}
     </span>

@@ -11,6 +11,19 @@ test('ConfidenceMeter shows the confidence as percentage text', () => {
   expect(screen.getByText('Confidence')).toBeVisible()
 })
 
+test.each([
+  [0.86, 'High', 'success'],
+  [0.7, 'High', 'success'],
+  [0.69, 'Medium', 'attention'],
+  [0.4, 'Medium', 'attention'],
+  [0.39, 'Low', 'danger'],
+  [0, 'Low', 'danger'],
+])('ConfidenceMeter %s is coloured as %s with the level as text', (value, level, tone) => {
+  const { container } = render(<ConfidenceMeter value={value} />)
+  expect(screen.getByText(level)).toBeVisible()
+  expect(container.firstChild).toHaveClass(`confidence--${tone}`)
+})
+
 test('StructuredFields renders labelled fields, lists and nested objects', () => {
   render(<StructuredFields value={{ rootCause: 'Worn valve', confidence: 0.86, partialData: false, sources: [{ source: 'Broker', status: 'ok' }], sent: ['A', 'B'], note: null }} />)
   const term = (label) => screen.getByText(label, { selector: 'dt' })

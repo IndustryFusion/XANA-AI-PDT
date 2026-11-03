@@ -108,12 +108,23 @@ describe('hypotheses and decision', () => {
     expect(items[0]).toHaveTextContent('Delivery 82 %')
   })
 
+  test('hypotheses are colour-coded by confidence: high green, medium amber, low red', () => {
+    renderWithRouter(<HypothesisList steps={[proposed, validated]} />)
+    const items = screen.getAllByRole('listitem').filter((li) => li.classList.contains('hypothesis'))
+    expect(items[0]).toHaveClass('toned--success')
+    expect(within(items[0]).getByText('High')).toBeVisible()
+    expect(items[1]).toHaveClass('toned--danger')
+    expect(within(items[1]).getByText('Low')).toBeVisible()
+  })
+
   test('the decision card shows root cause, recommended action and confidence', () => {
     renderWithRouter(<DecisionCard steps={[{ node: 'decide', output: { rootCause: 'Worn pump', recommendedAction: 'Replace pump', confidence: 0.84 }, at }]} />)
     const card = screen.getByRole('region', { name: 'Decision' })
     expect(card).toHaveTextContent('Worn pump')
     expect(card).toHaveTextContent('Replace pump')
     expect(card).toHaveTextContent('84%')
+    expect(card).toHaveClass('toned--success')
+    expect(within(card).getByText('High')).toBeVisible()
   })
 
   test('no decision card while confidence is below the threshold', () => {

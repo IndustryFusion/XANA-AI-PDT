@@ -4,7 +4,7 @@ import { useData } from '../../data/useData'
 import { EntityRef } from '../../app/EntityRef'
 import { Link, paths } from '../../app/router'
 import { Button, Card, DataView, EmptyState, StatusBadge } from '../../ui/components'
-import { SEVERITY_ORDER } from '../../ui/status'
+import { SEVERITY_ORDER, toneOf } from '../../ui/status'
 import './dashboard.css'
 
 export const REFRESH_KEY = 'xana.dashboard.refreshMs'
@@ -82,7 +82,7 @@ function IncidentsTile({ opts }) {
             <p className="tile__figure"><strong>{runs.length}</strong> active</p>
             <ul className="tile__list">
               {runs.slice(0, MAX_LISTED).map((run) => (
-                <li key={run.runId} className="tile__item">
+                <li key={run.runId} className={`tile__item tile__item--toned toned toned--${toneOf('run', run.status)}`}>
                   <div className="tile__item-main">
                     <Link to={paths.run(run.runId)} className="tile__item-title">{run.issue}</Link>
                     <span className="row muted"><EntityRef id={run.machineId} /></span>

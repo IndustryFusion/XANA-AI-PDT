@@ -21,7 +21,8 @@ const toLocalInput = (ms) => {
 }
 
 /** History of one attribute over a selectable time range: chart (numeric values) and table. */
-export default function HistoryPane({ entityId, name, unit, onClose }) {
+export default function HistoryPane({ entityId, name, unit, headingLevel = 3, onClose }) {
+  const Heading = `h${Math.min(headingLevel, 6)}`
   const [range, setRange] = useState('24h')
   const [custom, setCustom] = useState(() => ({ from: toLocalInput(Date.now() - 24 * HOUR), to: toLocalInput(Date.now()) }))
   const [applied, setApplied] = useState(custom)
@@ -38,7 +39,7 @@ export default function HistoryPane({ entityId, name, unit, onClose }) {
   return (
     <section className="card history" aria-labelledby={ids.title}>
       <header className="card__header">
-        <h3 id={ids.title} className="card__title">History of {name}</h3>
+        <Heading id={ids.title} className="card__title">History of {name}</Heading>
         <Button size="sm" variant="ghost" onClick={onClose}>Close history</Button>
       </header>
       <div className="card__body stack">

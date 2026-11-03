@@ -1,6 +1,7 @@
 import { useId, useState } from 'react'
 import { MESSAGE_KINDS } from '../../data/conversationActs'
 import { StructuredFields } from '../../ui/structured'
+import { confidenceTone } from '../../ui/status'
 import { formatTime, humanize, percent } from '../../ui/format'
 import { feedSteps, stepLabel } from './runModel'
 
@@ -48,8 +49,10 @@ export function StepItem({ step, showInput = false }) {
   const detailsId = useId()
   const label = stepLabel(step.node)
   const summary = SUMMARIES[step.node]?.(step.output ?? {}) ?? genericSummary(step.output)
+  const confidence = step.output?.confidence ?? lead(step.output?.hypotheses)?.confidence
+  const toned = confidence != null ? ` toned toned--${confidenceTone(confidence)}` : ''
   return (
-    <li className={`step step--${SUMMARIES[step.node] ? step.node : 'generic'}`} data-node={step.node}>
+    <li className={`step step--${SUMMARIES[step.node] ? step.node : 'generic'}${toned}`} data-node={step.node}>
       <div className="step__head">
         <span className="step__kind">{label}</span>
         <time className="muted step__time" dateTime={step.at}>{formatTime(step.at)}</time>

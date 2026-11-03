@@ -193,7 +193,8 @@ export function createEntitiesArea(store) {
         const e = state.entities.find((x) => x.id === id)
         for (const [name, fragment] of Object.entries(attrs)) {
           Object.assign(e[name], structuredClone(fragment))
-          if (e[name].observedAt && ('value' in fragment || 'vocab' in fragment)) e[name].observedAt = now()
+          // A new value is observed now, unless the fragment names its own observation time.
+          if (e[name].observedAt && ('value' in fragment || 'vocab' in fragment) && !('observedAt' in fragment)) e[name].observedAt = now()
         }
         return state
       })
