@@ -17,8 +17,45 @@
 
 A self-contained package: it can be installed, imported and tested without
 the backend service, which is one of its consumers.
+
+    workflow = Workflow(llm, context, history, memory, threshold=0.9)
+    async for event in workflow.analyse(RoundInput(machine_id=..., issue=...)):
+        ...  # StepEvent per completed step, then one Outcome
 """
 
+from xana_agent import testing as _testing
+from xana_agent.schemas import IncidentRecord, Outcome, PastIncident, Rejection, RoundInput, StepEvent
 from xana_agent.scripted import ScriptedChatModel, example_for, register_example
+from xana_agent.sources import (
+    ContextSource,
+    HistorySource,
+    IncidentMemory,
+    InMemoryIncidentMemory,
+    NgsiContextSource,
+    SourceUnavailable,
+    TimescaleHistorySource,
+)
+from xana_agent.workflow import Workflow
 
-__all__ = ["ScriptedChatModel", "example_for", "register_example"]
+# Without a model, the scripted provider gives a complete, confident diagnosis.
+_testing.register_scripted_answers()
+
+__all__ = [
+    "ContextSource",
+    "HistorySource",
+    "InMemoryIncidentMemory",
+    "IncidentMemory",
+    "IncidentRecord",
+    "NgsiContextSource",
+    "Outcome",
+    "PastIncident",
+    "Rejection",
+    "RoundInput",
+    "ScriptedChatModel",
+    "SourceUnavailable",
+    "StepEvent",
+    "TimescaleHistorySource",
+    "Workflow",
+    "example_for",
+    "register_example",
+]
