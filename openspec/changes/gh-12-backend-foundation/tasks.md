@@ -4,7 +4,7 @@
 
 - [x] 1.1 Create `backend/` and `backend/agent/` with the layout and `pyproject.toml` files from design decisions 1–3; verify that `pip install -e backend/agent -e "backend[dev]"` succeeds on Python 3.12 and that `python -c "import app, xana_agent"` works
 - [x] 1.2 Add the Ruff configuration and pytest setup (including the `db` marker skipped without `TEST_DATABASE_URL`); verify that `ruff check`, `ruff format --check` and `pytest` run, with an initial smoke test in each package
-- [ ] 1.3 Add the `Backend` CI workflow from design decision 11; verify that it passes on this pull request and is not triggered by frontend-only changes
+- [x] 1.3 Add the `Backend` CI workflow from design decision 11; verify that it passes on this pull request and is not triggered by frontend-only changes
 
 ## 2. Service runtime
 
