@@ -85,6 +85,9 @@ which is the authoritative description of the system, and moves the change to
 - **Change ID:** `gh-<issue>-<kebab-summary>`.
 - **Proposal:** `Issue: #<number>` as its first line.
 - **Pull Request:** names the change ID and closes the issue (template provided).
+- **Licence header:** every source file (JavaScript, CSS, HTML, CI workflows)
+  starts with the Apache-2.0 header of the IndustryFusion Foundation in that
+  file type's comment style; copy it from an existing file of the same type.
 
 ## Working locally (optional)
 
