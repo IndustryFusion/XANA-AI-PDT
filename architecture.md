@@ -123,7 +123,7 @@ The run stream delivers the run's current state first, then step events (one per
 
 Python 3.12 + FastAPI, async throughout; database access with psycopg 3 (async).
 
-The backend is delivered in phases (issue #12). This section describes the target; what exists today is the service runtime (configuration, language model factory, `GET /api/diagnostics`), the memory database migrations and the local environment.
+The backend is delivered in phases (issue #12). This section describes the target; what exists today is the service runtime (configuration, language model factory, `GET /api/diagnostics`), the memory database migrations, the local environment and the diagnostic agent workflow package.
 
 **Layout.** Two Python packages:
 
@@ -166,29 +166,44 @@ The agent package never imports the service. The service uses it like any other 
 
 #### Agent Runtime (`agent/xana_agent/`)
 
-A LangGraph `StateGraph` with six nodes, compiled once at startup.
+Two LangGraph `StateGraph`s over one `AgentState`, compiled when a `Workflow` is created. Phase 1 runs the sequence of `manifest.md` → Agent Runtime; it has no retrieve step.
 
 ```
-observe → hypothesize → retrieve → validate → decide ──(confidence ≥ threshold)──→ act → END
-                                                   │
-                                                   ├──(confidence < threshold)──→ END [awaiting_input]
-                                                   └──(operator confirmation pending)──→ END [awaiting_confirmation]
+analyse:  observe → hypothesize → validate → decide → END
+                                                  ├── confidence < threshold  → outcome awaiting_input
+                                                  └── confidence ≥ threshold  → outcome awaiting_confirmation
+act:      act → END            (called only after the operator confirmed the proposed resolution)
 ```
 
-After `act` completes (incident logged), or when confidence is too low, the run transitions to a terminal or paused state handled outside the graph by the API layer.
+There is no edge from `decide` into `act`. The confirmation is an operator action between the two calls, so an unconfirmed diagnosis cannot be logged. The package keeps nothing between calls: the caller (the API layer) owns the run and passes the round's input each time, so a paused run survives a restart.
 
-| Node | Tools called | LLM call | Output added to state |
+```python
+workflow = Workflow(llm, context, history, memory, threshold=0.9)
+async for event in workflow.analyse(RoundInput(machine_id, issue, round, clarifications, rejected)):
+    ...  # StepEvent(node, input, output, at) per completed step, then one Outcome
+async for event in workflow.act(round_input, decision, trace):
+    ...  # StepEvent("act", ...), then Outcome completed (with incident ID) or failed
+```
+
+Each step is delivered when it completes, before the next starts. `Outcome.kind` is `awaiting_input` (question, confidence, threshold), `awaiting_confirmation` (root cause, recommended action, confidence), `completed` (incident ID) or `failed` (step and reason).
+
+| Node | Reads | LLM call | Step output |
 |---|---|---|---|
-| `observe` | `ngsi_get_entity`, `ngsi_traverse_relationships`, `timescale_fetch_recent`, `alerta_list_alerts` | No | `entities`, `signals`, `alerta_alerts` |
-| `hypothesize` | — | Yes (structured output: `HypothesisList`) | `hypotheses` |
-| `retrieve` | `rag_retrieve()` (HTTP to retrieval-service) | Yes (query planning: decompose hypotheses into search queries) | `rag_queries`, `rag_context` |
-| `validate` | `timescale_query_metrics` | Yes (structured output: `ValidatedHypothesisList`; `rag_context` injected into prompt) | `validated_hypotheses` |
-| `decide` | `memory_find_similar_incidents` | Yes (structured output: `Decision`; `rag_context` injected into prompt) | `root_cause`, `recommended_action`, `confidence`, `past_incidents` |
-| `act` | `memory_store_incident`, `memory_log_trace` | No | `incident_id` |
+| `observe` | Context: the machine, entities one relationship away in either direction (at most 20). History: last value and trend per numeric attribute (24 h) | No | `summary`, `signals` (`name`, `value`, `unit`, `assessment`), `sources` (status per source), `partial_data`, `entities` |
+| `hypothesize` | — | `HypothesisList` | `hypotheses`: two or three, ranked, IDs `h<round>-<n>` |
+| `validate` | History: bucketed min, max, average and last value; context: fresh entity reads. At most 6 queries and 3 lookups per round, observed entities only | `ValidationPlan`, then `ValidatedHypothesisList` | `hypotheses` with `verdict` (`confirmed`, `plausible`, `inconclusive`, `refuted`), updated `confidence` and `validation` notes |
+| `decide` | Memory: up to 3 similar incidents (same machine, then same type) | `Question` or `Decision` | `root_cause`, `recommended_action`, `confidence`, `threshold`, `question`, `past_incidents` |
+| `act` | Memory: stores the incident with the full step trace | No | `action`, `recommended_action`, `incident_logged`, `incident_id` |
 
-**Confidence routing.** The `decide` node sets `confidence` to the highest validated hypothesis confidence score (not a separate LLM assessment). If `confidence < DECISION_CONFIDENCE_THRESHOLD` (default 0.9), `awaiting_input` is set to `True` and the graph routes to `END` without calling `act`. The API layer transitions the run to `awaiting_input` and prompts the operator for more information.
+Step content uses the field names of the UI's data interface, in snake_case; the frontend adapter maps them to camelCase.
 
-**Clarification loop.** When the operator submits additional context (`POST /api/agent/clarify/{run_id}`), the extra information is appended to the issue and the full graph re-runs from `observe`. The run can cycle through multiple clarification rounds until confidence is sufficient or the operator escalates.
+**Confidence gate.** `decide` takes the highest validated confidence among hypotheses that are neither refuted nor rejected by the operator. That number is shown and compared with `DECISION_CONFIDENCE_THRESHOLD` (default 0.9). Below it, the model writes a question naming the missing information. At or above it, the model writes the recommended action; the root cause is the leading hypothesis, never a rejected one.
+
+**Rounds.** A clarification (`POST /api/agent/clarify/{run_id}`) or a rejected resolution starts a new round from `observe`. The round's input carries all clarifications and all rejected root causes with their reasons; `hypothesize` sees them, and `decide` never proposes a rejected root cause again.
+
+**Model calls.** Every call uses `with_structured_output`, a timeout of `LLM_TIMEOUT_S` and one retry when the answer does not match the structure. A timeout or a second mismatch fails the round with the step and a readable reason. Prompts (`agent/xana_agent/prompts/`) pass every value as JSON in a named section; operator text is marked as data, never as instructions.
+
+**Read-only.** Sources only read: the context source sends GET requests, the history source runs read-only transactions. The validation plan is limited to the entities observed in the round, so text in the issue cannot widen what is read. Memory is written only by `act`.
 
 **Escalation flow.** When the operator clicks "Escalate to machine builder":
 
@@ -230,24 +245,21 @@ Data-sharing tiers mirror the pre-negotiated IFF Dataspace capabilities:
 
 Every transmission goes through `apply_policy()` which strips files outside the configured tier before the gateway call. A `policy_check` step event is pushed over the WebSocket so the operator can see exactly what was allowed and what was stripped.
 
-Every node catches tool exceptions and continues with partial data — a missing NGSI or Timescale connection degrades gracefully rather than crashing the run. State is a plain `TypedDict` (`AgentState`); each node returns a full merged copy.
+Every node catches source errors and continues with partial data — a missing NGSI or Timescale connection degrades gracefully rather than crashing the run. State is a plain `TypedDict` (`AgentState`); each node returns its updates and its step record.
 
-LLM structured output uses Pydantic models (`app/agent/schemas.py`) passed to `llm.with_structured_output(...)`. All confidence fields include a normaliser validator that accepts both `0.7` and `70` from the LLM and always stores a `[0, 1]` float. The LLM provider is resolved at call time via `get_llm()` — see Configuration section.
+LLM structured output uses Pydantic models (`agent/xana_agent/schemas.py`) passed to `llm.with_structured_output(...)`. All confidence fields include a normaliser validator that accepts both `0.7` and `70` from the LLM and always stores a `[0, 1]` float. The LLM provider is resolved at call time via `get_llm()` — see Configuration section.
 
 #### Tool Layer (`agent/xana_agent/`)
 
-All tools are LangChain `@tool`-decorated functions with Pydantic `args_schema`. They are directly usable by the agent or callable standalone.
+The workflow reads through three protocols (`sources/base.py`), so a program can supply its own implementations:
 
-| Module | Tools | Backend |
+| Module | Protocol and implementation | Backend |
 |---|---|---|
-| `tools/ngsi.py` | `ngsi_get_entity`, `ngsi_query_entities`, `ngsi_traverse_relationships` | `httpx` HTTP to Scorpio |
-| `tools/timescale.py` | `timescale_fetch_recent`, `timescale_query_metrics` | `psycopg2` to TimescaleDB |
-| `tools/memory.py` | `memory_find_similar_incidents`, `memory_store_incident`, `memory_log_trace` | `psycopg2` to PostgreSQL |
-| `tools/alerta.py` | `alerta_list_alerts`, `alerta_get_alert`, `alerta_action` | `httpx` HTTP to Alerta (`Authorization: Key`) |
-| `tools/gateway.py` | `gateway_send_message`, `gateway_send_files_raw`, `gateway_list_inbox`, `gateway_ack_message`, `gateway_list_compatible_peers`, capability tools | `httpx` HTTP to IFF Dataspace Gateway |
-| `tools/ifric.py` | `lookup_machine_builder` | `httpx` HTTP to IFRIC Registry |
+| `sources/ngsi.py` | `ContextSource`: `NgsiContextSource` (get an entity; entities one relationship away, including those whose `partOf` or `measures` points to it) | `httpx` HTTP GET to Scorpio, optional `NGSILD-Tenant` |
+| `sources/timescale.py` | `HistorySource`: `TimescaleHistorySource` (recent values with trend; bucketed metrics) | psycopg 3, read-only transactions, attribute table `TIMESCALE_TABLE` |
+| `sources/memory.py` | `IncidentMemory`: `InMemoryIncidentMemory` (similar incidents, store) | Process memory; the PostgreSQL implementation lives in the service, which owns the schema |
 
-`ALL_TOOLS` in `tools/__init__.py` exports a flat list for easy wiring into future ReAct-style agents.
+`testing.py` provides fake sources and scripted answers for every step; the scripted provider (`LLM_PROVIDER=scripted`) uses them, so a complete run works without a model. Alerts, dataspace gateway and IFRIC sources are not part of phase 1.
 
 #### Knowledge Base (`rag-tool`)
 
@@ -478,7 +490,7 @@ for the full deployment walkthrough, including creating the `rag` database.
 
 ## Key Design Decisions
 
-**Directed workflow over ReAct.** The agent follows a fixed six-step path (OBSERVE → HYPOTHESIZE → RETRIEVE → VALIDATE → DECIDE → ACT) rather than an open tool-calling loop. This gives predictable, auditable behaviour suited to industrial diagnostics. Each step has a clear role and emits a typed WebSocket event. The `retrieve` step queries the RAG knowledge base (equipment manuals, procedures) and injects relevant chunks into the `validate` and `decide` prompts, grounding LLM reasoning in document evidence without expanding the tool-calling surface.
+**Directed workflow over ReAct.** The agent follows a fixed path (OBSERVE → HYPOTHESIZE → VALIDATE → DECIDE → ACT) rather than an open tool-calling loop. This gives predictable, auditable behaviour suited to industrial diagnostics. Each step has a clear role and emits a typed WebSocket event.
 
 **Confidence-gated decisions.** The decision confidence is derived from the top validated hypothesis score, not a separate LLM call, so the number shown in the UI and the number used for routing are always the same. Runs below the configured threshold pause and ask the operator for more information rather than committing a low-confidence diagnosis.
 
