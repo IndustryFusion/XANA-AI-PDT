@@ -121,7 +121,25 @@ The run stream delivers the run's current state first, then step events (one per
 
 ### Backend (`backend/`)
 
-Python 3.12 + FastAPI. All async at the HTTP layer; sync DB calls wrapped in `asyncio.to_thread`.
+Python 3.12 + FastAPI, async throughout; database access with psycopg 3 (async).
+
+The backend is delivered in phases (issue #12). This section describes the target; what exists today is the service runtime (configuration, language model factory, `GET /api/diagnostics`), the memory database migrations and the local environment.
+
+**Layout.** Two Python packages:
+
+```
+backend/
+  app/                 service: config.py (settings, get_llm), health.py, api/, memory/
+  migrations/          numbered .sql files, applied at startup
+  agent/xana_agent/    diagnostic agent workflow and its tools: a package of its own,
+                       installable and testable without the service
+  sample_data/         sample machine data and its loader (local environment)
+  compose.yaml         local environment
+```
+
+The agent package never imports the service. The service uses it like any other program would.
+
+**Local environment.** `docker compose -f backend/compose.yaml up --build` starts PostgreSQL with TimescaleDB (databases `memory`, `tsdb` and the broker's), Scorpio, Ollama (pulling `LLM_MODEL` once), the backend on port 8000 and a one-off loader for the sample machine data. The sample data is exported from the UI mock's seed (`frontend/scripts/export-sample-data.mjs`), so machine identifiers agree between the UI and the backend. `LLM_PROVIDER=scripted` runs everything without downloading a model. The frontend development server forwards `/api` and `/ws` to `XANA_BACKEND_URL` (default `http://localhost:8000`). See `backend/README.md`.
 
 #### API Layer (`app/api/`)
 
@@ -146,7 +164,7 @@ Python 3.12 + FastAPI. All async at the HTTP layer; sync DB calls wrapped in `as
 
 `RunRecord` (in `api/run_store.py`) is the central per-run state object. It holds the step list and a list of subscriber queues so multiple WebSocket clients can connect to the same run. The in-memory store (`run_store: dict[str, RunRecord]`) is sufficient for a single-process deployment; swap to Redis for horizontal scaling.
 
-#### Agent Runtime (`app/agent/`)
+#### Agent Runtime (`agent/xana_agent/`)
 
 A LangGraph `StateGraph` with six nodes, compiled once at startup.
 
@@ -216,7 +234,7 @@ Every node catches tool exceptions and continues with partial data — a missing
 
 LLM structured output uses Pydantic models (`app/agent/schemas.py`) passed to `llm.with_structured_output(...)`. All confidence fields include a normaliser validator that accepts both `0.7` and `70` from the LLM and always stores a `[0, 1]` float. The LLM provider is resolved at call time via `get_llm()` — see Configuration section.
 
-#### Tool Layer (`app/tools/`)
+#### Tool Layer (`agent/xana_agent/`)
 
 All tools are LangChain `@tool`-decorated functions with Pydantic `args_schema`. They are directly usable by the agent or callable standalone.
 
@@ -325,14 +343,16 @@ pending_runs (
 | Store | Purpose | Access pattern |
 |---|---|---|
 | **Scorpio (NGSI-LD)** | Live machine context, relationships | HTTP via NGSI-LD v1 API |
-| **TimescaleDB** | Time-series signals and telemetry | SQL via `psycopg2`; `time_bucket` for aggregation |
-| **PostgreSQL** | AI memory: incidents + agent traces | SQL via `psycopg2` |
+| **TimescaleDB** | Attribute history (signals and telemetry) | SQL via psycopg 3; `time_bucket` for aggregation |
+| **PostgreSQL** | AI memory: incidents + agent traces | SQL via psycopg 3 |
 | **Alerta** | Active alerts and alarm history | HTTP via Alerta REST API (`Authorization: Key`) |
 
-TimescaleDB is assumed to have a `signals` table:
+The backend reads attribute history in the layout the IFF Digital Twin platform writes: one row per observed attribute value, in a table named by `TIMESCALE_TABLE` (default `attributes`):
 ```sql
-signals (time TIMESTAMPTZ, machine_id TEXT, signal_id TEXT, metric TEXT, value DOUBLE PRECISION)
+attributes ("observedAt" TIMESTAMPTZ, "entityId" TEXT, "attributeId" TEXT, "attributeType" TEXT,
+            "nodeType" TEXT, "value" TEXT, "valueType" TEXT, "datasetId" TEXT, "deleted" BOOLEAN)
 ```
+The local environment creates this table and fills it with 24 hours of sample history ending at load time.
 
 ---
 
@@ -342,15 +362,17 @@ All backend configuration is via environment variables, read by `pydantic-settin
 
 In **production** (K8s), non-sensitive config comes from a Helm-rendered ConfigMap and sensitive values from a Secret — both injected as `envFrom` in the backend Deployment. See `helm/charts/xana-pdt/templates/backend-configmap.yaml` and `backend-secret.yaml`.
 
-For **local development**, copy `backend/.env.example` to `backend/.env` and fill in credentials.
+For **local development**, copy `backend/.env.example` to `backend/.env` and fill in credentials. `backend/.env.example` lists every variable the backend reads, with its default; an invalid value stops the backend at startup with a message naming the variable (never its value). Secrets are never returned or logged; connection URLs are shown with the password masked.
 
-Key variable groups:
+Key variable groups (gateway, IFRIC and sign-in variables belong to later phases):
 
 ```
 # LLM
-LLM_PROVIDER=ollama                  # ollama | anthropic | openai
+LLM_PROVIDER=ollama                  # ollama | anthropic | openai | scripted (fixed answers, no model)
 LLM_MODEL=llama3.1
 OLLAMA_URL=http://...
+LLM_TIMEOUT_S=120
+ANTHROPIC_API_KEY=... / OPENAI_API_KEY=...   # secret; required for that provider
 
 # Agent behaviour
 DECISION_CONFIDENCE_THRESHOLD=0.9   # runs below this ask for clarification
@@ -360,6 +382,8 @@ DATA_SHARING_POLICY=minimal          # minimal | adjacent | timeseries
 NGSI_URL=http://scorpio.iff-core.svc.cluster.local:9090
 TIMESCALE_DB_URL=postgresql://...
 POSTGRES_MEMORY_URL=postgresql://...
+TIMESCALE_TABLE=attributes           # attribute history table
+NGSI_TENANT=                         # optional NGSILD-Tenant
 ALERTA_URL=http://...
 ALERTA_API_KEY=...                   # secret
 

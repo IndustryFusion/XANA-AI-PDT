@@ -100,7 +100,7 @@ It exists so that CI, contributors without a GPU, and demos can run the whole fl
 The language model health check works as follows:
 - `ollama`: lists the server's models and verifies that the configured model is present.
 - Cloud providers: a minimal model-list call.
-- `scripted`: always `ok`.
+- `scripted`: always `ok`, with the detail "Scripted answers, no model".
 
 *Alternatives:* mock the model only inside tests. This would leave no model-free way to run the local environment or end-to-end tests.
 
@@ -154,8 +154,10 @@ The result is cached for `HEALTH_CACHE_S`. The overall rule matches the UI's (`o
 
 How to run it:
 - The documented command is `docker compose -f backend/compose.yaml up`.
-- `LLM_PROVIDER=scripted` together with the `no-model` profile skips Ollama.
+- `LLM_PROVIDER=scripted` runs without a model: `ollama-pull` then skips the download. The Ollama server container still starts, idle and without a model. A Compose profile was dropped because it would have required a second flag for the default case.
 - Named volumes keep the data and models between runs.
+- Host ports can be changed (`XANA_DB_PORT`, `XANA_BROKER_PORT`, `XANA_OLLAMA_PORT`, `XANA_BACKEND_PORT`).
+- The database trusts local connections, so the local environment needs no password; every port is bound to `127.0.0.1`.
 
 The frontend development server proxies `/api` and `/ws`, with WebSocket upgrade, to `XANA_BACKEND_URL` (default `http://localhost:8000`).
 
@@ -166,7 +168,8 @@ The frontend development server proxies `/api` and `/ws`, with WebSocket upgrade
 ### 10. Sample data shared with the UI mock
 The UI mock already has a deterministic factory: machines, components and relationships.
 - A frontend script exports these entities as NGSI-LD JSON into `backend/sample_data/entities.json`. A frontend test fails if the file differs from the current seed, so the two cannot drift apart.
-- The backend loader upserts the entities into the broker. It then writes 24 hours of attribute history for every numeric property into the time-series table, at 5-minute intervals ending at load time, with deterministic variation.
+- The backend loader creates the entities in the broker. Existing entities are left as they are, so later changes are kept.
+- The export also contains the mock's own deterministic history curves: sensor values every 5 minutes and machine status every 2 hours, for 24 hours. The loader writes them into the time-series table, shifted to end at load time, so the backend shows the same signal patterns as the UI mock.
 - A marker row makes the history load happen once.
 
 Because the identifiers match, a machine picked in the UI while the data explorer still runs on the mock (phase 1) exists in the backend.
