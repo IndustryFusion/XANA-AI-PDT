@@ -17,11 +17,18 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
+// Forward API and run-stream requests to the backend (default: the local environment's address).
+const backend = process.env.XANA_BACKEND_URL || 'http://localhost:8000'
+const proxy = {
+  '/api': { target: backend, changeOrigin: true },
+  '/ws': { target: backend, ws: true, changeOrigin: true },
+}
+
 export default defineConfig({
   plugins: [react()],
   // Listen on all network interfaces so the UI is reachable from other machines.
-  server: { host: true },
-  preview: { host: true },
+  server: { host: true, proxy },
+  preview: { host: true, proxy },
   test: {
     environment: 'jsdom',
     globals: true,
