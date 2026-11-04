@@ -15,6 +15,12 @@ npm run dev
 
 The development server listens on all network interfaces (port 5173, or the next free port), so it can be opened from another machine at `http://<host-ip>:5173`; `npm run preview` does the same on port 4173. Use `npm run dev -- --port <port>` to pick a port. With the mock data source, sign in as `operator` / `operator`.
 
+## With the backend
+
+The development server forwards `/api` and `/ws` to the backend at `XANA_BACKEND_URL` (default `http://localhost:8000`, the local environment in [`../backend`](../backend/README.md)), for example `XANA_BACKEND_URL=http://localhost:18000 npm run dev`.
+
+`backend/sample_data/sample-data.json` is exported from the mock seed, so the backend's sample machines are the mock's. After changing the seed, run `npx vite-node scripts/export-sample-data.mjs`; a unit test fails while the two differ.
+
 ## Commands
 
 | Command | What it does |

@@ -20,11 +20,13 @@ on:
   pull_request:
     paths:
       - "frontend/**"
+      - "backend/sample_data/sample-data.json"
       - ".github/workflows/frontend.yml"
   push:
     branches: [main]
     paths:
       - "frontend/**"
+      - "backend/sample_data/sample-data.json"
       - ".github/workflows/frontend.yml"
 
 permissions:
