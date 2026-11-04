@@ -1,0 +1,124 @@
+#
+# Copyright (c) 2026 IndustryFusion Foundation
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+# Local environment: backend, PostgreSQL with TimescaleDB, NGSI-LD context
+# broker, Ollama and the sample machine data. Development only: the database
+# trusts local connections and every port is bound to 127.0.0.1.
+#
+#   docker compose -f backend/compose.yaml up --build
+#   LLM_PROVIDER=scripted docker compose -f backend/compose.yaml up --build   (no model download)
+#
+# Host ports can be changed with XANA_DB_PORT, XANA_BROKER_PORT,
+# XANA_OLLAMA_PORT and XANA_BACKEND_PORT.
+
+name: xana-ai-pdt
+
+x-backend-env: &backend-env
+  LLM_PROVIDER: ${LLM_PROVIDER:-ollama}
+  LLM_MODEL: ${LLM_MODEL:-llama3.1}
+  OLLAMA_URL: http://ollama:11434
+  ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+  OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+  OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+  DECISION_CONFIDENCE_THRESHOLD: ${DECISION_CONFIDENCE_THRESHOLD:-0.9}
+  NGSI_URL: http://broker:9090
+  TIMESCALE_DB_URL: postgresql://xana@db:5432/tsdb
+  POSTGRES_MEMORY_URL: postgresql://xana@db:5432/memory
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+
+services:
+  db:
+    image: timescale/timescaledb-ha:pg16
+    environment:
+      POSTGRES_USER: xana
+      POSTGRES_DB: memory
+      POSTGRES_HOST_AUTH_METHOD: trust
+    volumes:
+      - db-data:/home/postgres/pgdata
+      - ./db-init:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "127.0.0.1:${XANA_DB_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "xana", "-d", "memory"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  broker:
+    image: scorpiobroker/all-in-one-runner:java-latest
+    environment:
+      DBHOST: db
+      DBUSER: xana
+      DBPASS: unused
+      DBNAME: ngb
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${XANA_BROKER_PORT:-9090}:9090"
+
+  ollama:
+    image: ollama/ollama:latest
+    volumes:
+      - ollama-models:/root/.ollama
+    ports:
+      - "127.0.0.1:${XANA_OLLAMA_PORT:-11434}:11434"
+
+  # Downloads the model once; skipped when another provider is configured.
+  ollama-pull:
+    image: ollama/ollama:latest
+    environment:
+      OLLAMA_HOST: ollama:11434
+      LLM_PROVIDER: ${LLM_PROVIDER:-ollama}
+      LLM_MODEL: ${LLM_MODEL:-llama3.1}
+    entrypoint: ["/bin/sh", "-c"]
+    command: ['if [ "$$LLM_PROVIDER" = ollama ]; then ollama pull "$$LLM_MODEL"; else echo "LLM_PROVIDER=$$LLM_PROVIDER: no model download"; fi']
+    depends_on:
+      - ollama
+    restart: on-failure
+
+  sample-data:
+    build: .
+    image: xana-ai-pdt-backend:local
+    command: ["python", "-m", "sample_data"]
+    environment: *backend-env
+    depends_on:
+      db:
+        condition: service_healthy
+      broker:
+        condition: service_started
+    restart: on-failure
+
+  backend:
+    build: .
+    image: xana-ai-pdt-backend:local
+    environment:
+      <<: *backend-env
+      BACKEND_HOST: 0.0.0.0
+      BACKEND_RELOAD: "true"
+    volumes:
+      - ./app:/srv/backend/app:ro
+      - ./migrations:/srv/backend/migrations:ro
+      - ./agent/xana_agent:/srv/backend/agent/xana_agent:ro
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${XANA_BACKEND_PORT:-8000}:8000"
+
+volumes:
+  db-data:
+  ollama-models:

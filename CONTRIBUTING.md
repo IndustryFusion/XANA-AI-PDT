@@ -85,9 +85,10 @@ which is the authoritative description of the system, and moves the change to
 - **Change ID:** `gh-<issue>-<kebab-summary>`.
 - **Proposal:** `Issue: #<number>` as its first line.
 - **Pull Request:** names the change ID and closes the issue (template provided).
-- **Licence header:** every source file (JavaScript, CSS, HTML, CI workflows)
-  starts with the Apache-2.0 header of the IndustryFusion Foundation in that
-  file type's comment style; copy it from an existing file of the same type.
+- **Licence header:** every source file (JavaScript, CSS, HTML, Python, SQL,
+  Dockerfiles, Compose and CI workflows) starts with the Apache-2.0 header of
+  the IndustryFusion Foundation in that file type's comment style; copy it
+  from an existing file of the same type.
 
 ## Working locally (optional)
 
@@ -117,4 +118,4 @@ and commit the generated files. `openspec init --help` lists all tool IDs.
 - Proposal creation, implementation and archiving are started manually by a maintainer; nothing runs automatically from issues.
 - Who may add `spec-approved` is not enforced yet (CODEOWNERS / branch protection are open decisions).
 - CI checks artifact structure only. Functional correctness and security require human review.
-- Code-level test and lint conventions are not defined yet; they follow once the application code is in the repository.
+- Code-level test and lint conventions are those of each component: `frontend/README.md` (Vitest, Playwright, ESLint) and `backend/README.md` (pytest, Ruff).
