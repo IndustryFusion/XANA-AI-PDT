@@ -83,6 +83,7 @@ These are two compiled graphs over the same `AgentState`. `decide` sets the outc
 - **Entities:**
   - get the machine;
   - follow its Relationship attributes one level deep (`architecture.md` → `ngsi_traverse_relationships`);
+  - also query the entities whose relationships point to the machine. NGSI-LD cannot ask for "any relationship pointing here", so the relationship names are configured (default `partOf` and `measures`). In the sample data and in IFF installations, components and sensors point to their machine, not the other way round;
   - keep the machine and the related entities, at most 20 in total.
 - **History:** `HistorySource.recent(entity_ids, window)` returns the last value and the trend per numeric attribute (default window 24 h, configurable).
 - **Source errors** are caught per source and recorded in `sources`, with `partial_data = true`.
@@ -90,7 +91,7 @@ These are two compiled graphs over the same `AgentState`. `decide` sets the outc
 ### 6. Validate
 1. The model answers with a `ValidationPlan`: history queries `(entity_id, attribute, window, bucket)` and entity lookups `(entity_id)`, each tied to a hypothesis.
 2. The plan is trimmed to 6 queries and 3 lookups. Any entity id that was not observed in this round is dropped, which keeps the workflow on the run's machine.
-3. The queries run as `time_bucket` aggregates (min, max, avg, last).
+3. The queries run as bucketed aggregates (min, max, avg, last). They use PostgreSQL's `date_bin`, which gives the same buckets as TimescaleDB's `time_bucket` and also works on a table that is not a hypertable or in a database without the extension.
 4. A second model call with the results returns `ValidatedHypothesisList`.
 
 ### 7. Decide

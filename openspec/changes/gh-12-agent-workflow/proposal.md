@@ -35,7 +35,7 @@ None.
 
 ## Impact
 
-- New code in `backend/agent/` and its tests. One new runtime dependency of the agent package: `psycopg` (already a backend dependency) for attribute history.
+- New code in `backend/agent/` and its tests. Two new runtime dependencies of the agent package, both already backend dependencies: `psycopg` for attribute history and `httpx` for the context broker.
 - `architecture.md` sections affected:
   - **Agent Runtime**: the node table and graph are updated to the phase 1 workflow. Phase 1 has no retrieve step: the node sequence is the one in `manifest.md` → Agent Runtime.
   - The **awaiting_confirmation** routing and the confirmation-gated ACT are described.
