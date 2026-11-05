@@ -59,27 +59,28 @@ Outcomes map to states:
 | `stopped` | `{by: "operator", reason, reopenable: false}` |
 
 ### 3. Short machine names
-If `machine_id` is not a URI, the broker is queried for entities whose id ends in `:<name>`. Exactly one match: its id is used. No match or several: the request is refused as `invalid`. If the broker is unreachable, the name is used as given and the observe step reports it.
+If `machine_id` is not a URI, the broker is queried for entities whose id ends in `:<name>` (`idPattern`). An NGSI-LD query by pattern needs entity types (Scorpio refuses it otherwise), so the broker's type list (`/ngsi-ld/v1/types`) is read first and all types are queried at once. Exactly one match: its id is used. No match or several: the request is refused as `invalid`. If the broker is unreachable, the name is used as given and the observe step reports it.
 
 ### 4. Persistence and restart
 The migrations are:
 - `002_runs.sql`: `runs(run_id PK, incident_number, machine_id, issue, status, data JSONB, steps JSONB, round INT, clarifications JSONB, rejected JSONB, started_at, updated_at)`.
 - `003_incidents.sql`, with two tables:
-  - `incidents(id SERIAL, number INT UNIQUE, run_id UNIQUE, machine_id, machine_type, issue, outcome, root_cause, recommended_action, decision JSONB, resolution, confirmed BOOL, started_at, closed_at, archived_at, reopened_run_id)`;
-  - `agent_traces(incident_id FK, step, action, input JSONB, output JSONB, timestamp)`, as named in `architecture.md`.
+  - `incidents(id SERIAL, number INT UNIQUE, run_id UNIQUE, machine_id, machine_type, issue, outcome, root_cause, recommended_action, decision JSONB, resolution, confirmed BOOL, confirmed_at, started_at, closed_at, archived_at, reopened_run_id)`; `confirmed_at` orders `similar()` newest first;
+  - `agent_traces(incident_id FK, step, round, action, input JSONB, output JSONB, timestamp)`, as named in `architecture.md`, plus the round so the history can show rounds.
 - An `incident_number` sequence.
 
 How state is written and restored:
 - Each step and status change is written in one transaction before it is published to watchers. A watcher never sees an event that would be missing after a restart.
-- Each step records the round it belongs to.
-- At startup, runs in `running` drop the steps of their current round and start that round again. If the interrupted round was the act after a confirmation, the act runs again; storing is idempotent by `run_id`.
+- Each step records the round it belongs to. An operator's `clarification` or `resolution` step belongs to the round it answers; the round number then increases for the new round.
+- At startup, runs in `running` drop the steps of their current round and start that round again. If the current round holds a confirmed `resolution` step, the round was the act after a confirmation: only the steps after it are dropped and the act runs again; storing is idempotent by `run_id`.
+- If the memory database is not reachable at startup, migrations and the restore run on the first request that needs them; until then run requests are refused as `unavailable`.
 
 `architecture.md` names the table `pending_runs` and keeps only paused runs. The UI keeps finished runs in the active list until they are archived, so `runs` keeps every non-archived run, and `architecture.md` is updated.
 
 ### 5. Incident records
 - **Number:** taken from the sequence at the first status other than `running`.
 - **Act:** stores via `PostgresIncidentMemory.store()` (the workflow memory interface): it upserts the `incidents` row with `confirmed = true`, root cause, action and trace.
-- **Archive:** upserts the row with outcome, decision, resolution, `closed_at = archived_at = now()` and the full trace, then deletes the `runs` row. Both happen in one transaction.
+- **Archive:** upserts the row with outcome, decision (the output of the run's last decide step), resolution, `closed_at = archived_at = now()` and the full trace, then deletes the `runs` row. Both happen in one transaction.
 - **`similar()`:** returns confirmed rows, same machine first, then same `machine_type`, newest first.
 - **History list:** rows with `archived_at` set.
 - **Resolution text:**
@@ -94,7 +95,8 @@ How state is written and restored:
 - Each `RunRecord` has a set of subscriber queues, bounded at 256 events.
 - **Publish:** `put_nowait` into every queue. A full queue closes that subscriber with code 1013. The client's reconnect then starts with a fresh snapshot.
 - **Messages:** `{type: "snapshot", run}`, `{type: "step", ...}`, `{type: "status", status, data, summary}` and `{type: "error", error}`.
-- **Keep-alive:** WebSocket ping every 20 s.
+- **Unknown or archived run:** an `error` event with kind `not_found`, then close code 4404 (the code the UI source stops retrying on). Archiving a run sends the same to its open streams.
+- **Keep-alive:** a `{type: "keepalive", at}` message after 20 s without events, in addition to the server's WebSocket pings. Browsers cannot see protocol pings, so the message lets a client notice a silent connection; clients ignore types they do not know.
 - **Snapshot consistency:** the snapshot is taken under the run lock, together with registering the subscriber, so no event falls between them.
 
 ### 7. Tests
