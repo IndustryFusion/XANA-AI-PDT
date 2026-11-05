@@ -3,14 +3,15 @@
 Python 3.12 / FastAPI backend of XANA AI PDT. It is built in phases (issue #12). Today it provides:
 - the service runtime: configuration, language model selection, and a health report of every dependency;
 - the incident memory database and its migrations;
-- a local environment with sample machine data.
+- a local environment with sample machine data;
+- the diagnostic agent workflow as a package of its own ([`agent/README.md`](agent/README.md)).
 
 See [`architecture.md`](../architecture.md) → Backend.
 
 ```
 app/                 service: settings and get_llm(), health checks, API routes, memory migrations
 migrations/          numbered .sql files, applied once each at startup
-agent/               the xana-agent package: diagnostic agent workflow (installable on its own)
+agent/               the xana-agent package: diagnostic agent workflow, installable and usable on its own
 sample_data/         sample machine data (exported from the UI mock) and its loader
 compose.yaml         local environment
 ```

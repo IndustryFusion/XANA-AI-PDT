@@ -22,6 +22,7 @@ the schema's fields.
 
 from __future__ import annotations
 
+import inspect
 import types
 import typing
 from collections.abc import Callable
@@ -31,18 +32,19 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.runnables import RunnableLambda
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 SCRIPTED_TEXT = "Scripted answer: no language model is configured."
 
-Answer = dict[str, Any] | Callable[[Any], dict[str, Any]]
+Answer = dict[str, Any] | Callable[[Any], Any]
 _EXAMPLES: dict[type[BaseModel], Answer] = {}
 
 
 def register_example(schema: type[BaseModel], answer: Answer) -> None:
     """Sets the answer the scripted model gives for `schema`.
 
-    `answer` is the content as a dict, or a function of the prompt input that returns it.
+    `answer` is the content as a dict, or a function of the prompt input that returns it
+    (an async function is awaited when the model is called asynchronously).
     """
     _EXAMPLES[schema] = answer
 
@@ -84,9 +86,13 @@ def _is_model(annotation: Any) -> bool:
 
 
 class ScriptedChatModel(BaseChatModel):
-    """Chat model with fixed answers; makes no network request."""
+    """Chat model with fixed answers; makes no network request.
+
+    `answers` overrides the registered example answers for this instance only.
+    """
 
     text: str = SCRIPTED_TEXT
+    answers: dict[Any, Any] = Field(default_factory=dict)
 
     @property
     def _llm_type(self) -> str:
@@ -101,10 +107,20 @@ class ScriptedChatModel(BaseChatModel):
         if not _is_model(schema):
             raise TypeError("The scripted model supports Pydantic schemas only")
 
-        def answer(prompt: Any) -> BaseModel:
-            content = _EXAMPLES.get(schema)
-            if callable(content):
-                content = content(prompt)
+        def content_for(prompt: Any) -> Any:
+            content = self.answers.get(schema, _EXAMPLES.get(schema))
+            return content(prompt) if callable(content) else content
+
+        def validate(content: Any) -> BaseModel:
             return schema.model_validate(content if content is not None else example_for(schema))
 
-        return RunnableLambda(answer)
+        def answer(prompt: Any) -> BaseModel:
+            return validate(content_for(prompt))
+
+        async def aanswer(prompt: Any) -> BaseModel:
+            content = content_for(prompt)
+            if inspect.isawaitable(content):
+                content = await content
+            return validate(content)
+
+        return RunnableLambda(answer, afunc=aanswer)
