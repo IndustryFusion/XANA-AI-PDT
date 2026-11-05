@@ -20,11 +20,19 @@ on:
   pull_request:
     paths:
       - "backend/**"
+      - "frontend/src/data/**"
+      - "frontend/e2e/backend/**"
+      - "frontend/playwright.config.js"
+      - "frontend/package*.json"
       - ".github/workflows/backend.yml"
   push:
     branches: [main]
     paths:
       - "backend/**"
+      - "frontend/src/data/**"
+      - "frontend/e2e/backend/**"
+      - "frontend/playwright.config.js"
+      - "frontend/package*.json"
       - ".github/workflows/backend.yml"
 
 permissions:
@@ -79,3 +87,46 @@ jobs:
 
       - name: Local environment file
         run: docker compose -f compose.yaml config --quiet
+
+  # The UI on the backend data source against the local environment, with the
+  # scripted language model and the sample data.
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      LLM_PROVIDER: scripted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start the local environment
+        run: docker compose -f compose.yaml up -d --build db broker sample-data backend
+
+      - name: Wait for the sample data and the backend
+        run: |
+          machine=http://127.0.0.1:9090/ngsi-ld/v1/entities/urn:ngsi-ld:Machine:laser-cutter-01
+          timeout 600 sh -c "until curl -sf -H 'Accept: application/json' $machine > /dev/null; do sleep 5; done"
+          timeout 300 sh -c 'until curl -sf http://127.0.0.1:8000/api/agent/runs > /dev/null; do sleep 3; done'
+          curl -s "http://127.0.0.1:8000/api/diagnostics?fresh=true"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install the UI
+        working-directory: frontend
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: End-to-end tests on the backend data source
+        working-directory: frontend
+        env:
+          XANA_BACKEND_URL: http://127.0.0.1:8000
+        run: npm run test:e2e:backend
+
+      - name: Local environment logs
+        if: failure()
+        run: docker compose -f compose.yaml logs --no-color --tail 300 backend sample-data broker
+

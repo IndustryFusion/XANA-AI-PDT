@@ -128,3 +128,21 @@ def test_scripted_model_needs_no_network(block_network):
     answer = llm.with_structured_output(Decision).invoke("Why is the spindle vibrating?")
     assert isinstance(answer, Decision)
     assert llm.invoke("hello").content
+
+
+async def test_scripted_provider_asks_first_then_proposes(block_network):
+    from xana_agent import InMemoryIncidentMemory, Outcome, RoundInput, Workflow
+    from xana_agent.testing import FakeContextSource, FakeHistorySource, sample_entities, sample_history
+
+    llm = get_llm(Settings(_env_file=None, llm_provider="scripted"))
+    workflow = Workflow(
+        llm, FakeContextSource(sample_entities()), FakeHistorySource(sample_history()), InMemoryIncidentMemory()
+    )
+
+    async def outcome(round_input):
+        return [e async for e in workflow.analyse(round_input) if isinstance(e, Outcome)][0]
+
+    machine = "urn:ngsi-ld:Machine:press-01"
+    first = await outcome(RoundInput(machine_id=machine, issue="Noise"))
+    second = await outcome(RoundInput(machine_id=machine, issue="Noise", round=2, clarifications=["Since Monday"]))
+    assert (first.kind, second.kind) == ("awaiting_input", "awaiting_confirmation")

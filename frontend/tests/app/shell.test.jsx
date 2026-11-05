@@ -157,13 +157,14 @@ describe('entity reference', () => {
 
 test('an unknown data source shows a configuration error', async () => {
   vi.resetModules()
-  vi.stubEnv('VITE_DATA_SOURCE', 'backend')
+  vi.stubEnv('VITE_DATA_SOURCE', 'remote')
   const { default: App } = await import('../../src/App')
   const { render } = await import('@testing-library/react')
   render(<App />)
   const alert = screen.getByRole('alert')
   expect(alert).toHaveTextContent('VITE_DATA_SOURCE')
-  expect(alert).toHaveTextContent('backend')
+  expect(alert).toHaveTextContent('remote')
   expect(alert).toHaveTextContent('mock')
+  expect(alert).toHaveTextContent('backend')
   vi.unstubAllEnvs()
 })

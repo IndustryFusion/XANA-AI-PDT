@@ -86,7 +86,7 @@ Built with React 18 + Vite in JavaScript. Structured views, no chat interface. E
 
 **Data layer.** Screens obtain data only through the UI data interface (`src/data`), one module per area: session, runs, incidents, entities, alerts, dataspace, knowledge base, system health. A data source implements the interface and is selected with `VITE_DATA_SOURCE`:
 - `mock` (default): runs in the browser with deterministic seeded data, a simulated run engine, and development controls for per-area latency and failure. No backend is needed.
-- A backend adapter implementing the same interface talks to the API layer below over REST and WebSocket. Attaching it changes no screen.
+- `backend`: the operations the backend provides (runs and their stream, incident history, system health) over REST and WebSocket, with key mapping (snake_case ↔ camelCase), error mapping and stream reconnection. Every other operation is delegated to the mock source (`{ ...mock[area], ...backend[area] }`), so the whole UI stays usable while later phases bring their backends. Attaching it changed no screen.
 
 The interface is documented in `frontend/docs/data-interface.md`. Lint rules forbid screens from importing a data source or doing network I/O directly.
 
@@ -111,11 +111,12 @@ The run stream delivers the run's current state first, then step events (one per
 - `src/data/index.js`: data facade; selects the data source
 - `src/data/interface.js`: operations per area and result shapes
 - `src/data/sources/mock/`: mock data source and development controls
+- `src/data/sources/backend/`: backend data source (HTTP, run stream, key and error mapping, delegation to the mock)
 - `src/app/`: router, session gate, header, entity references
 - `src/ui/`: design tokens (CSS custom properties, dark and light themes, no CSS framework) and shared components
 - `src/features/`: one folder per area
 
-**Tests:** Vitest with Testing Library (components, data interface), Playwright with axe (end to end, accessibility), ESLint. The `Frontend` workflow runs them on every pull request that touches `frontend/`.
+**Tests:** Vitest with Testing Library (components, data interface), Playwright with axe (end to end, accessibility), ESLint. The `Frontend` workflow runs them on every pull request that touches `frontend/`. The `Backend` workflow's `integration` job runs `frontend/e2e/backend/` against the local environment with the scripted model.
 
 ---
 
@@ -139,7 +140,7 @@ backend/
 
 The agent package never imports the service. The service uses it like any other program would.
 
-**Local environment.** `docker compose -f backend/compose.yaml up --build` starts PostgreSQL with TimescaleDB (databases `memory`, `tsdb` and the broker's), Scorpio, Ollama (pulling `LLM_MODEL` once), the backend on port 8000 and a one-off loader for the sample machine data. The sample data is exported from the UI mock's seed (`frontend/scripts/export-sample-data.mjs`), so machine identifiers agree between the UI and the backend. `LLM_PROVIDER=scripted` runs everything without downloading a model. The frontend development server forwards `/api` and `/ws` to `XANA_BACKEND_URL` (default `http://localhost:8000`). See `backend/README.md`.
+**Local environment.** `docker compose -f backend/compose.yaml up --build` starts PostgreSQL with TimescaleDB (databases `memory`, `tsdb` and the broker's), Scorpio, Ollama (pulling `LLM_MODEL` once), the backend on port 8000 and a one-off loader for the sample machine data. The sample data is exported from the UI mock's seed (`frontend/scripts/export-sample-data.mjs`), so machine identifiers agree between the UI and the backend. `LLM_PROVIDER=scripted` runs everything without downloading a model; its runs ask one question, then propose a diagnosis once the operator has clarified. The frontend development server forwards `/api` and `/ws` to `XANA_BACKEND_URL` (default `http://localhost:8000`). See `backend/README.md`.
 
 #### API Layer (`app/api/`)
 

@@ -110,10 +110,15 @@ describe('source selection', () => {
     expect(resolveSource('')).toMatchObject({ name: 'mock' })
   })
 
+  test('the backend source is available', () => {
+    expect(resolveSource('backend')).toMatchObject({ name: 'backend' })
+    expect(resolveSource('backend').error).toBeUndefined()
+  })
+
   test('an unknown source yields a configuration error naming the setting', () => {
-    expect(resolveSource('backend')).toEqual({
-      name: 'backend',
-      error: { setting: 'VITE_DATA_SOURCE', value: 'backend', accepted: ['mock'] },
+    expect(resolveSource('remote')).toEqual({
+      name: 'remote',
+      error: { setting: 'VITE_DATA_SOURCE', value: 'remote', accepted: ['mock', 'backend'] },
     })
   })
 })

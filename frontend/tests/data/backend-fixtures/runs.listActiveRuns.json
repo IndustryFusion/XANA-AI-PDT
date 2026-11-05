@@ -1,0 +1,17 @@
+{
+  "method": "GET",
+  "path": "/api/agent/runs",
+  "status": 200,
+  "body": [
+    {
+      "run_id": "587a7994-d81e-4cb0-859a-7cf682818303",
+      "incident_id": 1,
+      "machine_id": "urn:ngsi-ld:Machine:laser-cutter-01",
+      "issue": "Cut edges show burrs since this morning",
+      "status": "awaiting_input",
+      "started_at": "2026-11-05T11:19:22.204788+00:00",
+      "updated_at": "2026-11-05T11:19:22.597842+00:00",
+      "escalation_ref": null
+    }
+  ]
+}

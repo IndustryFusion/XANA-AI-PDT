@@ -1,0 +1,213 @@
+{
+  "method": "GET",
+  "path": "/api/agent/status/587a7994-d81e-4cb0-859a-7cf682818303",
+  "status": 200,
+  "body": {
+    "run_id": "587a7994-d81e-4cb0-859a-7cf682818303",
+    "incident_id": 1,
+    "machine_id": "urn:ngsi-ld:Machine:laser-cutter-01",
+    "issue": "Cut edges show burrs since this morning",
+    "status": "awaiting_input",
+    "started_at": "2026-11-05T11:19:22.204788+00:00",
+    "updated_at": "2026-11-05T11:19:22.597842+00:00",
+    "escalation_ref": null,
+    "data": {
+      "question": "When did the issue start, and did anything change on the machine shortly before (maintenance, material, settings)?",
+      "confidence": 0.6,
+      "threshold": 0.9
+    },
+    "steps": [
+      {
+        "node": "observe",
+        "input": {
+          "machine_id": "urn:ngsi-ld:Machine:laser-cutter-01",
+          "issue": "Cut edges show burrs since this morning"
+        },
+        "output": {
+          "summary": "Read Laser cutter 01 and 6 related entities; 2 signals with up to 24 h of history.",
+          "signals": [
+            {
+              "name": "Laser cutter 01 temperature",
+              "value": 30.2,
+              "unit": "°C",
+              "assessment": "rising",
+              "entity_id": "urn:ngsi-ld:Sensor:laser-cutter-01-temperature",
+              "attribute": "value"
+            },
+            {
+              "name": "Laser cutter 01 power",
+              "value": 4.2,
+              "unit": "kW",
+              "assessment": "falling",
+              "entity_id": "urn:ngsi-ld:Sensor:laser-cutter-01-power",
+              "attribute": "value"
+            }
+          ],
+          "sources": [
+            {
+              "source": "Context broker",
+              "status": "ok",
+              "detail": "Machine and 6 related entities read."
+            },
+            {
+              "source": "Time-series database",
+              "status": "ok",
+              "detail": "24 h of history read for 2 signals."
+            }
+          ],
+          "partial_data": false,
+          "entities": [
+            "urn:ngsi-ld:Machine:laser-cutter-01",
+            "urn:ngsi-ld:ProductionLine:line-a",
+            "urn:ngsi-ld:Component:laser-cutter-01-axis-drive",
+            "urn:ngsi-ld:Component:laser-cutter-01-laser-source",
+            "urn:ngsi-ld:Component:laser-cutter-01-cutting-head",
+            "urn:ngsi-ld:Sensor:laser-cutter-01-temperature",
+            "urn:ngsi-ld:Sensor:laser-cutter-01-power"
+          ],
+          "machine_found": true,
+          "machine_type": "LaserCutter"
+        },
+        "at": "2026-11-05T11:19:22.448753+00:00",
+        "round": 1
+      },
+      {
+        "node": "hypothesize",
+        "input": {
+          "observations": 2
+        },
+        "output": {
+          "hypotheses": [
+            {
+              "id": "h1-1",
+              "title": "Wear of a moving component",
+              "confidence": 0.7,
+              "evidence": [
+                "Laser cutter 01 temperature: 30.2 (rising)",
+                "Laser cutter 01 power: 4.2 (falling)"
+              ]
+            },
+            {
+              "id": "h1-2",
+              "title": "Cooling or supply problem",
+              "confidence": 0.5,
+              "evidence": [
+                "Laser cutter 01 temperature: 30.2 (rising)",
+                "Laser cutter 01 power: 4.2 (falling)"
+              ]
+            },
+            {
+              "id": "h1-3",
+              "title": "Sensor or calibration fault",
+              "confidence": 0.3,
+              "evidence": [
+                "Laser cutter 01 temperature: 30.2 (rising)",
+                "Laser cutter 01 power: 4.2 (falling)"
+              ]
+            }
+          ]
+        },
+        "at": "2026-11-05T11:19:22.468211+00:00",
+        "round": 1
+      },
+      {
+        "node": "validate",
+        "input": {
+          "hypotheses": [
+            "h1-1",
+            "h1-2",
+            "h1-3"
+          ],
+          "checks": [
+            {
+              "hypothesis_id": "h1-1",
+              "kind": "history",
+              "entity_id": "urn:ngsi-ld:Sensor:laser-cutter-01-temperature",
+              "attribute": "value",
+              "window_hours": 24,
+              "bucket_minutes": 60
+            },
+            {
+              "hypothesis_id": "h1-1",
+              "kind": "history",
+              "entity_id": "urn:ngsi-ld:Sensor:laser-cutter-01-power",
+              "attribute": "value",
+              "window_hours": 24,
+              "bucket_minutes": 60
+            },
+            {
+              "hypothesis_id": "h1-1",
+              "kind": "lookup",
+              "entity_id": "urn:ngsi-ld:Machine:laser-cutter-01"
+            }
+          ]
+        },
+        "output": {
+          "hypotheses": [
+            {
+              "id": "h1-1",
+              "title": "Wear of a moving component",
+              "confidence": 0.6,
+              "evidence": [
+                "Laser cutter 01 temperature: 30.2 (rising)",
+                "Laser cutter 01 power: 4.2 (falling)"
+              ],
+              "verdict": "plausible",
+              "validation": "Checked 3 of 3 planned data checks."
+            },
+            {
+              "id": "h1-2",
+              "title": "Cooling or supply problem",
+              "confidence": 0.4,
+              "evidence": [
+                "Laser cutter 01 temperature: 30.2 (rising)",
+                "Laser cutter 01 power: 4.2 (falling)"
+              ],
+              "verdict": "plausible",
+              "validation": "Checked 3 of 3 planned data checks."
+            },
+            {
+              "id": "h1-3",
+              "title": "Sensor or calibration fault",
+              "confidence": 0.15,
+              "evidence": [
+                "Laser cutter 01 temperature: 30.2 (rising)",
+                "Laser cutter 01 power: 4.2 (falling)"
+              ],
+              "verdict": "refuted",
+              "validation": "Checked 3 of 3 planned data checks."
+            }
+          ]
+        },
+        "at": "2026-11-05T11:19:22.581309+00:00",
+        "round": 1
+      },
+      {
+        "node": "decide",
+        "input": {
+          "threshold": 0.9
+        },
+        "output": {
+          "root_cause": null,
+          "recommended_action": null,
+          "confidence": 0.6,
+          "threshold": 0.9,
+          "question": "When did the issue start, and did anything change on the machine shortly before (maintenance, material, settings)?",
+          "past_incidents": [],
+          "sources": [
+            {
+              "source": "Incident memory",
+              "status": "ok",
+              "detail": "0 similar incidents found."
+            }
+          ]
+        },
+        "at": "2026-11-05T11:19:22.593336+00:00",
+        "round": 1
+      }
+    ],
+    "escalation": null,
+    "outbox": [],
+    "reopenable": false
+  }
+}

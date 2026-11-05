@@ -17,10 +17,12 @@
 /**
  * Data facade: the only module screens import for data. It exposes every area
  * of the UI data interface (see interface.js), backed by the data source that
- * VITE_DATA_SOURCE selects (default: mock).
+ * VITE_DATA_SOURCE selects: `mock` (default) or `backend` (the backend's
+ * operations, with every other operation delegated to the mock).
  */
 import { OPERATIONS } from './interface'
 import { DataError, toDataError } from './errors'
+import * as backendSource from './sources/backend'
 import * as mockSource from './sources/mock'
 
 export { DataError } from './errors'
@@ -30,7 +32,7 @@ export {
 } from './interface'
 
 export const DATA_SOURCE_SETTING = 'VITE_DATA_SOURCE'
-const SOURCES = { mock: mockSource }
+const SOURCES = { mock: mockSource, backend: backendSource }
 export const AVAILABLE_SOURCES = Object.keys(SOURCES)
 
 /** Resolves a source name to `{ name, source }` or `{ name, error }`. */

@@ -1,6 +1,8 @@
 # UI data interface
 
-Screens obtain all data through this interface (`src/data`). A **data source** implements it. The mock source (`src/data/sources/mock`) is the default; a backend adapter implementing the same interface can be added later and selected with `VITE_DATA_SOURCE`, without changing any screen.
+Screens obtain all data through this interface (`src/data`). A **data source** implements it, and `VITE_DATA_SOURCE` selects it without changing any screen:
+- `mock` (default, `src/data/sources/mock`): everything in the browser;
+- `backend` (`src/data/sources/backend`): the operations the backend provides, with every other operation delegated to the mock (see [Backend source](#backend-source)).
 
 The operation list is defined in `src/data/interface.js` (`OPERATIONS`); result shapes of implemented operations are in `SHAPES` and checked by `tests/data/interface.test.js`. A new data source must pass those tests.
 
@@ -20,6 +22,25 @@ The operation list is defined in `src/data/interface.js` (`OPERATIONS`); result 
 - Live data uses `subscribeX(params, onEvent)`, which returns `unsubscribe()`. The source handles reconnection and polling; screens only see events. Failures arrive as `{ type: 'error', error }` events.
 - Timestamps are ISO 8601 strings. Entity identifiers are NGSI-LD URIs.
 - Status: every operation is **implemented** on the mock source. An operation a data source does not implement rejects with `unavailable`.
+
+## Backend source
+
+Served by the backend (phase 1):
+
+| Area | Operations | Backend |
+|---|---|---|
+| runs | `listActiveRuns`, `startRun`, `getRun`, `subscribeRun`, `clarify`, `confirmResolution`, `escalationPreflight`, `reopenRun`, `stopRun`, `archiveRun` | `/api/agent/…`, `/ws/run/{runId}` |
+| incidents | `listIncidents`, `getIncident`, `reopenIncident` | `/api/incidents` |
+| system | `getHealth` | `/api/diagnostics` |
+
+Every other operation (session, entities, alerts, dataspace, knowledge base, service settings, and the escalation and conversation operations of runs) comes from the mock, so the whole UI stays usable. `src/data/sources/backend/index.js` builds each area as `{ ...mock[area], ...backend[area] }` and lists the served operations in `SERVED`; the mock's development controls still apply to the delegated operations.
+
+- **Transport:** relative paths (`/api/…`, `/ws/…`), so the development server's proxy reaches the backend (`XANA_BACKEND_URL`). `VITE_BACKEND_BASE` sets another prefix or origin. Requests time out after 15 s.
+- **Keys:** the backend uses snake_case; keys are converted both ways, recursively, including step input and output and state data. Values are never changed. Attached files are sent as `{ name, type, size, data_url }`.
+- **Errors:** a backend refusal keeps its kind and message. Without one, HTTP 401/403 map to `unauthorized`, 404 to `not_found`, 409 to `conflict`, 422 to `invalid`, anything else to `unavailable`. A backend that cannot be reached or does not answer is `unavailable`, in the calling area only.
+- **Run stream:** the WebSocket's first message is the snapshot. A lost connection emits `{ type: 'connection', state: 'reconnecting' }` and reconnects after 0.5, 1, 2, 4 and then every 8 s; the new snapshot replaces the screen's state. An unknown or archived run (an `error` event, or close code 4404) ends the stream with `not_found`; a stream that never opened ends with `unavailable`, and the screen offers a retry. `keepalive` messages are not forwarded.
+- **Phase 1 limits:** `escalationPreflight` answers that escalation is not possible, with the backend's reason; `reopenRun` rejects with `conflict`.
+- **Shapes:** `tests/data/backendShapes.test.js` checks every served operation against `SHAPES` with answers recorded from a real backend (`tests/data/backend-fixtures/`, recorded with `scripts/record-backend-fixtures.mjs`).
 
 ## session — implemented
 
