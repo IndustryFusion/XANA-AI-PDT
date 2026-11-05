@@ -135,7 +135,9 @@ def get_llm(settings: Settings | None = None) -> BaseChatModel:
                 model=s.llm_model, api_key=s.openai_api_key, base_url=s.openai_base_url, timeout=s.llm_timeout_s
             )
         case "scripted":
-            from xana_agent import ScriptedChatModel
+            from xana_agent.testing import StepScript
 
-            return ScriptedChatModel()
+            # Fixed answers that pass through every pause: one question first, then a
+            # confident diagnosis once the operator has clarified.
+            return StepScript("clarified").model()
     raise ConfigError(f"LLM_PROVIDER: unknown provider {s.llm_provider}")

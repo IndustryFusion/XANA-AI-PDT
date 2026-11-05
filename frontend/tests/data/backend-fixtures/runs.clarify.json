@@ -1,0 +1,8 @@
+{
+  "method": "POST",
+  "path": "/api/agent/clarify/587a7994-d81e-4cb0-859a-7cf682818303",
+  "status": 200,
+  "body": {
+    "status": "running"
+  }
+}

@@ -42,8 +42,13 @@ The data source is chosen at build time with `VITE_DATA_SOURCE`:
 | Value | Data source |
 |---|---|
 | `mock` (default) | Deterministic mock data in the browser; no backend needed |
+| `backend` | Runs, incident history and system health from the backend; every other area from the mock data |
 
-An unknown value shows a configuration error naming the setting and the accepted values. A backend adapter is added as another source under `src/data/sources/` that implements every operation in `src/data/interface.js` and passes `tests/data/interface.test.js`.
+An unknown value shows a configuration error naming the setting and the accepted values.
+
+**On the backend:** start the backend (`backend/README.md`, for example the local environment with `LLM_PROVIDER=scripted`), then `VITE_DATA_SOURCE=backend npm run dev`. The development server forwards `/api` and `/ws` to `XANA_BACKEND_URL` (default `http://localhost:8000`). Which operations the backend serves is listed in [`docs/data-interface.md`](docs/data-interface.md#backend-source).
+
+**End-to-end tests on the backend:** with the local environment running on the scripted model, `npm run test:e2e:backend` runs `e2e/backend/` against it (`XANA_BACKEND_URL` to point elsewhere). `npm run test:e2e` keeps running the mock tests only. To refresh the recorded backend answers used by the unit tests: `node scripts/record-backend-fixtures.mjs` (`BACKEND_URL`, default `http://localhost:8000`).
 
 `VITE_SESSION_CHECK_MS` (optional) overrides how often the session is re-checked (default 60000 ms); the end-to-end tests use it to exercise session expiry.
 
@@ -96,7 +101,7 @@ Settings are stored in `localStorage` (`xana.mock.controls`); operator changes t
 src/
   app/        shell: router, session gate, sign-in, header, entity references, not-found and configuration error
   ui/         design tokens, themes and shared components
-  data/       UI data interface, facade, mock data source
+  data/       UI data interface, facade, mock and backend data sources
   features/   one folder per area (dashboard, incidents, history, explorer, alerts, dataspace, system)
 tests/        Vitest tests, mirroring src/
 e2e/          Playwright tests

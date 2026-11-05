@@ -15,7 +15,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:bundle": "node scripts/check-prod-bundle.mjs",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:e2e:backend": "XANA_E2E_BACKEND=1 playwright test"
   },
   "dependencies": {
     "react": "^18.3.1",

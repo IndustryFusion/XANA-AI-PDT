@@ -17,10 +17,42 @@
 import { defineConfig, devices } from '@playwright/test'
 
 const PORT = 5174
+const BACKEND_UI_PORT = 5175
+
+// XANA_E2E_BACKEND=1 runs only the `backend` project: the UI on the backend data
+// source against a running backend (XANA_BACKEND_URL, default http://localhost:8000)
+// with the scripted language model and the sample data. Otherwise only the mock project runs.
+const backendRun = !!process.env.XANA_E2E_BACKEND
+
+const mock = {
+  project: { name: 'chromium', testIgnore: 'backend/**', use: { ...devices['Desktop Chrome'] } },
+  server: {
+    command: `npm run dev -- --port ${PORT} --strictPort --host 127.0.0.1`,
+    url: `http://127.0.0.1:${PORT}`,
+    reuseExistingServer: !process.env.CI,
+    env: { VITE_DATA_SOURCE: 'mock', VITE_SESSION_CHECK_MS: '1000' },
+  },
+}
+
+const backend = {
+  project: {
+    name: 'backend',
+    testDir: './e2e/backend',
+    use: { ...devices['Desktop Chrome'], baseURL: `http://127.0.0.1:${BACKEND_UI_PORT}` },
+  },
+  server: {
+    command: `npm run dev -- --port ${BACKEND_UI_PORT} --strictPort --host 127.0.0.1`,
+    url: `http://127.0.0.1:${BACKEND_UI_PORT}`,
+    reuseExistingServer: !process.env.CI,
+    env: { VITE_DATA_SOURCE: 'backend', VITE_SESSION_CHECK_MS: '1000', XANA_BACKEND_URL: process.env.XANA_BACKEND_URL ?? 'http://localhost:8000' },
+  },
+}
+
+const selected = backendRun ? backend : mock
 
 export default defineConfig({
   testDir: './e2e',
-  fullyParallel: true,
+  fullyParallel: !backendRun,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? [['github'], ['list']] : 'list',
@@ -29,11 +61,6 @@ export default defineConfig({
     reducedMotion: 'reduce',
     trace: 'retain-on-failure',
   },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
-  webServer: {
-    command: `npm run dev -- --port ${PORT} --strictPort --host 127.0.0.1`,
-    url: `http://127.0.0.1:${PORT}`,
-    reuseExistingServer: !process.env.CI,
-    env: { VITE_DATA_SOURCE: 'mock', VITE_SESSION_CHECK_MS: '1000' },
-  },
+  projects: [selected.project],
+  webServer: selected.server,
 })

@@ -40,7 +40,7 @@ This starts:
 
 Data and models are kept in Docker volumes between runs. `docker compose -f backend/compose.yaml down -v` removes them.
 
-**Without a model:** `LLM_PROVIDER=scripted docker compose -f backend/compose.yaml up --build` gives fixed answers and downloads no model.
+**Without a model:** `LLM_PROVIDER=scripted docker compose -f backend/compose.yaml up --build` gives fixed answers and downloads no model: each run asks one question, and proposes a diagnosis once the operator has clarified.
 
 **With a cloud model:** set `LLM_PROVIDER=anthropic` (or `openai`), `LLM_MODEL` and the API key in your shell.
 
@@ -106,7 +106,7 @@ cd backend
 ```
 
 - **Database tests:** tests marked `db` need PostgreSQL with TimescaleDB. Point `TEST_DATABASE_URL` at a server where the user may create databases, for example `TEST_DATABASE_URL=postgresql://xana@localhost:5432/postgres .venv/bin/pytest`. Without it they are skipped.
-- **CI:** the `Backend` workflow runs linting, the formatting check, all tests including the database tests, and a check of `compose.yaml` on every pull request that touches `backend/`.
+- **CI:** the `Backend` workflow runs linting, the formatting check, all tests including the database tests, and a check of `compose.yaml` on every pull request that touches `backend/`. Its `integration` job starts the local environment with `LLM_PROVIDER=scripted` and runs the UI's end-to-end tests on the backend data source (`frontend/e2e/backend/`); it also runs when the UI's data layer changes.
 
 ## Sample data
 
