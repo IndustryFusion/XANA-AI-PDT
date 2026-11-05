@@ -57,7 +57,8 @@ async def run_stream(websocket: WebSocket, run_id: str) -> None:
         runs.unsubscribe(run_id, sub)
         for task in (sender, receiver):
             task.cancel()
-        await asyncio.gather(sender, receiver, return_exceptions=True)
+        # asyncio.wait, not gather: a cancellation of this handler passes through unchanged.
+        await asyncio.wait({sender, receiver})
 
 
 async def _send(websocket: WebSocket, snapshot: dict, sub: Subscriber, keepalive: float) -> None:
