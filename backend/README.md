@@ -3,6 +3,7 @@
 Python 3.12 / FastAPI backend of XANA AI PDT. It is built in phases (issue #12). Today it provides:
 - the service runtime: configuration, language model selection, and a health report of every dependency;
 - the incident memory database and its migrations;
+- runs that operators start, clarify, confirm or reject, stop and archive, with a live stream and the incident history ([API](#api));
 - a local environment with sample machine data;
 - the diagnostic agent workflow as a package of its own ([`agent/README.md`](agent/README.md)).
 
@@ -10,6 +11,9 @@ See [`architecture.md`](../architecture.md) → Backend.
 
 ```
 app/                 service: settings and get_llm(), health checks, API routes, memory migrations
+  api/               HTTP and WebSocket routes, error shape
+  runs/              run manager: lifecycle, rounds in the background, stream subscribers
+  memory/            migrations, run and incident storage, the workflow's incident memory
 migrations/          numbered .sql files, applied once each at startup
 agent/               the xana-agent package: diagnostic agent workflow, installable and usable on its own
 sample_data/         sample machine data (exported from the UI mock) and its loader
@@ -53,6 +57,30 @@ curl 'http://localhost:8000/api/diagnostics?fresh=true'
 Every check (memory, time-series store, context broker, language model) should be `ok`. While the model is still downloading, the language model check is `degraded`.
 
 **With the UI:** in `frontend/`, run `npm run dev`. The development server forwards `/api` and `/ws` to `XANA_BACKEND_URL` (default `http://localhost:8000`).
+
+## API
+
+Fields are snake_case. A refused request answers `{"error": {"kind", "message"}}`: `not_found` (404), `conflict` (409, the run's status does not allow the operation), `invalid` (422) or `unavailable` (503, for example when the memory database cannot be reached).
+
+| Endpoint | Method | Purpose |
+|---|---|---|
+| `/api/agent/run` | POST `{machine_id, issue}` | Start a run; answers 202 `{run_id}` before the first step. `machine_id` may be a short name such as `laser-cutter-01` |
+| `/api/agent/runs` | GET | Runs that are not archived, newest first |
+| `/api/agent/status/{run_id}` | GET | The run with `data`, `steps`, `escalation`, `outbox` and `reopenable` |
+| `/api/agent/clarify/{run_id}` | POST `{text, files}` | Answer the agent's question (`awaiting_input`); starts a new round |
+| `/api/agent/confirm-resolution/{run_id}` | POST `{confirmed, text, files}` | Confirm (logs the incident) or reject with a reason (new round) in `awaiting_confirmation` |
+| `/api/agent/stop/{run_id}` | POST `{reason?}` | Stop an open run, cancelling a round in progress |
+| `/api/agent/archive/{run_id}` | POST | Move a finished run to the history; 204 |
+| `/api/agent/escalate-preflight/{run_id}` | GET | Always `possible: false` in this phase |
+| `/api/agent/reopen/{run_id}` | POST | Always `conflict` in this phase (no machine-builder conversations yet) |
+| `/api/incidents` | GET `?machine_id&status=a,b&from&to` | History, newest first; `from` and `to` are inclusive dates (UTC) |
+| `/api/incidents/{id}` | GET | A history record with decision, resolution and the full trace |
+| `/api/incidents/{id}/reopen` | POST | Start a new run with the incident's machine and issue; 202 `{run_id}` |
+| `/ws/run/{run_id}` | WebSocket | `snapshot` first, then `step` and `status` events; `keepalive` every 20 s while quiet; `error` and close code 4404 for an unknown or archived run |
+
+- **Attachments:** `files` items are `{name, type, size, data_url}`: images, PDF or plain text, at most 5 files of 10 MB each. Only the name, type and size are kept.
+- **Persistence:** every change is stored before the stream reports it. After a restart, open runs are listed again; a round that was in progress runs again from its start.
+- **Concurrency:** at most `MAX_CONCURRENT_ROUNDS` rounds run at once; others wait in status `running`.
 
 ## Configuration
 

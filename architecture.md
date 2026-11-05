@@ -56,7 +56,7 @@ It is not a chatbot. Every output is a typed, structured artifact: a hypothesis 
 ┌────────▼──────────────────┐      │  → pgvector                   │
 │  PostgreSQL               │      │                               │
 │  incidents │ agent_traces │      │  retrieval-service            │
-│  pending_runs             │      │  embed query → pgvector       │
+│  runs                     │      │  embed query → pgvector       │
 └───────────────────────────┘      │  search → rerank → chunks     │
                                    │                               │
 ┌──────────────────────────┐       │  pgvector  (rag DB)           │
@@ -123,13 +123,13 @@ The run stream delivers the run's current state first, then step events (one per
 
 Python 3.12 + FastAPI, async throughout; database access with psycopg 3 (async).
 
-The backend is delivered in phases (issue #12). This section describes the target; what exists today is the service runtime (configuration, language model factory, `GET /api/diagnostics`), the memory database migrations, the local environment and the diagnostic agent workflow package.
+The backend is delivered in phases (issue #12). This section describes the target; what exists today is the service runtime (configuration, language model factory, `GET /api/diagnostics`), the memory database migrations, the local environment, the diagnostic agent workflow package, and the phase 1 run API with its stream and incident history.
 
 **Layout.** Two Python packages:
 
 ```
 backend/
-  app/                 service: config.py (settings, get_llm), health.py, api/, memory/
+  app/                 service: config.py (settings, get_llm), health.py, api/, runs/, memory/
   migrations/          numbered .sql files, applied at startup
   agent/xana_agent/    diagnostic agent workflow and its tools: a package of its own,
                        installable and testable without the service
@@ -143,26 +143,37 @@ The agent package never imports the service. The service uses it like any other 
 
 #### API Layer (`app/api/`)
 
+Fields are snake_case. A refused request answers `{"error": {"kind", "message"}}` with kind `not_found` (404), `conflict` (409), `invalid` (422) or `unavailable` (503); the UI maps the kind directly.
+
 | Endpoint | Method | Description |
 |---|---|---|
-| `/api/agent/run` | POST | Start an agent run; returns `run_id` immediately (202) |
-| `/api/agent/runs` | GET | List all active (non-terminal) runs |
-| `/api/agent/status/{run_id}` | GET | Poll run status and accumulated steps |
-| `/api/agent/clarify/{run_id}` | POST | Submit operator clarification to resume a paused run |
-| `/api/agent/escalate/{run_id}` | POST | Escalate to machine builder via IFF Dataspace |
-| `/api/agent/mb-feedback/{run_id}` | POST | Process a machine builder reply (called by inbox poller) |
-| `/api/agent/operator-approve/{run_id}` | POST | Operator approves or declines an out-of-policy data request |
-| `/api/agent/stop/{run_id}` | POST | Cancel an active or paused run |
-| `/api/incidents` | GET | List past incidents from memory DB |
+| `/api/agent/run` | POST | Start a run for `{machine_id, issue}`; returns `run_id` immediately (202). A short machine name is resolved through the broker |
+| `/api/agent/runs` | GET | List all runs that are not archived, newest first |
+| `/api/agent/status/{run_id}` | GET | Run with state data, steps, `escalation`, `outbox` and `reopenable` |
+| `/api/agent/clarify/{run_id}` | POST | Operator clarification for a run in `awaiting_input`; starts a new round |
+| `/api/agent/confirm-resolution/{run_id}` | POST | Confirm the proposed resolution (runs `act`) or reject it with a reason (new round) |
+| `/api/agent/stop/{run_id}` | POST | Stop an open run, cancelling a round in progress |
+| `/api/agent/archive/{run_id}` | POST | Move a finished run to the incident history |
+| `/api/agent/escalate-preflight/{run_id}` | GET | Whether escalation is possible; always not possible in phase 1 |
+| `/api/agent/reopen/{run_id}` | POST | Reopen a run with a machine-builder conversation; always `conflict` in phase 1 |
+| `/api/incidents` | GET | History, filtered by `machine_id`, outcomes (`status=a,b`) and an inclusive closing date range (`from`, `to`) |
 | `/api/incidents/{id}` | GET | Incident detail + full agent trace |
-| `/api/diagnostics` | GET | Live connectivity check: PostgreSQL, TimescaleDB, Scorpio, Alerta, LLM |
-| `/api/gateway/*` | — | Gateway token management and peer/capability inspection |
-| `/api/ifric/*` | — | IFRIC registry token management and factory identity |
-| `/ws/run/{run_id}` | WebSocket | Live stream of node updates; sentinel on completion or pause |
-| `/events/ngsi` | POST | Webhook for Scorpio NGSI-LD notifications |
-| `/events/alert` | POST | Webhook for external alert systems |
+| `/api/incidents/{id}/reopen` | POST | Start a new run with the incident's machine and issue |
+| `/api/diagnostics` | GET | Live connectivity check: PostgreSQL, TimescaleDB, Scorpio, LLM |
+| `/ws/run/{run_id}` | WebSocket | Live stream: the run's snapshot first, then step and status events |
+| `/api/agent/escalate/{run_id}` | POST | *Later phase.* Escalate to machine builder via IFF Dataspace |
+| `/api/agent/mb-feedback/{run_id}` | POST | *Later phase.* Process a machine builder reply (called by inbox poller) |
+| `/api/agent/operator-approve/{run_id}` | POST | *Later phase.* Operator approves or declines an out-of-policy data request |
+| `/api/gateway/*` | — | *Later phase.* Gateway token management and peer/capability inspection |
+| `/api/ifric/*` | — | *Later phase.* IFRIC registry token management and factory identity |
+| `/events/ngsi` | POST | *Later phase.* Webhook for Scorpio NGSI-LD notifications |
+| `/events/alert` | POST | *Later phase.* Webhook for external alert systems |
 
-`RunRecord` (in `api/run_store.py`) is the central per-run state object. It holds the step list and a list of subscriber queues so multiple WebSocket clients can connect to the same run. The in-memory store (`run_store: dict[str, RunRecord]`) is sufficient for a single-process deployment; swap to Redis for horizontal scaling.
+**Runs** (`app/runs/`). `RunManager` holds one `RunRecord` per non-archived run: its stored state, a lock that every change takes, the task of the round in progress and the subscribers of its stream. Each round runs as an `asyncio` task; at most `MAX_CONCURRENT_ROUNDS` run at once and further rounds wait in `running`. An operation is accepted only in the statuses that allow it (clarify in `awaiting_input`; confirm or reject in `awaiting_confirmation`; stop in `running`, `awaiting_input`, `awaiting_confirmation`; archive in `completed`, `failed`, `stopped`), otherwise it is refused as `conflict`. Stopping cancels the round; a step that completes afterwards is discarded. Operator answers are recorded as `clarification` and `resolution` steps; attached files keep only name, type and size.
+
+**Stream.** Each subscriber has a queue of 256 events; publishing never waits. A full queue closes that subscriber (code 1013) and its reconnect starts with a fresh snapshot. The snapshot is taken together with registering the subscriber, under the run's lock, so no event falls between them. A `keepalive` message is sent after 20 s without events. An unknown or archived run gets an `error` event and close code 4404.
+
+The in-memory manager is sufficient for a single-process deployment; for horizontal scaling it would need a shared store.
 
 #### Agent Runtime (`agent/xana_agent/`)
 
@@ -310,41 +321,62 @@ PostgreSQL as the AI memory store — not for system state.
 **Schema** (migrations applied automatically at startup):
 
 ```sql
--- 001_init.sql
+-- 002_runs.sql: every run that is not archived
+runs (
+    run_id          TEXT PRIMARY KEY,
+    incident_number INT,
+    machine_id      TEXT,
+    issue           TEXT,
+    status          TEXT,   -- running | awaiting_input | awaiting_confirmation | completed | failed | stopped
+    data            JSONB,  -- state data of the status
+    steps           JSONB,  -- completed steps, each with its round
+    round           INT,
+    clarifications  JSONB,
+    rejected        JSONB,  -- rejected resolutions with reasons
+    started_at      TIMESTAMPTZ,
+    updated_at      TIMESTAMPTZ
+)
+
+-- 003_incidents.sql
+incident_number   SEQUENCE   -- given when a run first leaves running
+
 incidents (
-    id          SERIAL PRIMARY KEY,
-    machine_id  TEXT,
-    issue       TEXT,
-    root_cause  TEXT,
-    resolution  TEXT,
-    timestamp   TIMESTAMPTZ
+    id                 SERIAL PRIMARY KEY,
+    number             INT UNIQUE,
+    run_id             TEXT UNIQUE,
+    machine_id         TEXT,
+    machine_type       TEXT,
+    issue              TEXT,
+    outcome            TEXT,     -- completed | failed | stopped, set when archived
+    root_cause         TEXT,
+    recommended_action TEXT,
+    decision           JSONB,    -- the last decide step's output
+    resolution         TEXT,
+    confirmed          BOOLEAN,  -- the operator confirmed the diagnosis
+    confirmed_at       TIMESTAMPTZ,
+    started_at         TIMESTAMPTZ,
+    closed_at          TIMESTAMPTZ,
+    archived_at        TIMESTAMPTZ,
+    reopened_run_id    TEXT
 )
 
 agent_traces (
     id          SERIAL PRIMARY KEY,
     incident_id INT REFERENCES incidents(id) ON DELETE CASCADE,
     step        INT,
-    action      TEXT,      -- OBSERVE | HYPOTHESIZE | VALIDATE | DECIDE | ACT
+    round       INT,
+    action      TEXT,      -- observe | hypothesize | validate | decide | act | clarification | resolution
     input       JSONB,
     output      JSONB,
     timestamp   TIMESTAMPTZ
 )
-
--- 002_pending_runs.sql
-pending_runs (
-    run_id                  TEXT PRIMARY KEY,
-    status                  TEXT NOT NULL,  -- awaiting_input | awaiting_machine_builder | awaiting_operator_approval
-    machine_id              TEXT NOT NULL DEFAULT '',
-    issue_summary           TEXT NOT NULL DEFAULT '',
-    created_at              TIMESTAMPTZ NOT NULL,
-    steps                   JSONB NOT NULL DEFAULT '[]',
-    final_state             JSONB,
-    clarification_message   TEXT,
-    clarification_confidence FLOAT
-)
 ```
 
-`pending_runs` is the persistence backing for open runs. On each transition to a non-terminal state (`awaiting_input`, `awaiting_machine_builder`, `awaiting_operator_approval`), the run is upserted into this table. On completion, failure, or stop it is deleted. At startup the backend restores all rows into the in-memory `run_store` so open incidents survive a backend restart.
+`runs` is the persistence backing for every run that is not archived; the UI lists finished runs until the operator archives them. Each step and status change is written in one transaction before it is published to watchers, so a watcher never sees an event that would be missing after a restart. At startup the backend restores all rows. A run in `running` drops the steps of its current round and runs that round again; if the round was the `act` after a confirmation, only `act` runs again (storing is idempotent by run).
+
+`incidents` serves two purposes. `act` stores a confirmed diagnosis through `PostgresIncidentMemory`, the workflow's `IncidentMemory`; `similar()` returns confirmed rows of the same machine first, then of the same machine type, newest first. Archiving writes the history record (outcome, decision, resolution, close time and full trace) and removes the `runs` row in one transaction; the history lists rows with `archived_at` set.
+
+If the memory database is not reachable, runs cannot be stored: starting a run is refused as `unavailable`, and migrations and the restore happen on the first request after it is back.
 
 `app/memory/migrate.py` maintains a `schema_migrations` tracking table and applies `.sql` files in lexicographic order. Idempotent — safe to call on every startup.
 
@@ -388,6 +420,7 @@ ANTHROPIC_API_KEY=... / OPENAI_API_KEY=...   # secret; required for that provide
 
 # Agent behaviour
 DECISION_CONFIDENCE_THRESHOLD=0.9   # runs below this ask for clarification
+MAX_CONCURRENT_ROUNDS=2             # analysis rounds at the same time; others wait
 DATA_SHARING_POLICY=minimal          # minimal | adjacent | timeseries
 
 # Data sources (IFF cluster DNS in production)
@@ -498,7 +531,7 @@ for the full deployment walkthrough, including creating the `rag` database.
 
 **Structured output throughout.** All LLM responses are Pydantic-typed via `with_structured_output`. A normaliser validator on every `confidence` field accepts both `0.7` and `70` from the LLM and always stores a `[0, 1]` float. The UI never renders raw LLM text.
 
-**Run persistence.** Open runs (`awaiting_input`, `awaiting_machine_builder`, `awaiting_operator_approval`) are upserted into the `pending_runs` PostgreSQL table on every state transition and restored into the in-memory store on startup. Active incidents survive backend restarts.
+**Run persistence.** Every run that is not archived is written to the `runs` PostgreSQL table on every step and status change, before watchers hear of it, and restored into the in-memory manager on startup. Paused runs (`awaiting_input`, `awaiting_confirmation`, and later `awaiting_machine_builder`, `awaiting_operator_approval`) and finished but not yet archived runs survive backend restarts; a round in progress runs again from its start.
 
 **Dataspace escalation.** Unresolved incidents can be escalated to the machine builder via the IFF Dataspace. The backend resolves the machine builder from the IFRIC registry, matches the gateway participant ID, enforces the data-sharing policy, and sends the NGSI-LD entity as a file-transfer and the incident summary as a structured message. A background inbox polling loop (30 s interval) picks up replies automatically.
 
@@ -506,6 +539,6 @@ for the full deployment walkthrough, including creating the `rag` database.
 
 **Single LLM factory.** `get_llm()` resolves the provider at call time from settings. Ollama is the default for local development; switching to Anthropic or OpenAI requires only an environment variable change.
 
-**In-memory run store with DB backing.** `run_store: dict[str, RunRecord]` is the primary source of truth for running state. `pending_runs` in PostgreSQL provides persistence across restarts. For horizontal scaling, replace `run_store` with a Redis-backed store.
+**In-memory run manager with DB backing.** `RunManager` holds a `RunRecord` per run and is the primary source of truth for running state. `runs` in PostgreSQL provides persistence across restarts. For horizontal scaling, replace the manager's records with a shared store such as Redis.
 
 **Event deduplication.** The event worker tracks active machine runs in a set. Duplicate events (e.g., Scorpio firing multiple times for the same machine) are dropped until the current run completes.
