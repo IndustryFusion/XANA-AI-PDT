@@ -34,18 +34,21 @@ def write(directory, name, sql):
     (directory / name).write_text(sql)
 
 
+REAL = sorted(p.name for p in MIGRATIONS_DIR.glob("*.sql"))
+
+
 @pytest.fixture
 def migrations(tmp_path):
     for path in MIGRATIONS_DIR.glob("*.sql"):
         write(tmp_path, path.name, path.read_text())
-    write(tmp_path, "002_things.sql", "CREATE TABLE things (id INT PRIMARY KEY);")
+    write(tmp_path, "900_things.sql", "CREATE TABLE things (id INT PRIMARY KEY);")
     return tmp_path
 
 
 async def test_empty_database_gets_all_migrations_in_order(fresh_database, migrations):
     url = fresh_database()
     newly = await Migrator(url, migrations).apply()
-    assert newly == ["001_schema_migrations.sql", "002_things.sql"]
+    assert newly == [*REAL, "900_things.sql"]
     assert applied(url) == newly
 
 
@@ -62,25 +65,25 @@ async def test_restart_applies_nothing_and_keeps_data(fresh_database, migrations
 async def test_only_new_migration_applied(fresh_database, migrations):
     url = fresh_database()
     await Migrator(url, migrations).apply()
-    write(migrations, "003_more.sql", "ALTER TABLE things ADD COLUMN label TEXT;")
-    assert await Migrator(url, migrations).apply() == ["003_more.sql"]
+    write(migrations, "901_more.sql", "ALTER TABLE things ADD COLUMN label TEXT;")
+    assert await Migrator(url, migrations).apply() == ["901_more.sql"]
 
 
 async def test_failing_migration_leaves_nothing(fresh_database, migrations):
     url = fresh_database()
     await Migrator(url, migrations).apply()
-    write(migrations, "003_broken.sql", "CREATE TABLE half_done (id INT); SELECT * FROM missing_table;")
+    write(migrations, "902_broken.sql", "CREATE TABLE half_done (id INT); SELECT * FROM missing_table;")
     migrator = Migrator(url, migrations)
-    with pytest.raises(MigrationError, match="003_broken.sql"):
+    with pytest.raises(MigrationError, match="902_broken.sql"):
         await migrator.apply()
-    assert "003_broken.sql" not in applied(url)
+    assert "902_broken.sql" not in applied(url)
     with psycopg.connect(url) as conn:
         assert conn.execute("SELECT to_regclass('half_done')").fetchone()[0] is None
 
     s = make_settings(postgres_memory_url=url)
     status, detail = await HealthService(s, migrator)._memory()
     assert status == "error"
-    assert "003_broken.sql" in detail
+    assert "902_broken.sql" in detail
 
 
 async def test_memory_reachable_later(fresh_database):
@@ -91,7 +94,7 @@ async def test_memory_reachable_later(fresh_database):
         fresh_database.create_later(url)
         memory = next(c for c in client.get("/api/diagnostics?fresh=true").json()["checks"] if c["id"] == "memory")
     assert memory["status"] == "ok", memory
-    assert applied(url) == ["001_schema_migrations.sql"]
+    assert applied(url) == REAL
 
 
 async def test_concurrent_runners_apply_once(fresh_database, migrations):
@@ -99,4 +102,4 @@ async def test_concurrent_runners_apply_once(fresh_database, migrations):
 
     url = fresh_database()
     results = await asyncio.gather(Migrator(url, migrations).apply(), Migrator(url, migrations).apply())
-    assert sorted(len(r) for r in results) == [0, 2]
+    assert sorted(len(r) for r in results) == [0, len(REAL) + 1]

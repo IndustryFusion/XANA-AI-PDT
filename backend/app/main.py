@@ -21,14 +21,22 @@ import asyncio
 import contextlib
 import logging
 from collections.abc import AsyncIterator
+from dataclasses import dataclass
+from datetime import timedelta
 
 from fastapi import FastAPI
+from langchain_core.language_models import BaseChatModel
 
-from app.api import diagnostics
-from app.config import Settings, load_settings
+from app.api import diagnostics, errors, incidents, runs, stream
+from app.config import Settings, get_llm, load_settings
 from app.health import HealthService
 from app.memory.migrate import Migrator
+from app.memory.store import Database, IncidentStore, RunStore
 from app.redact import RedactingFilter, Redactor
+from app.runs.machines import MachineResolver
+from app.runs.manager import RunManager
+from xana_agent import NgsiContextSource, TimescaleHistorySource, Workflow
+from xana_agent.sources.base import ContextSource, HistorySource, IncidentMemory
 
 log = logging.getLogger(__name__)
 
@@ -41,27 +49,80 @@ def configure_logging(settings: Settings, redactor: Redactor) -> None:
     logging.basicConfig(level=settings.log_level, handlers=[handler], force=True)
 
 
-def create_app(settings: Settings | None = None, health: HealthService | None = None) -> FastAPI:
+@dataclass(frozen=True)
+class AgentDeps:
+    """What the diagnostic workflow reads from, and how a short machine name is resolved."""
+
+    llm: BaseChatModel
+    context: ContextSource
+    history: HistorySource
+    machines: MachineResolver
+
+    @classmethod
+    def from_settings(cls, s: Settings) -> AgentDeps:
+        return cls(
+            llm=get_llm(s),
+            context=NgsiContextSource(s.ngsi_url, s.ngsi_tenant),
+            history=TimescaleHistorySource(s.timescale_db_url.get_secret_value(), s.timescale_table),
+            machines=MachineResolver(s.ngsi_url, s.ngsi_tenant, s.health_timeout_s),
+        )
+
+
+def create_app(
+    settings: Settings | None = None, health: HealthService | None = None, agent: AgentDeps | None = None
+) -> FastAPI:
     settings = settings or load_settings()
     redactor = settings.redactor()
-    migrator = Migrator(
-        settings.postgres_memory_url.get_secret_value(), redactor=redactor, connect_timeout=settings.health_timeout_s
-    )
+    memory_url = settings.postgres_memory_url.get_secret_value()
+    migrator = Migrator(memory_url, redactor=redactor, connect_timeout=settings.health_timeout_s)
     health = health or HealthService(settings, migrator)
+    agent = agent or AgentDeps.from_settings(settings)
+    db = Database(memory_url, settings.health_timeout_s, redactor)
+    incident_store = IncidentStore(db)
+
+    def workflow(memory: IncidentMemory) -> Workflow:
+        return Workflow(
+            agent.llm,
+            agent.context,
+            agent.history,
+            memory,
+            threshold=settings.decision_confidence_threshold,
+            llm_timeout_s=settings.llm_timeout_s,
+            history_window=timedelta(hours=24),
+        )
+
+    manager = RunManager(
+        RunStore(db),
+        incident_store,
+        workflow,
+        agent.machines,
+        migrator,
+        max_concurrent_rounds=settings.max_concurrent_rounds,
+    )
 
     @contextlib.asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        # Startup never waits for, or fails on, a dependency: migrations that cannot run now
-        # run later from the memory health check.
-        task = asyncio.create_task(migrator.try_apply())
+        # Startup never waits for, or fails on, a dependency. If the memory database is not
+        # reachable yet, migrations and the restore of stored runs happen on the first request
+        # that needs them (or from the memory health check).
+        await db.open()
+        task = asyncio.create_task(manager.start_up())
         yield
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await task
+        await manager.shut_down()
+        await db.close()
 
     app = FastAPI(title="XANA AI PDT backend", version="0.1.0", lifespan=lifespan)
     app.state.settings = settings
     app.state.migrator = migrator
     app.state.health = health
+    app.state.runs = manager
+    app.state.incidents = incident_store
+    errors.install(app)
     app.include_router(diagnostics.router)
+    app.include_router(runs.router)
+    app.include_router(incidents.router)
+    app.include_router(stream.router)
     return app
