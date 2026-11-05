@@ -49,6 +49,7 @@ class Settings(BaseSettings):
     llm_timeout_s: float = Field(120, gt=0)
 
     decision_confidence_threshold: float = Field(0.9, ge=0, le=1)
+    max_concurrent_rounds: int = Field(2, ge=1)
 
     ngsi_url: str = "http://localhost:9090"
     ngsi_tenant: str | None = None
