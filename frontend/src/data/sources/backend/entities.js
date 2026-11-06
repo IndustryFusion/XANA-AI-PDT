@@ -16,12 +16,45 @@
 
 /**
  * The entities area served by the backend (`/api/ngsi`). Attribute names are data, so answers
- * that hold them skip the key mapping. Live updates and value hints come in later changes.
+ * that hold them skip the key mapping. Value hints come in a later change.
  */
+import { DataError } from '../../errors'
 import { request, seg } from './http'
+import { socketUrl } from './runs'
 
 const AREA = 'entities'
 const raw = { raw: true }
+
+/** The stream of changes: it ends with one `error` event, and the screen resubscribes when health says `ok`. */
+function subscribeEntities({ type, ids } = {}, onEvent) {
+  const params = new URLSearchParams()
+  if (ids?.length) params.set('ids', ids.join(','))
+  else if (type) params.set('type', type)
+  const query = params.toString()
+  const socket = new WebSocket(socketUrl(`/api/ngsi/ws${query ? `?${query}` : ''}`))
+  let ended = false
+  const end = (message) => {
+    if (ended) return
+    ended = true
+    onEvent({ type: 'error', error: new DataError(AREA, 'unavailable', message) })
+  }
+  socket.onmessage = (event) => {
+    if (ended) return
+    let message
+    try {
+      message = JSON.parse(event.data)
+    } catch {
+      return
+    }
+    if (message.type === 'update') onEvent({ type: 'update', entityId: message.entity_id, attributes: message.attributes })
+  }
+  socket.onerror = () => end('Live updates cannot be reached.')
+  socket.onclose = () => end('The live updates connection was lost.')
+  return () => {
+    ended = true
+    socket.close()
+  }
+}
 
 const queryParams = ({ type, id, idPattern, q, limit } = {}) => ({ type, id, id_pattern: idPattern, q, limit })
 
@@ -45,4 +78,6 @@ export const entities = {
   listTypesAt: (at) => request(AREA, 'GET', '/api/ngsi/timeshift/types', { ...raw, params: { at } }),
   queryEntitiesAt: (at, query) =>
     request(AREA, 'GET', '/api/ngsi/timeshift/entities', { ...raw, params: { at, ...queryParams(query) } }),
+  subscribeEntities,
+  getLiveUpdateHealth: () => request(AREA, 'GET', '/api/ngsi/subscription-health'),
 }

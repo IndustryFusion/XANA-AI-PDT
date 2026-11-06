@@ -18,9 +18,14 @@
 from __future__ import annotations
 
 import logging
+import re
 from urllib.parse import unquote, urlsplit, urlunsplit
 
 MASK = "***"
+# What may hold a token wherever it appears, known to this process or not.
+_URL_PASSWORD = re.compile(r"([A-Za-z][A-Za-z0-9+.\-]*://[^/\s:@]*:)[^@\s/]+@")
+_JWT = re.compile(r"\beyJ[\w\-]+\.[\w\-]+(\.[\w\-]*)?")
+_BEARER = re.compile(r"\b(Bearer|Key)\s+[\w\-.~+/=]{8,}")
 
 
 def mask_url(url: str) -> str:
@@ -56,7 +61,9 @@ class Redactor:
         result = str(text)
         for secret in self._secrets:
             result = result.replace(secret, MASK)
-        return result
+        result = _URL_PASSWORD.sub(rf"\g<1>{MASK}@", result)
+        result = _JWT.sub(MASK, result)
+        return _BEARER.sub(rf"\g<1> {MASK}", result)
 
 
 class RedactingFilter(logging.Filter):

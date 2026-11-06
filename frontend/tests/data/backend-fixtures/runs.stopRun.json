@@ -1,6 +1,6 @@
 {
   "method": "POST",
-  "path": "/api/agent/stop/c1f2aded-1d1b-4d9f-8555-5a5900ac6ca1",
+  "path": "/api/agent/stop/2f3829d8-b50a-4670-a7f8-952e74fc0990",
   "status": 200,
   "body": {
     "status": "stopped"

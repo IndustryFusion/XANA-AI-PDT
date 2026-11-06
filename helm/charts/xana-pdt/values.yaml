@@ -44,6 +44,8 @@ config:
   KEYCLOAK_CLIENT_ID: scorpio
   NGSI_URL: http://scorpio-all-in-one-runner:9090
   PGREST_URL: http://pgrest:3000
+  MQTT_BROKER_URL: mqtt://emqx-listeners:1883
+  MQTT_MGMT_URL: http://emqx-dashboard:18083
   POSTGRES_SSLMODE: require
 
 # Database addresses. The chart builds TIMESCALE_DB_URL and POSTGRES_MEMORY_URL from

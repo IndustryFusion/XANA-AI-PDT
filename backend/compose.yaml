@@ -24,9 +24,10 @@
 # Optional services, each under a profile (see backend/README.md):
 #   --profile auth      Keycloak
 #   --profile history   PostgREST, for the explorer's history and time-shift
+#   --profile live      EMQX, for live updates in the explorer
 #
 # Host ports can be changed with XANA_DB_PORT, XANA_BROKER_PORT, XANA_OLLAMA_PORT,
-# XANA_KEYCLOAK_PORT, XANA_PGREST_PORT and XANA_BACKEND_PORT.
+# XANA_KEYCLOAK_PORT, XANA_PGREST_PORT, XANA_MQTT_PORT, XANA_MQTT_MGMT_PORT and XANA_BACKEND_PORT.
 
 name: xana-ai-pdt
 
@@ -51,6 +52,8 @@ x-backend-env: &backend-env
   NGSI_URL: http://broker:9090
   NGSI_CONTEXT_URL: ${NGSI_CONTEXT_URL:-}
   PGREST_URL: http://pgrest:3000
+  MQTT_BROKER_URL: mqtt://emqx:1883
+  MQTT_MGMT_URL: http://emqx:18083
   TIMESCALE_DB_URL: postgresql://xana@db:5432/tsdb
   POSTGRES_MEMORY_URL: postgresql://xana@db:5432/memory
   LOG_LEVEL: ${LOG_LEVEL:-INFO}
@@ -127,6 +130,15 @@ services:
         condition: service_completed_successfully
     ports:
       - "127.0.0.1:${XANA_PGREST_PORT:-3000}:3000"
+
+  # On the platform's version. Here it takes any client; on the platform it checks a token and
+  # a role, as backend/README.md says.
+  emqx:
+    image: emqx/emqx:5.8.8
+    profiles: [live]
+    ports:
+      - "127.0.0.1:${XANA_MQTT_PORT:-1883}:1883"
+      - "127.0.0.1:${XANA_MQTT_MGMT_PORT:-18083}:18083"
 
   broker:
     image: scorpiobroker/all-in-one-runner:java-latest

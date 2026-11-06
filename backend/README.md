@@ -52,7 +52,9 @@ Data and models are kept in Docker volumes between runs. `docker compose -f back
 
 **With the explorer's history and time-shift:** add `--profile history`, which starts PostgREST (v12, as on the platform) on the sample history. An existing database gains the platform's columns when the sample data loads. To refuse requests without a token, as the platform does, set `XANA_PGREST_ANON_ROLE=` and use the `auth` profile too, with `KEYCLOAK_URL=http://keycloak:8080`.
 
-**Ports in use:** if a host port is taken, set `XANA_DB_PORT`, `XANA_BROKER_PORT`, `XANA_OLLAMA_PORT`, `XANA_KEYCLOAK_PORT`, `XANA_PGREST_PORT` or `XANA_BACKEND_PORT`.
+**With live updates:** add `--profile live`, which starts EMQX (5.8, as on the platform). Here it takes any client; the platform checks a token and a role. See [Data Explorer](#data-explorer).
+
+**Ports in use:** if a host port is taken, set `XANA_DB_PORT`, `XANA_BROKER_PORT`, `XANA_OLLAMA_PORT`, `XANA_KEYCLOAK_PORT`, `XANA_PGREST_PORT`, `XANA_MQTT_PORT`, `XANA_MQTT_MGMT_PORT` or `XANA_BACKEND_PORT`.
 
 The local environment is for development only. The database trusts local connections, and every port is bound to `127.0.0.1`.
 
@@ -99,6 +101,8 @@ Fields are snake_case. A refused request answers `{"error": {"kind", "message"}}
 | `/api/ngsi/attr-status` | GET `?entity_id` | The latest recorded state per attribute: `{name: {deleted, observedAt}}` |
 | `/api/ngsi/timeshift/types` | GET `?at` | Types at a past moment |
 | `/api/ngsi/timeshift/entities` | GET `?at&type&id&id_pattern&q&limit` | Entities as they were at a past moment |
+| `/api/ngsi/ws` | WebSocket `?type&ids=a,b` | Changes as they happen: `{type: "update", entity_id, entity_type, attributes}`, and `keepalive` every 20 s while quiet. A client that falls behind is closed with code 1013 |
+| `/api/ngsi/subscription-health` | GET | `{status, state, detail, expires_at}` of live updates |
 | `/ws/run/{run_id}` | WebSocket | `snapshot` first, then `step` and `status` events; `keepalive` every 20 s while quiet; `error` and close code 4404 for an unknown or archived run |
 
 - **Attachments:** `files` items are `{name, type, size, data_url}`: images, PDF or plain text, at most 5 files of 10 MB each. Only the name, type and size are kept.
@@ -139,6 +143,9 @@ Routes under `/api/ngsi` reach only `NGSI_URL` and `PGREST_URL`, with the sessio
 - **Names on platform data:** attributes are full IRIs, and answers keep them. A short name in `q` silently matches nothing unless `NGSI_CONTEXT_URL` names a context that maps it. The same goes for the agent's lookups through `partOf` and `measures`. An IRI with a dot in `q`, which the broker can't evaluate, is filtered by the backend over up to 5000 entities.
 - **History:** PostgREST needs `TIMESCALE_TABLE` and `TIMESCALE_ENTITY_TABLE` in the platform's layout. On the platform, the operator's token must carry the `role` claim, which the `scorpio` client's `pgrest_role` scope adds.
 - **Import from a URL:** refuses every internal address, also after a redirect, and connects only to the address it checked. 10 MB and 10 s at most.
+- **Live updates:** one subscription of 24 hours in the context broker, with an MQTT endpoint on `MQTT_BROKER_NOTIFY_URL`, starting after sign-in. It is renewed when the token rotates and an hour before it expires, and deleted on sign-out and shutdown. If the process dies, it runs out by itself, and the next start removes it.
+  - **On the platform,** each operator needs `Factory-Admin` or `Factory-Reader` on client `scorpio`, or EMQX refuses the token and the state says so.
+  - **The token is in the subscription's address,** as the broker has no other way to take MQTT credentials. It isn't logged or returned here, but anyone who may read subscriptions from the broker can read it until it expires.
 - **While the session is shared:** anyone who can reach the backend can edit, delete and import, using the signed-in operator's token. See [Sign-in](#sign-in).
 
 ## Language model

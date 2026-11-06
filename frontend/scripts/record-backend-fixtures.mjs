@@ -97,6 +97,7 @@ const SENSOR = 'urn:ngsi-ld:Sensor:laser-cutter-01-temperature'
 const entity = (id) => `/api/ngsi/entities/${encodeURIComponent(id)}`
 const tag = Date.now().toString(36)
 const RECORDED = `urn:ngsi-ld:Recording:${tag}`
+record('entities.getLiveUpdateHealth', await call('GET', '/api/ngsi/subscription-health'))
 record('entities.getStats', await call('GET', '/api/ngsi/stats'))
 record('entities.listTypes', await call('GET', '/api/ngsi/types'))
 record('entities.listAttributes', await call('GET', '/api/ngsi/attributes'))

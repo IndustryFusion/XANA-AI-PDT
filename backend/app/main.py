@@ -35,6 +35,7 @@ from app.memory.migrate import Migrator
 from app.memory.store import Database, IncidentStore, RunStore
 from app.ngsi.broker import ContextBroker
 from app.ngsi.history import AttributeHistory
+from app.ngsi.live import LiveUpdates
 from app.redact import RedactingFilter, Redactor
 from app.runs.machines import MachineResolver
 from app.runs.manager import RunManager
@@ -122,7 +123,10 @@ def create_app(
         # that needs them (or from the memory health check).
         await db.open()
         task = asyncio.create_task(manager.start_up())
+        if not session.enabled:
+            live.start()
         yield
+        await live.stop()
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await task
@@ -140,6 +144,13 @@ def create_app(
     app.state.runs = manager
     app.state.incidents = incident_store
     app.state.broker = ContextBroker(settings, session.token)
+    live = LiveUpdates(settings, session.token, session.enabled, app.state.broker)
+    app.state.live = live
+
+    async def start_live_updates() -> None:
+        live.start()
+
+    session.on_sign_in.append(start_live_updates)
     app.state.attribute_history = AttributeHistory(settings, session.token)
     errors.install(app)
 

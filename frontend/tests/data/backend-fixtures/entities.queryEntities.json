@@ -40,8 +40,8 @@
       },
       "status": {
         "type": "Property",
-        "value": "running",
-        "observedAt": "2026-11-02T12:00:00.000Z"
+        "value": "idle",
+        "observedAt": "2026-11-06T22:07:42Z"
       }
     },
     {
@@ -170,35 +170,35 @@
       }
     },
     {
-      "id": "urn:ngsi-ld:Machine:chiller-01",
+      "id": "urn:ngsi-ld:Machine:coating-01",
       "type": "Machine",
       "configuration": {
         "type": "JsonProperty",
         "json": {
-          "firmware": "4.0.1",
-          "setPointC": 18,
-          "refrigerant": "R-513A"
+          "guns": 2,
+          "firmware": "1.9.3",
+          "cureTemperatureC": 180
         }
       },
       "machineType": {
         "type": "Property",
-        "value": "Chiller"
+        "value": "Coating"
       },
       "manufacturer": {
         "type": "Property",
-        "value": "CoolFlow Process Cooling"
+        "value": "SurfaceTec Finishing"
       },
       "name": {
         "type": "Property",
-        "value": "Process chiller 01"
+        "value": "Powder coating booth 01"
       },
       "operatingMode": {
         "type": "VocabProperty",
-        "vocab": "automatic"
+        "vocab": "setup"
       },
       "partOf": {
         "type": "Relationship",
-        "object": "urn:ngsi-ld:ProductionLine:line-a"
+        "object": "urn:ngsi-ld:ProductionLine:line-c"
       },
       "status": {
         "type": "Property",

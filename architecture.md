@@ -167,7 +167,7 @@ Fields are snake_case. A refused request answers `{"error": {"kind", "message"}}
 | `/api/agent/escalate/{run_id}` | POST | *Later phase.* Escalate to machine builder via IFF Dataspace |
 | `/api/agent/mb-feedback/{run_id}` | POST | *Later phase.* Process a machine builder reply (called by inbox poller) |
 | `/api/agent/operator-approve/{run_id}` | POST | *Later phase.* Operator approves or declines an out-of-policy data request |
-| `/api/ngsi/*` | — | Data Explorer: query, edit, import, history and time-shift, on `NGSI_URL` and `PGREST_URL` only. For operators; the workflow has no path to it |
+| `/api/ngsi/*` | — | Data Explorer: query, edit, import, history and time-shift, on `NGSI_URL` and `PGREST_URL` only, and live updates (`/api/ngsi/ws`) through a broker subscription with an MQTT endpoint. For operators; the workflow has no path to it |
 | `/api/gateway/*` | — | *Later phase.* Gateway token management and peer/capability inspection |
 | `/api/ifric/*` | — | *Later phase.* IFRIC registry token management and factory identity |
 | `/events/ngsi` | POST | *Later phase.* Webhook for Scorpio NGSI-LD notifications |
@@ -446,6 +446,9 @@ POSTGRES_MEMORY_URL=postgresql://...
 TIMESCALE_TABLE=attributes           # attribute history table
 TIMESCALE_ENTITY_TABLE=entities      # entity lifecycle table
 PGREST_URL=http://pgrest:3000        # the Data Explorer's history
+MQTT_BROKER_URL=mqtt://emqx-listeners:1883       # live updates
+MQTT_MGMT_URL=http://emqx-dashboard:18083
+MQTT_BROKER_NOTIFY_URL=              # the MQTT broker as Scorpio reaches it, if different
 NGSI_TENANT=                         # optional NGSILD-Tenant
 NGSI_CONTEXT_URL=                    # Link context; short names need it on data with full IRIs
 ALERTA_URL=http://...
