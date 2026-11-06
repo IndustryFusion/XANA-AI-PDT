@@ -39,14 +39,14 @@
 
 ## 8. Review follow-ups
 
-- [ ] 8.1 Changes to the images' own files run the workflow; verify the workflow's paths against both Dockerfiles, and that it runs on this Pull Request
+- [x] 8.1 Changes to the images' own files run the workflow; verify the workflow's paths against both Dockerfiles, and that it runs on this Pull Request
 - [x] 8.2 The chart job checks secret precedence, and that no secret reaches a ConfigMap; verify with `helm/test/check_render.py`, including that it fails on a wrong chart
-- [ ] 8.3 Helmfile takes install-time secrets from the shell; verify in the workflow
+- [x] 8.3 Helmfile takes install-time secrets from the shell; verify in the workflow
 - [x] 8.4 A CA certificate can be mounted from a Secret; verify with `helm/test/check_render.py`
 - [x] 8.5 Both Pods set a seccomp profile; verify with `helm/test/check_render.py`
-- [ ] 8.6 Any non-secret setting can be passed through Helmfile; verify in the workflow
-- [ ] 8.7 The smoke test checks every analysis step, that a large body reaches the backend, and that the incident survives a restart; verify in the workflow
-- [ ] 8.8 Images are published only after the chart and install jobs pass; verify by reading the workflow, and that the job runs after them on this Pull Request
+- [x] 8.6 Any non-secret setting can be passed through Helmfile; verify the workflow renders every environment with the new setting present
+- [x] 8.7 The smoke test checks every analysis step, that a large body reaches the backend, and that the incident survives a restart; verify in the workflow
+- [x] 8.8 Images are published only after the chart and install jobs pass; verify by reading the workflow, and that the job runs after them on this Pull Request
 
 ## Workflow follow-up
 
