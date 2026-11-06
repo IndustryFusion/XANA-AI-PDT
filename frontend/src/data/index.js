@@ -20,7 +20,7 @@
  * VITE_DATA_SOURCE selects: `mock` (default) or `backend` (the backend's
  * operations, with every other operation delegated to the mock).
  */
-import { OPERATIONS } from './interface'
+import { KNOWLEDGE_BASE_ENABLED, OPERATIONS } from './interface'
 import { DataError, toDataError } from './errors'
 import * as backendSource from './sources/backend'
 import * as mockSource from './sources/mock'
@@ -28,7 +28,7 @@ import * as mockSource from './sources/mock'
 export { DataError } from './errors'
 export {
   OPERATIONS, RUN_STATES, DELIVERY_STATES, INCIDENT_OUTCOMES, ALERT_STATUSES, ALERT_ACTIONS, LIVE_UPDATE_STATES, IMPORT_RESULTS,
-  SHARING_TIERS, POLICY_STATES, REQUEST_STATES, PIPELINES, INGEST_STATES,
+  SHARING_TIERS, POLICY_STATES, REQUEST_STATES, PIPELINES, INGEST_STATES, KNOWLEDGE_BASE_ENABLED, KNOWLEDGE_BASE_SETTING,
 } from './interface'
 
 export const DATA_SOURCE_SETTING = 'VITE_DATA_SOURCE'
@@ -124,10 +124,11 @@ export const incidents = bindArea('incidents', source.incidents)
 export const entities = bindArea('entities', source.entities)
 export const alerts = bindArea('alerts', source.alerts)
 export const dataspace = emitAfter(bindArea('dataspace', source.dataspace), ['connect', 'disconnect'], CONNECTION_CHANGED)
-export const knowledgeBase = bindArea('knowledgeBase', source.knowledgeBase)
+/** Present only while the knowledge base is turned on. */
+export const knowledgeBase = KNOWLEDGE_BASE_ENABLED ? bindArea('knowledgeBase', source.knowledgeBase) : undefined
 export const system = bindArea('system', source.system)
 
-export const areas = { session, runs, incidents, entities, alerts, dataspace, knowledgeBase, system }
+export const areas = { session, runs, incidents, entities, alerts, dataspace, ...(KNOWLEDGE_BASE_ENABLED ? { knowledgeBase } : {}), system }
 
 /** Development-only controls of the source (null in production builds). */
 export const DevControls = import.meta.env.DEV ? (source.DevControls ?? null) : null

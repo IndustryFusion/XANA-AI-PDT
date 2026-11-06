@@ -60,7 +60,18 @@ test('check again updates the time of the check', async ({ page }) => {
   }).toPass()
 })
 
+const knowledgeBaseOn = process.env.VITE_KNOWLEDGE_BASE === 'on'
+
+test('the knowledge base is not shown by default', async ({ page }) => {
+  test.skip(knowledgeBaseOn, 'The knowledge base is turned on.')
+  await page.goto('/system')
+  await expect(page.getByRole('button', { name: 'Check again' })).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Knowledge base' })).toHaveCount(0)
+  await expect(page.getByText('Knowledge base')).toHaveCount(0)
+})
+
 test('an uploaded document is ingested and found by a test query', async ({ page }) => {
+  test.skip(!knowledgeBaseOn, 'The knowledge base is off by default.')
   await page.goto('/system')
   const kb = page.getByRole('region', { name: 'Knowledge base' })
   await kb.getByRole('radio', { name: /Structured pipeline/ }).check()
@@ -84,6 +95,7 @@ test('an uploaded document is ingested and found by a test query', async ({ page
 })
 
 test('a corrupt document fails with the reason and is removed', async ({ page }) => {
+  test.skip(!knowledgeBaseOn, 'The knowledge base is off by default.')
   await page.goto('/system')
   const kb = page.getByRole('region', { name: 'Knowledge base' })
   await kb.getByLabel('Or choose files').setInputFiles({ name: 'corrupt-scan.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4') })

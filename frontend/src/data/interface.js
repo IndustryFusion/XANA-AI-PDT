@@ -28,6 +28,10 @@
  *   source's responsibility and invisible to screens.
  */
 
+/** Build setting that turns the optional knowledge base on (value `on`). It is off by default. */
+export const KNOWLEDGE_BASE_SETTING = 'VITE_KNOWLEDGE_BASE'
+export const KNOWLEDGE_BASE_ENABLED = import.meta.env.VITE_KNOWLEDGE_BASE === 'on'
+
 /** Interface areas and their operations. */
 export const OPERATIONS = {
   session: ['getAuthConfig', 'getSession', 'signIn', 'signOut', 'getFactory'],
@@ -49,7 +53,7 @@ export const OPERATIONS = {
     'getConnection', 'connect', 'disconnect', 'listPeers', 'getPeerCapabilities',
     'listCapabilityRequests', 'decideCapabilityRequest', 'setCapabilityPolicy', 'resolveNames', 'resolveBuilders',
   ],
-  knowledgeBase: ['listDocuments', 'uploadDocument', 'getIngestJob', 'updateDescription', 'deleteDocument', 'query'],
+  ...(KNOWLEDGE_BASE_ENABLED ? { knowledgeBase: ['listDocuments', 'uploadDocument', 'getIngestJob', 'updateDescription', 'deleteDocument', 'query'] } : {}),
   system: ['getHealth', 'getServiceSettings', 'saveServiceSettings'],
 }
 

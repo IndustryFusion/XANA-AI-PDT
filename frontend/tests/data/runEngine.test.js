@@ -17,6 +17,7 @@
 import { createStore } from '../../src/data/sources/mock/store'
 import { createRunEngine } from '../../src/data/sources/mock/runEngine'
 import { createRunRecord } from '../../src/data/sources/mock/runCore'
+import { KNOWLEDGE_BASE_ENABLED } from '../../src/data/interface'
 
 const NOW = Date.parse('2026-11-02T12:00:00Z')
 
@@ -51,12 +52,12 @@ test('steps and status events arrive over time in the documented order, then the
 
   await vi.advanceTimersByTimeAsync(20_000)
   expect(events.map((e) => (e.type === 'step' ? e.node : `status:${e.status}`))).toEqual([
-    'observe', 'retrieve_documents', 'hypothesize', 'retrieve_similar_incidents', 'validate', 'decide', 'status:awaiting_confirmation',
+    'observe', ...(KNOWLEDGE_BASE_ENABLED ? ['retrieve_documents'] : []), 'hypothesize', 'retrieve_similar_incidents', 'validate', 'decide', 'status:awaiting_confirmation',
   ])
   expect(events.at(-1)).toMatchObject({ type: 'status', data: { rootCause: expect.any(String), confidence: expect.any(Number) }, summary: { runId: 'run-t1', status: 'awaiting_confirmation' } })
 
   await vi.advanceTimersByTimeAsync(60_000)
-  expect(events).toHaveLength(7)
+  expect(events).toHaveLength(KNOWLEDGE_BASE_ENABLED ? 7 : 6)
   expect(stored(store)).toMatchObject({ status: 'awaiting_confirmation', wait: 'start' })
 })
 

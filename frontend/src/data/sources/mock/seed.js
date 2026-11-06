@@ -18,6 +18,7 @@ import { COMPONENTS, LINES, MACHINES, PEERS, SENSORS, urn } from './catalog'
 import { applyNext, createRunRecord, incidentFromRun, initialCounters, simulate } from './runCore'
 import { machineStatusAt, sensorValueAt } from './history'
 import { buildKnowledgeBase } from './kbContent'
+import { KNOWLEDGE_BASE_ENABLED } from '../../interface'
 
 export { PEERS }
 
@@ -48,7 +49,7 @@ export function createRng(seed) {
 
 export const SEED = 20261102
 /** Stored state with another version is discarded and rebuilt from the seed. */
-export const SEED_VERSION = 4
+export const SEED_VERSION = 5
 const MINUTE = 60_000
 const DAY = 24 * 60 * MINUTE
 
@@ -288,7 +289,7 @@ const HEALTH_CHECKS = [
   ['message-broker', 'Message broker', 4],
   ['llm', 'Language model', 240],
   ['gateway', 'Dataspace gateway', 64],
-  ['knowledge-base', 'Knowledge base', 35],
+  ...(KNOWLEDGE_BASE_ENABLED ? [['knowledge-base', 'Knowledge base', 35]] : []),
 ]
 
 /**
@@ -346,6 +347,6 @@ export function buildSeed({ seed = SEED, now = Date.now() } = {}) {
     dataspace: buildDataspace(now),
     health: HEALTH_CHECKS.map(([id, label, latencyMs]) => ({ id, label, latencyMs })),
     settings: {},
-    kb: buildKnowledgeBase(now),
+    ...(KNOWLEDGE_BASE_ENABLED ? { kb: buildKnowledgeBase(now) } : {}),
   }
 }

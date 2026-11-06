@@ -57,6 +57,9 @@ jobs:
       - name: Unit and component tests
         run: npm test
 
+      - name: Unit and component tests with the knowledge base on
+        run: npm run test:knowledge-base
+
       - name: Build
         run: npm run build
 
@@ -68,6 +71,9 @@ jobs:
 
       - name: End-to-end tests
         run: npm run test:e2e
+
+      - name: End-to-end tests with the knowledge base on
+        run: npm run test:e2e:knowledge-base
 
       - name: Upload Playwright report
         if: failure()

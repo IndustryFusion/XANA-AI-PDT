@@ -23,6 +23,7 @@ import { createAlertsArea } from './alertsArea'
 import { createEntitiesArea } from './entitiesArea'
 import { createDataspaceArea } from './dataspaceArea'
 import { createKnowledgeBaseArea } from './knowledgeBaseArea'
+import { KNOWLEDGE_BASE_ENABLED } from '../../interface'
 import { createSystemArea } from './systemArea'
 
 /** Mock credentials, shown as a hint on the sign-in screen. */
@@ -223,7 +224,7 @@ export function createAreas(store) {
     }),
   }
 
-  const knowledgeBase = createKnowledgeBaseArea(store)
+  const knowledgeBase = KNOWLEDGE_BASE_ENABLED ? createKnowledgeBaseArea(store) : undefined
   const system = createSystemArea(store, { connectionState })
 
   return { session, runs, incidents, alerts, entities, dataspace, knowledgeBase, system, engine, raiseAlert }

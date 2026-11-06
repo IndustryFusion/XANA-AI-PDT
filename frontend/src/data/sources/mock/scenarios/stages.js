@@ -14,6 +14,8 @@
 // limitations under the License.
 //
 
+import { KNOWLEDGE_BASE_ENABLED } from '../../../interface'
+
 /**
  * Building blocks of scenario scripts. Each builder returns timed events for
  * the run engine; delays are base milliseconds at playback speed 1.
@@ -78,7 +80,7 @@ function observe(ctx, { degraded }) {
   }
 }
 
-/** One analysis round: (observe and retrieve on the first round), hypothesize, validate, decide. */
+/** One analysis round: (observe, and document retrieval if the knowledge base is on, on the first round), hypothesize, validate, decide. */
 export function analysis(ctx, { mode = 'confident', degraded = false } = {}) {
   const round = ctx.run.round
   const rejectedCount = ctx.run.rejected.length
@@ -87,14 +89,16 @@ export function analysis(ctx, { mode = 'confident', degraded = false } = {}) {
   const events = []
   if (round === 1) {
     events.push(observe(ctx, { degraded }))
-    events.push({
-      delay: 1100,
-      step: {
-        node: 'retrieve_documents',
-        input: { query: ctx.run.issue },
-        output: { passages: ctx.content.manuals.map((title, i) => ({ title, relevance: pct(0.82 - i * 0.11) })) },
-      },
-    })
+    if (KNOWLEDGE_BASE_ENABLED) {
+      events.push({
+        delay: 1100,
+        step: {
+          node: 'retrieve_documents',
+          input: { query: ctx.run.issue },
+          output: { passages: ctx.content.manuals.map((title, i) => ({ title, relevance: pct(0.82 - i * 0.11) })) },
+        },
+      })
+    }
   }
   const context = ctx.run.rejected.length
     ? { rejectedRootCauses: ctx.run.rejected.map((r) => r.rootCause), reason: ctx.run.rejected[ctx.run.rejected.length - 1].reason }
