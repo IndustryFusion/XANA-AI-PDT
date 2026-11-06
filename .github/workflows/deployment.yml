@@ -53,6 +53,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: azure/setup-helm@v4
+        with:
+          version: v3.17.3 # Helmfile 1.1 does not support Helm 4
       - name: Lint
         run: helm lint helm/charts/xana-pdt
       - name: Render with each secret source
@@ -69,6 +71,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: azure/setup-helm@v4
+        with:
+          version: v3.17.3 # Helmfile 1.1 does not support Helm 4
       - name: Install Helmfile
         run: |
           curl -fsSL "https://github.com/helmfile/helmfile/releases/download/v$HELMFILE_VERSION/helmfile_${HELMFILE_VERSION}_linux_amd64.tar.gz" \
