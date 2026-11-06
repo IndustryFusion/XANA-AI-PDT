@@ -45,7 +45,7 @@
 - [x] 8.3 Reopen is refused while the model is down, and an unknown incident gives 404 first; verify with incident tests
 - [x] 8.4 The configured OpenAI key reaches the model; verify with a config test
 - [x] 8.5 The explorer's view of the past doesn't depend on the time of day; verify the end-to-end test picks a moment from the recorded history and checks its exact value
-- [ ] 8.6 Send a prompt of more than 8000 tokens to Ollama; verify the reported prompt token count
+- [x] 8.6 Send a prompt of more than 8000 tokens to Ollama; verify the reported prompt token count (18218 tokens reported, with `LLM_NUM_CTX` 32768, on `llama3.1`)
 
 ## Workflow follow-up
 
