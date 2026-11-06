@@ -1,6 +1,6 @@
 {
   "method": "POST",
-  "path": "/api/agent/clarify/8c0e9ae0-26e2-480e-b6a3-8f1cb45f35eb",
+  "path": "/api/agent/clarify/617ed5a2-8a1a-460c-a44f-f36eed0f3335",
   "status": 200,
   "body": {
     "status": "running"

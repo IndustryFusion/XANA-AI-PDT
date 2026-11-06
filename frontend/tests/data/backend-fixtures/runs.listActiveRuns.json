@@ -4,23 +4,13 @@
   "status": 200,
   "body": [
     {
-      "run_id": "8c0e9ae0-26e2-480e-b6a3-8f1cb45f35eb",
-      "incident_id": 2,
+      "run_id": "617ed5a2-8a1a-460c-a44f-f36eed0f3335",
+      "incident_id": 1,
       "machine_id": "urn:ngsi-ld:Machine:laser-cutter-01",
       "issue": "Cut edges show burrs since this morning",
       "status": "awaiting_input",
-      "started_at": "2026-11-06T19:33:27.261609+00:00",
-      "updated_at": "2026-11-06T19:33:27.630261+00:00",
-      "escalation_ref": null
-    },
-    {
-      "run_id": "ec978b8f-0ca8-48fc-b561-a0264c802253",
-      "incident_id": 1,
-      "machine_id": "urn:ngsi-ld:Machine:laser-cutter-01",
-      "issue": "Cut edges show burrs",
-      "status": "awaiting_input",
-      "started_at": "2026-11-06T19:24:40.824285+00:00",
-      "updated_at": "2026-11-06T19:24:41.227796+00:00",
+      "started_at": "2026-11-06T21:52:50.276618+00:00",
+      "updated_at": "2026-11-06T21:52:50.712741+00:00",
       "escalation_ref": null
     }
   ]

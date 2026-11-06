@@ -11,6 +11,19 @@
       "standardFlowEnabled": false,
       "protocolMappers": [
         {
+          "name": "pgrest role",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-hardcoded-claim-mapper",
+          "config": {
+            "claim.name": "role",
+            "claim.value": "dbreader",
+            "jsonType.label": "String",
+            "access.token.claim": "true",
+            "id.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        },
+        {
           "name": "ifric company",
           "protocol": "openid-connect",
           "protocolMapper": "oidc-hardcoded-claim-mapper",

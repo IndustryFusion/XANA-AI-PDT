@@ -108,5 +108,5 @@ export function parseInput(text, current, member) {
   return trimmed
 }
 
-/** Attributes with recorded history are those with an observation time. */
-export const hasHistory = (attr) => !Array.isArray(attr) && !!attr?.observedAt && attributeKind(attr) === 'property'
+/** Attributes with recorded history are those with an observation time. Relationship changes are recorded too. */
+export const hasHistory = (attr) => !Array.isArray(attr) && !!attr?.observedAt && ['property', 'relationship'].includes(attributeKind(attr))

@@ -316,6 +316,12 @@ export function createEntitiesArea(store) {
       return seriesOf(entity, name, lo, hi) ?? []
     }),
 
+    getAttributeStatus: withControls((id) => {
+      const entity = find(id)
+      if (!entity) return {}
+      return Object.fromEntries(attributeNames(entity).map((name) => [name, { deleted: false, observedAt: entity[name]?.observedAt ?? null }]))
+    }),
+
     listTypesAt: withControls((at) => [...new Set(entitiesAt(parseMoment(at)).map((e) => e.type))].sort()),
     queryEntitiesAt: withControls((at, params = {}) => query(entitiesAt(parseMoment(at)), params)),
 
