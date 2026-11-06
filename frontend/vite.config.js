@@ -14,6 +14,7 @@
 // limitations under the License.
 //
 
+import { configDefaults } from 'vitest/config'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
@@ -34,6 +35,8 @@ export default defineConfig({
     globals: true,
     setupFiles: ['./tests/setup.js'],
     include: ['tests/**/*.test.{js,jsx}'],
+    // The knowledge base is off by default; `npm run test:knowledge-base` tests it turned on.
+    exclude: [...configDefaults.exclude, ...(process.env.VITE_KNOWLEDGE_BASE === 'on' ? [] : ['tests/**/knowledgeBase.test.*'])],
     css: false,
   },
 })

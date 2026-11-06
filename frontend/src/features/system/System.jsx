@@ -15,6 +15,7 @@
 //
 
 import { useState } from 'react'
+import { KNOWLEDGE_BASE_ENABLED } from '../../data'
 import HealthSection from './HealthSection'
 import KnowledgeBase from './KnowledgeBase'
 import ServiceSettings from './ServiceSettings'
@@ -22,8 +23,8 @@ import SessionSection from './SessionSection'
 import './system.css'
 
 /**
- * System area: dependency health, service settings, the session, and the
- * knowledge base the agent retrieves from.
+ * System area: dependency health, service settings, the session and, if it
+ * is turned on, the knowledge base the agent retrieves from.
  */
 export default function System() {
   const [round, setRound] = useState(0)
@@ -40,7 +41,7 @@ export default function System() {
           <SessionSection />
         </div>
       </div>
-      <KnowledgeBase />
+      {KNOWLEDGE_BASE_ENABLED && <KnowledgeBase />}
     </section>
   )
 }

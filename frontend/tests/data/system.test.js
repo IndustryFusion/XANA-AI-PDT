@@ -18,6 +18,7 @@ import { areas } from '../../src/data'
 import { addressProblem } from '../../src/data/sources/mock/systemArea'
 import { writeControls } from '../../src/data/sources/mock/controls'
 import { resetMock } from '../helpers'
+import { KNOWLEDGE_BASE_ENABLED } from '../../src/data/interface'
 
 const { system } = areas
 const check = async (id) => (await system.getHealth()).checks.find((c) => c.id === id)
@@ -29,7 +30,7 @@ describe('health', () => {
   test('all dependencies OK by default, with latency and the address in use', async () => {
     const health = await system.getHealth()
     expect(health.overall).toBe('ok')
-    expect(health.checks.map((c) => c.id)).toEqual(['context-broker', 'timeseries', 'memory', 'alerts', 'message-broker', 'llm', 'gateway', 'knowledge-base'])
+    expect(health.checks.map((c) => c.id)).toEqual(['context-broker', 'timeseries', 'memory', 'alerts', 'message-broker', 'llm', 'gateway', ...(KNOWLEDGE_BASE_ENABLED ? ['knowledge-base'] : [])])
     expect(health.checks.every((c) => c.status === 'ok' && c.latencyMs > 0)).toBe(true)
     expect(await check('message-broker')).toMatchObject({ detail: 'Reached at mqtt://message-broker.example.org:1883' })
   })
@@ -39,7 +40,7 @@ describe('health', () => {
     const health = await system.getHealth()
     expect(health.overall).toBe('degraded')
     expect(health.checks.find((c) => c.id === 'gateway')).toMatchObject({ status: 'error', latencyMs: null, detail: expect.any(String) })
-    expect(health.checks.filter((c) => c.status === 'ok')).toHaveLength(7)
+    expect(health.checks.filter((c) => c.status === 'ok')).toHaveLength(health.checks.length - 1)
   })
 })
 

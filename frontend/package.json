@@ -14,9 +14,11 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:knowledge-base": "VITE_KNOWLEDGE_BASE=on vitest run",
     "test:bundle": "node scripts/check-prod-bundle.mjs",
     "test:e2e": "playwright test",
-    "test:e2e:backend": "XANA_E2E_BACKEND=1 playwright test"
+    "test:e2e:backend": "XANA_E2E_BACKEND=1 playwright test",
+    "test:e2e:knowledge-base": "VITE_KNOWLEDGE_BASE=on playwright test system accessibility layout"
   },
   "dependencies": {
     "react": "^18.3.1",

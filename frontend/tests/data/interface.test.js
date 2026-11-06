@@ -54,7 +54,7 @@ describe('facade', () => {
   })
 
   test('operations a source does not implement reject with unavailable', async () => {
-    await expect(bindArea('knowledgeBase', {}).listDocuments()).rejects.toMatchObject({ name: 'DataError', area: 'knowledgeBase', kind: 'unavailable' })
+    await expect(bindArea('alerts', {}).listAlerts()).rejects.toMatchObject({ name: 'DataError', area: 'alerts', kind: 'unavailable' })
   })
 
   test('unimplemented subscriptions report an error event', async () => {
@@ -146,7 +146,7 @@ describe('mock source matches the documented shapes', () => {
       saveServiceSettings: () => [{ messageBroker: 'mqtt://broker-2.example.org:1883' }],
     },
   }
-  const implemented = Object.entries(SHAPES).flatMap(([area, ops]) => Object.keys(ops).map((op) => [area, op]))
+  const implemented = Object.entries(SHAPES).filter(([area]) => OPERATIONS[area]).flatMap(([area, ops]) => Object.keys(ops).map((op) => [area, op]))
 
   test.each(implemented)('%s.%s', async (area, op) => {
     const result = await areas[area][op](...(args[area]?.[op]?.() ?? []))

@@ -190,6 +190,7 @@ const MARKDOWN = { name: 'Checklist.md', mimeType: 'text/markdown', buffer: Buff
 const kb = (page) => page.getByRole('region', { name: 'Knowledge base' })
 
 /** Dataspace and System views checked in both themes: extra controls preset, and how to reach the state. */
+const knowledgeBaseOn = process.env.VITE_KNOWLEDGE_BASE === 'on'
 const DATASPACE_SYSTEM_STATES = [
   ['dataspace with a selected peer and requests', {}, async (page) => {
     await page.goto('/dataspace?peer=peer-formwerk')
@@ -238,29 +239,31 @@ const DATASPACE_SYSTEM_STATES = [
     await page.getByRole('button', { name: 'Save settings' }).click()
     await expect(page.getByRole('button', { name: 'Reset to deployment value: Alert manager' })).toBeVisible()
   }],
-  ['knowledge base with an upload in progress, a refused file and the drop zone', { speed: 0.5 }, async (page) => {
-    await page.goto('/system')
-    await kb(page).getByLabel('Or choose files').setInputFiles([MARKDOWN, { name: 'photo.png', mimeType: 'image/png', buffer: Buffer.from('x') }])
-    await expect(kb(page).getByRole('progressbar', { name: 'Ingestion progress of Checklist.md' })).toBeVisible()
-    await expect(kb(page).getByRole('alert')).toContainText('photo.png was refused')
-  }],
-  ['knowledge base structured pipeline with a description being edited', {}, async (page) => {
-    await page.goto('/system')
-    await kb(page).getByRole('radio', { name: /Structured pipeline/ }).check()
-    await kb(page).getByRole('button', { name: 'Edit description of PB-2200 spare parts catalogue.pdf' }).click()
-    await expect(kb(page).getByLabel('Description of PB-2200 spare parts catalogue.pdf', { exact: true })).toBeVisible()
-  }],
-  ['knowledge base delete dialog', {}, async (page) => {
-    await page.goto('/system')
-    await kb(page).getByRole('button', { name: 'Delete Scanned wiring diagrams.pdf' }).click()
-    await expect(page.getByRole('dialog')).toBeVisible()
-  }],
-  ['knowledge base test query results', {}, async (page) => {
-    await page.goto('/system')
-    await kb(page).getByLabel('Question').fill('hydraulic pressure drop')
-    await kb(page).getByRole('button', { name: 'Run test query' }).click()
-    await expect(kb(page).getByRole('list', { name: 'Retrieved passages' })).toBeVisible()
-  }],
+  ...(knowledgeBaseOn ? [
+    ['knowledge base with an upload in progress, a refused file and the drop zone', { speed: 0.5 }, async (page) => {
+      await page.goto('/system')
+      await kb(page).getByLabel('Or choose files').setInputFiles([MARKDOWN, { name: 'photo.png', mimeType: 'image/png', buffer: Buffer.from('x') }])
+      await expect(kb(page).getByRole('progressbar', { name: 'Ingestion progress of Checklist.md' })).toBeVisible()
+      await expect(kb(page).getByRole('alert')).toContainText('photo.png was refused')
+    }],
+    ['knowledge base structured pipeline with a description being edited', {}, async (page) => {
+      await page.goto('/system')
+      await kb(page).getByRole('radio', { name: /Structured pipeline/ }).check()
+      await kb(page).getByRole('button', { name: 'Edit description of PB-2200 spare parts catalogue.pdf' }).click()
+      await expect(kb(page).getByLabel('Description of PB-2200 spare parts catalogue.pdf', { exact: true })).toBeVisible()
+    }],
+    ['knowledge base delete dialog', {}, async (page) => {
+      await page.goto('/system')
+      await kb(page).getByRole('button', { name: 'Delete Scanned wiring diagrams.pdf' }).click()
+      await expect(page.getByRole('dialog')).toBeVisible()
+    }],
+    ['knowledge base test query results', {}, async (page) => {
+      await page.goto('/system')
+      await kb(page).getByLabel('Question').fill('hydraulic pressure drop')
+      await kb(page).getByRole('button', { name: 'Run test query' }).click()
+      await expect(kb(page).getByRole('list', { name: 'Retrieved passages' })).toBeVisible()
+    }],
+  ] : []),
 ]
 
 for (const theme of ['dark', 'light']) {
@@ -522,17 +525,19 @@ test('keyboard only: connect, decide a request, change a policy and upload with 
   await page.keyboard.press('Enter')
   await expect(page.locator('tr[data-request="req-003"]')).toContainText('Approved')
 
-  await page.goto('/system')
-  await page.getByRole('radio', { name: /Base pipeline/ }).focus()
-  await page.keyboard.press('ArrowRight')
-  await expect(page.getByRole('radio', { name: /Structured pipeline/ })).toBeChecked()
-  const picker = page.getByLabel('Or choose files')
-  await picker.focus()
-  expect(await picker.evaluate((el) => getComputedStyle(el).outlineStyle)).not.toBe('none')
-  const chooser = page.waitForEvent('filechooser')
-  await page.keyboard.press('Space')
-  await (await chooser).setFiles(MARKDOWN)
-  const row = page.locator('tr[data-document="Checklist.md"]')
-  await expect(row.getByText('Done')).toBeVisible()
-  await expect(page.getByRole('table', { name: 'Documents in the structured pipeline' })).toContainText('Checklist.md')
+  if (knowledgeBaseOn) {
+    await page.goto('/system')
+    await page.getByRole('radio', { name: /Base pipeline/ }).focus()
+    await page.keyboard.press('ArrowRight')
+    await expect(page.getByRole('radio', { name: /Structured pipeline/ })).toBeChecked()
+    const picker = page.getByLabel('Or choose files')
+    await picker.focus()
+    expect(await picker.evaluate((el) => getComputedStyle(el).outlineStyle)).not.toBe('none')
+    const chooser = page.waitForEvent('filechooser')
+    await page.keyboard.press('Space')
+    await (await chooser).setFiles(MARKDOWN)
+    const row = page.locator('tr[data-document="Checklist.md"]')
+    await expect(row.getByText('Done')).toBeVisible()
+    await expect(page.getByRole('table', { name: 'Documents in the structured pipeline' })).toContainText('Checklist.md')
+  }
 })

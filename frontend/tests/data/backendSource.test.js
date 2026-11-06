@@ -202,7 +202,7 @@ describe('delegation to the mock', () => {
       incidents: ['listIncidents', 'getIncident', 'reopenIncident'],
       system: ['getHealth'],
     })
-    for (const name of ['session', 'entities', 'alerts', 'dataspace', 'knowledgeBase']) expect(backend[name]).toEqual(mock[name])
+    for (const name of ['session', 'entities', 'alerts', 'dataspace']) expect(backend[name]).toEqual(mock[name])
     expect(backend.runs.escalate).toBe(mock.runs.escalate)
     expect(backend.runs.sendConversationAct).toBe(mock.runs.sendConversationAct)
     expect(backend.system.getServiceSettings).toBe(mock.system.getServiceSettings)

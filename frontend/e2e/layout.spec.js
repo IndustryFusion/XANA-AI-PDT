@@ -87,7 +87,7 @@ test('dataspace and system sections stack below 900 px', async ({ page }) => {
   expect(detail.top).toBeGreaterThan(list.top)
 
   await page.goto('/system')
-  await expect(page.locator('tr[data-document]').first()).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Check again' })).toBeVisible()
   expect(await overflow(), 'system overflows horizontally').toBeLessThanOrEqual(0)
   const [health, settings] = await Promise.all(['.health', '.service-settings'].map(box))
   expect(settings.top).toBeGreaterThan(health.top)
@@ -110,7 +110,7 @@ for (const [name, path, open] of [
     await expect(page.getByRole('button', { name: 'Fetch' })).toBeVisible()
   }],
   ['alert filters', '/alerts', async (page) => expect(page.locator('tbody tr').first()).toBeVisible()],
-  ['knowledge-base test query and system forms', '/system', async (page) => expect(page.getByRole('button', { name: 'Run test query' })).toBeVisible()],
+  ['system forms', '/system', async (page) => expect(page.getByRole('button', { name: process.env.VITE_KNOWLEDGE_BASE === 'on' ? 'Run test query' : 'Save settings' })).toBeVisible()],
   ['dataspace', '/dataspace?peer=peer-formwerk', async (page) => expect(page.getByRole('table', { name: 'What Formwerk Press Technology may access here' })).toBeVisible()],
   ['dataspace connect form', '/dataspace', async (page) => {
     await page.getByRole('button', { name: 'Disconnect…' }).click()

@@ -23,6 +23,7 @@ import StepFeed from '../../src/features/incidents/StepFeed'
 import { DecisionCard, HypothesisList } from '../../src/features/incidents/Analysis'
 import { OutcomePanel } from '../../src/features/incidents/panels'
 import { addRun, findRun, renderApp, renderAppWith, renderWithRouter } from '../helpers'
+import { KNOWLEDGE_BASE_ENABLED } from '../../src/data/interface'
 
 const controls = { authEnabled: false, speed: 50 }
 const openRun = (runId, extra = {}) => renderApp({ path: paths.run(runId), controls: { ...controls, ...extra } })
@@ -70,7 +71,8 @@ describe('live step feed', () => {
     expect(within(feed).getByRole('status')).toHaveTextContent('The agent is working…')
     await within(feed).findByText('Validate')
     const kinds = within(feed).getAllByRole('listitem').filter((li) => li.classList.contains('step')).map((li) => li.dataset.node)
-    expect(kinds.slice(0, 5)).toEqual(['observe', 'retrieve_documents', 'hypothesize', 'retrieve_similar_incidents', 'validate'])
+    expect(kinds.filter((k) => k !== 'retrieve_documents').slice(0, 4)).toEqual(['observe', 'hypothesize', 'retrieve_similar_incidents', 'validate'])
+    expect(kinds.includes('retrieve_documents')).toBe(KNOWLEDGE_BASE_ENABLED)
     await within(feed).findByText('Decide')
     await waitFor(() => expect(within(feed).queryByRole('status')).not.toBeInTheDocument())
   })
