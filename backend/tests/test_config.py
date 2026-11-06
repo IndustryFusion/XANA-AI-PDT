@@ -187,3 +187,14 @@ def test_tracing_keys_come_together():
 def test_tracing_secret_is_redacted():
     s = load_settings(_env_file=None, langfuse_public_key="pk", langfuse_secret_key="sk-lf-secret")
     assert "sk-lf-secret" not in s.redactor()("key sk-lf-secret")
+
+
+def test_the_configured_openai_key_is_used():
+    llm = get_llm(Settings(_env_file=None, llm_provider="openai", llm_model="m", openai_api_key="sk-configured"))
+    assert llm.openai_api_key.get_secret_value() == "sk-configured"
+
+
+def test_a_server_without_a_key_gets_a_placeholder():
+    llm = get_llm(Settings(_env_file=None, llm_provider="openai", llm_model="m", openai_base_url="http://ovms/v3"))
+    assert llm.openai_api_key.get_secret_value() == "not-needed"
+    assert llm.openai_api_base == "http://ovms/v3"

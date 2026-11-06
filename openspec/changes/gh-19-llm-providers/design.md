@@ -37,6 +37,10 @@
 
 **Tracing through a callback, optional at two levels.** `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` turn it on, and the `tracing` extra installs it. If keys are set and the package is missing, the backend logs a warning and runs without tracing, because tracing must never stop a diagnosis. Runs are traced with the run ID as session and the machine and round as metadata. Alternative: a required dependency, which the issue excludes.
 
+**A model list that can't be read doesn't stop work.** An OpenAI-compatible server need not offer `/models`, and a cloud list can be slow. A 404, 405 or 501, or a read timeout, shows the check as degraded, saying the model could not be confirmed, and work may still start. A server that can't be reached, an authentication error, a server error, or a list without the configured model still gives 503. Alternative: treating these as unavailable, which blocks every run on a server that can answer. Limit: the Anthropic check doesn't search the list, which is paged and leaves out aliases, so a wrong `LLM_MODEL` shows when the first request fails.
+
+**Reasoning and broken content don't waste a retry.** `<think>` text is removed before reading the answer, and a broken object in the content doesn't hide a valid tool call.
+
 ## Architectural implications
 
 No conflict with `architecture.md` beyond the retry count and the variables, which this change updates. The workflow stays read-only towards the factory, and the agent package gains no dependency on the service.

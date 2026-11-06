@@ -38,6 +38,15 @@
 - [x] 7.1 Run backend and frontend tests, lint and `openspec validate --all --strict`; verify they pass locally and in CI
 - [x] 7.2 Check each scenario in the delta specs and report the result per scenario in the Pull Request; verify the report covers every scenario
 
+## 8. Review follow-ups
+
+- [x] 8.1 A 404, 405, 501 or read timeout on the model list doesn't block work, while an unreachable server, a server error, a key error and a missing model still do; verify with health tests
+- [x] 8.2 `<think>` text and broken content don't hide a valid answer; verify with structured answer tests
+- [x] 8.3 Reopen is refused while the model is down, and an unknown incident gives 404 first; verify with incident tests
+- [x] 8.4 The configured OpenAI key reaches the model; verify with a config test
+- [x] 8.5 The explorer's view of the past doesn't depend on the time of day; verify the end-to-end test picks a moment from the recorded history and checks its exact value
+- [ ] 8.6 Send a prompt of more than 8000 tokens to Ollama; verify the reported prompt token count
+
 ## Workflow follow-up
 
 - After merge, run `/opsx:archive gh-19-llm-providers` in a follow-up Pull Request from a fork, with `Closes #19` in its description.

@@ -37,6 +37,9 @@ log = logging.getLogger(__name__)
 Status = Literal["ok", "degraded", "error"]
 Probe = Callable[[], Awaitable[tuple[Status, str]]]
 
+UNCONFIRMED = "could not be confirmed, so it is assumed to be available"
+NO_MODEL_LIST = (404, 405, 501)  # an OpenAI-compatible server need not offer a model list
+
 LABELS = {
     "memory": "Memory database",
     "timeseries": "Time-series store",
@@ -108,11 +111,11 @@ class HealthService:
         if probe is None:
             return None
         check = await self._run("llm", probe)
-        return None if check.status == "ok" else f"The language model is not available: {check.detail}"
+        return None if _usable(check) else f"The language model is not available: {check.detail}"
 
     def _models(self, checks: list[Check]) -> list[dict[str, object]]:
         s = self._s
-        available = any(c.id == "llm" and c.status == "ok" for c in checks)
+        available = any(c.id == "llm" and _usable(c) for c in checks)
         name = "scripted" if s.llm_provider == "scripted" else s.llm_model
         return [{"name": name, "role": "agent", "provider": s.llm_label, "available": available}]
 
@@ -167,35 +170,51 @@ class HealthService:
 
     async def _llm(self) -> tuple[Status, str]:
         s = self._s
+        if s.llm_provider == "scripted":
+            return "ok", "Scripted answers, no model"
+        # Shorter than the check's own limit, so that a slow answer can be told from no answer.
+        limit = httpx.Timeout(s.health_timeout_s * 0.8)
+        async with httpx.AsyncClient(timeout=limit, transport=self._transport) as client:
+            try:
+                return await self._llm_state(client)
+            except httpx.ReadTimeout:
+                return "degraded", f"{self._label()} did not list its models in time; the model {UNCONFIRMED}"
+
+    def _label(self) -> str:
+        return (self._s.llm_provider_name or "Ollama") if self._s.llm_provider == "ollama" else self._s.llm_label
+
+    async def _llm_state(self, client: httpx.AsyncClient) -> tuple[Status, str]:
+        s = self._s
         model = s.llm_model
-        async with httpx.AsyncClient(timeout=s.health_timeout_s, transport=self._transport) as client:
-            if s.llm_provider == "scripted":
-                return "ok", "Scripted answers, no model"
-            if s.llm_provider == "ollama":
-                response = await client.get(f"{s.ollama_url.rstrip('/')}/api/tags")
-                response.raise_for_status()
-                names = {m.get("name", "") for m in response.json().get("models", [])}
-                label = s.llm_provider_name or "Ollama"
-                if model in names or f"{model}:latest" in names:
-                    return "ok", f"{label} at {s.ollama_url}, model {model} available"
-                return "degraded", f"{label} at {s.ollama_url} is reachable, but model {model} is not downloaded yet"
-            if s.llm_provider == "anthropic":
-                response = await client.get(
-                    "https://api.anthropic.com/v1/models",
-                    headers={"x-api-key": s.anthropic_api_key.get_secret_value(), "anthropic-version": "2023-06-01"},
-                )
-            else:
-                base = (s.openai_base_url or "https://api.openai.com/v1").rstrip("/")
-                key = s.openai_api_key
-                headers = {"Authorization": f"Bearer {key.get_secret_value()}"} if key else {}
-                response = await client.get(f"{base}/models", headers=headers)
-                if response.status_code == 200 and not _lists_model(response, model):
-                    return "degraded", f"{s.llm_label} is reachable, but does not list model {model}"
+        label = self._label()
+        if s.llm_provider == "ollama":
+            response = await client.get(f"{s.ollama_url.rstrip('/')}/api/tags")
+            response.raise_for_status()
+            names = {m.get("name", "") for m in response.json().get("models", [])}
+            if model in names or f"{model}:latest" in names:
+                return "ok", f"{label} at {s.ollama_url}, model {model} available"
+            return "degraded", f"{label} at {s.ollama_url} is reachable, but model {model} is not downloaded yet"
+        if s.llm_provider == "anthropic":
+            # The list is not searched for the model: it is paged, and aliases aren't listed.
+            # A wrong model name shows when the first request fails.
+            response = await client.get(
+                "https://api.anthropic.com/v1/models",
+                headers={"x-api-key": s.anthropic_api_key.get_secret_value(), "anthropic-version": "2023-06-01"},
+            )
+        else:
+            base = (s.openai_base_url or "https://api.openai.com/v1").rstrip("/")
+            key = s.openai_api_key
+            headers = {"Authorization": f"Bearer {key.get_secret_value()}"} if key else {}
+            response = await client.get(f"{base}/models", headers=headers)
+            if response.status_code in NO_MODEL_LIST:
+                return "degraded", f"{label} does not list its models; the model {UNCONFIRMED}"
+            if response.status_code == 200 and not _lists_model(response, model):
+                return "degraded", f"{label} is reachable, but does not list model {model}"
         if response.status_code in (401, 403):
-            return "error", f"{s.llm_label} rejected the API key"
+            return "error", f"{label} rejected the API key"
         if response.status_code != 200:
-            return "error", f"{s.llm_label} answered HTTP {response.status_code}"
-        return "ok", f"{s.llm_label} reachable, model {model}"
+            return "error", f"{label} answered HTTP {response.status_code}"
+        return "ok", f"{label} reachable, model {model}"
 
 
 async def _connect(url: str, connect_timeout_s: float) -> psycopg.AsyncConnection:
@@ -205,6 +224,11 @@ async def _connect(url: str, connect_timeout_s: float) -> psycopg.AsyncConnectio
 async def _select_one(url: str, connect_timeout_s: float) -> None:
     async with await _connect(url, connect_timeout_s) as conn:
         await conn.execute("SELECT 1")
+
+
+def _usable(check: Check) -> bool:
+    """Whether a language model check allows work to start: a list that can't be read proves nothing."""
+    return check.status == "ok" or (check.status == "degraded" and check.detail.endswith(UNCONFIRMED))
 
 
 def _lists_model(response: httpx.Response, model: str) -> bool:

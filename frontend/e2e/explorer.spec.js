@@ -16,6 +16,7 @@
 
 import { test, expect } from '@playwright/test'
 import { presetControls, setControls } from './helpers'
+import { machineStatusAt, STATUS_STEP_MS } from '../src/data/sources/mock/history.js'
 
 test.beforeEach(async ({ page }) => {
   await presetControls(page, { authEnabled: false })
@@ -26,6 +27,10 @@ const nodeHeadings = (page) => entities(page).getByRole('heading', { level: 3 })
 const node = (page, id) => page.locator(`[data-entity="${id}"]`).first()
 const attribute = (scope, name) => scope.locator(`[data-attribute="${name}"]`).first()
 const localInput = (ms) => new Date(ms - new Date(ms).getTimezoneOffset() * 60_000).toISOString().slice(0, 16)
+const momentWithStatusOtherThan = (id, status) => {
+  const start = (Math.floor((Date.now() - 3 * 24 * 3600_000) / STATUS_STEP_MS) + 0.5) * STATUS_STEP_MS
+  for (let t = start; ; t -= STATUS_STEP_MS) if (machineStatusAt(id, t) !== status) return t
+}
 const SENSOR = 'urn:ngsi-ld:Sensor:chiller-01-flow'
 const CHILLER = 'urn:ngsi-ld:Machine:chiller-01'
 const MACHINE = 'urn:ngsi-ld:Machine:press-brake-01'
@@ -96,12 +101,15 @@ test('edit in place with suggestions, cancel with Escape, then view the past and
   await page.reload()
   await expect(attribute(node(page, MACHINE), 'status')).toContainText('"maintenance"')
 
-  await page.getByLabel('View as of').fill(localInput(Date.now() - 3 * 24 * 3600_000))
+  // A moment in the past, mid-way through a recorded period, when the machine had another status.
+  const past = momentWithStatusOtherThan(MACHINE, 'maintenance')
+  await page.getByLabel('View as of').fill(localInput(past))
   await page.getByRole('button', { name: 'Show', exact: true }).click()
   const banner = page.getByRole('region', { name: 'Historical view' })
   await expect(banner).toContainText('Editing is disabled.')
   await expect(page).toHaveURL(/[?&]at=/)
   await expect(entities(page).getByRole('button', { name: 'Press brake 01', exact: true })).toHaveAttribute('aria-expanded', 'true')
+  await expect(attribute(node(page, MACHINE), 'status')).toContainText(`"${machineStatusAt(MACHINE, past)}"`)
   await expect(attribute(node(page, MACHINE), 'status')).not.toContainText('maintenance')
   await expect(page.getByRole('button', { name: 'Edit status' })).toHaveCount(0)
   await expect(page.getByLabel('Entity type').locator('option', { hasText: 'Camera' })).toHaveCount(1)

@@ -224,3 +224,45 @@ async def test_model_problem():
 async def test_model_problem_within_the_timeout():
     problem = await service({"llm": stub(delay=5)}, health_timeout_s=0.05).model_problem()
     assert "No answer within" in problem
+
+
+@pytest.mark.parametrize("status", [404, 405, 501])
+async def test_a_server_without_a_model_list_does_not_block_work(status):
+    s = make_settings(llm_provider="openai", llm_model="m1", openai_base_url="http://ovms/v3")
+    svc = HealthService(s, Migrator(""), transport=openai_models(status=status))
+    state, detail = await svc._llm()
+    assert state == "degraded"
+    assert "does not list its models" in detail
+    assert await svc.model_problem() is None
+    assert (await svc.report(fresh=True))["models"][0]["available"] is True
+
+
+async def test_a_slow_model_list_does_not_block_work():
+    def slow(request):
+        raise httpx.ReadTimeout("slow", request=request)
+
+    s = make_settings(llm_provider="openai", llm_model="m1", openai_base_url="http://ovms/v3")
+    svc = HealthService(s, Migrator(""), transport=httpx.MockTransport(slow))
+    assert await svc.model_problem() is None
+
+
+async def test_a_server_that_cannot_be_reached_still_blocks_work():
+    def down(request):
+        raise httpx.ConnectError("refused", request=request)
+
+    s = make_settings(llm_provider="openai", llm_model="m1", openai_base_url="http://ovms/v3")
+    svc = HealthService(s, Migrator(""), transport=httpx.MockTransport(down))
+    assert "not available" in await svc.model_problem()
+
+
+@pytest.mark.parametrize(("status", "blocks"), [(500, True), (401, True), (403, True), (200, False)])
+async def test_other_model_list_answers(status, blocks):
+    s = make_settings(llm_provider="openai", llm_model="m1", openai_base_url="http://ovms/v3")
+    svc = HealthService(s, Migrator(""), transport=openai_models(status=status))
+    assert (await svc.model_problem() is not None) is blocks
+
+
+async def test_a_listed_server_without_the_model_still_blocks_work():
+    s = make_settings(llm_provider="openai", llm_model="absent", openai_base_url="http://ovms/v3")
+    svc = HealthService(s, Migrator(""), transport=openai_models())
+    assert "does not list model absent" in await svc.model_problem()
