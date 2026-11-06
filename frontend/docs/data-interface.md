@@ -33,7 +33,7 @@ Served by the backend (phase 1):
 | incidents | `listIncidents`, `getIncident`, `reopenIncident` | `/api/incidents` |
 | system | `getHealth` | `/api/diagnostics` |
 
-Every other operation (session, entities, alerts, dataspace, knowledge base, service settings, and the escalation and conversation operations of runs) comes from the mock, so the whole UI stays usable. `src/data/sources/backend/index.js` builds each area as `{ ...mock[area], ...backend[area] }` and lists the served operations in `SERVED`; the mock's development controls still apply to the delegated operations.
+Every other operation (session, entities, alerts, dataspace, the optional knowledge base, service settings, and the escalation and conversation operations of runs) comes from the mock, so the whole UI stays usable. `src/data/sources/backend/index.js` builds each area as `{ ...mock[area], ...backend[area] }` and lists the served operations in `SERVED`; the mock's development controls still apply to the delegated operations.
 
 - **Transport:** relative paths (`/api/…`, `/ws/…`), so the development server's proxy reaches the backend (`XANA_BACKEND_URL`). `VITE_BACKEND_BASE` sets another prefix or origin. Requests time out after 15 s.
 - **Keys:** the backend uses snake_case; keys are converted both ways, recursively, including step input and output and state data. Values are never changed. Attached files are sent as `{ name, type, size, data_url }`.
@@ -198,7 +198,9 @@ Entities are NGSI-LD entities in compacted form: `id`, `type` and one member per
 
 **Mock specifics.** Connected by default with participant `participant-plant-north`, a session of 8 hours (expired once past) and the tier `minimal`. The credential is `plant-north-secret` unless the controls' *Configuration provides the dataspace credential* is set; *Dataspace gateway reachable* off makes `connect` fail as `unavailable`. A connection state preset in the controls applies until the operator connects or disconnects. Four peers (the machine builders of the factory's machines), seeded policies, and five capability requests (three pending, one from a service company that is not a peer).
 
-## knowledgeBase — implemented
+## knowledgeBase — optional, off by default
+
+This area exists only in a build with `VITE_KNOWLEDGE_BASE=on`, on the mock and backend sources alike. With the default setting, the data layer has no `knowledgeBase` area, the System screen has no knowledge base, health has no knowledge base check and simulated runs have no document retrieval step. The rest of this section applies when it is on.
 
 Documents belong to an ingestion pipeline: `base` (page text, faster) or `structured` (section-aware, better for tables and diagrams). A document name is unique within its pipeline.
 
@@ -221,4 +223,4 @@ Documents belong to an ingestion pipeline: `base` (page text, faster) or `struct
 | `getServiceSettings()` | — | `[{ key, label, value, deploymentValue, changed }]` for the context broker, time-series store, message broker and alert manager: the address in use, the deployment's address, and whether an operator override is in use | `unavailable` |
 | `saveServiceSettings(changes)` | `{ [key]: address \| null }`; `null` (or the deployment value) resets to the deployment value. Addresses are URLs with scheme `http`, `https`, `ws`, `wss` or `mqtt` | settings (as `getServiceSettings`) | `invalid` (with the reason; nothing is saved) |
 
-**Mock specifics.** Eight dependency checks with fixed latencies. Checks of services with a setting report the address in use in `detail`; a host under the reserved `.invalid` domain does not answer, to show a failing dependency. Failures injected for `entities`, `alerts`, `knowledgeBase` or `dataspace`, or an unreachable gateway in the controls, fail the matching check. Overrides are kept in the mock store.
+**Mock specifics.** Seven dependency checks with fixed latencies, and an eighth for the knowledge base when it is on. Checks of services with a setting report the address in use in `detail`; a host under the reserved `.invalid` domain does not answer, to show a failing dependency. Failures injected for `entities`, `alerts`, `knowledgeBase` or `dataspace`, or an unreachable gateway in the controls, fail the matching check. Overrides are kept in the mock store.

@@ -89,9 +89,15 @@ The seeded open runs and the twelve past incidents are produced by the same engi
 
 The mock entities are NGSI-LD entities of one factory (lines, machines, components, sensors) with every attribute kind: properties with units, observation times and sub-attributes, relationships, IRI values, geo, JSON, language, list and vocabulary properties. Sensor values and machine states have a deterministic history over the 7 days before the mock data was created, which also drives time-shift and live updates (every 5 s divided by the playback speed). Importing from a URL works with the sample documents listed in [`docs/data-interface.md`](docs/data-interface.md); the mock makes no network requests. Sixteen seeded alerts in two environments reference the factory's machines.
 
-### Dataspace, system and knowledge base
+### Dataspace and system
 
-The factory is connected to the dataspace with the data-sharing tier `minimal`; after disconnecting, connect again with the credential `plant-north-secret` (shown as a hint below the form). Four machine builders are compatible peers, with seeded policies and five capability requests. The System area checks eight dependencies; a saved service address under the reserved `.invalid` domain does not answer, to show a failing dependency. The knowledge base holds sample manuals in both ingestion pipelines; uploads are ingested in a few seconds (divided by the playback speed), Markdown files are searchable by their sections, and a file whose name contains `corrupt` fails. Details in [`docs/data-interface.md`](docs/data-interface.md).
+The factory is connected to the dataspace with the data-sharing tier `minimal`; after disconnecting, connect again with the credential `plant-north-secret` (shown as a hint below the form). Four machine builders are compatible peers, with seeded policies and five capability requests. The System area checks seven dependencies; a saved service address under the reserved `.invalid` domain does not answer, to show a failing dependency. Details in [`docs/data-interface.md`](docs/data-interface.md).
+
+### Knowledge base (off by default)
+
+Document retrieval is not part of the current system, so the knowledge base is off by default. To turn it on, build or start the UI with `VITE_KNOWLEDGE_BASE=on`, for example `VITE_KNOWLEDGE_BASE=on npm run dev`. That brings back the screen in the System area, its data operations, its health check and the document retrieval step of simulated runs.
+
+While on, it holds sample manuals in both ingestion pipelines; uploads are ingested in a few seconds (divided by the playback speed), Markdown files are searchable by their sections, and a file whose name contains `corrupt` fails. `npm run test:knowledge-base` and `npm run test:e2e:knowledge-base` run the tests with it on. CI runs both.
 
 Settings are stored in `localStorage` (`xana.mock.controls`); operator changes to mock data live in `sessionStorage` for the current tab. Production builds do not contain the controls.
 

@@ -10,6 +10,8 @@ It is not a chatbot. Every output is a typed, structured artifact: a hypothesis 
 
 ## System Overview
 
+> **Document retrieval is not part of the current system.** The diagram shows the target system. Its RETRIEVE step, RAG Tool and RAG Tool Microservice are not built, and the workflow runs without them. The UI's knowledge base is off by default (`VITE_KNOWLEDGE_BASE`, see [`frontend/README.md`](frontend/README.md)).
+
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
 │  Frontend (React + Vite)                                                │
@@ -82,9 +84,9 @@ Built with React 18 + Vite in JavaScript. Structured views, no chat interface. E
 | Data explorer | NGSI-LD entities, relationships, attribute history, time-shift, edits, import, live updates |
 | Alerts | Alert list, filters, actions, detail |
 | Dataspace | Gateway connection, peers and capabilities, capability requests, sharing tier |
-| System | Dependency health, service settings, knowledge-base documents |
+| System | Dependency health, service settings; knowledge-base documents only when the knowledge base is turned on |
 
-**Data layer.** Screens obtain data only through the UI data interface (`src/data`), one module per area: session, runs, incidents, entities, alerts, dataspace, knowledge base, system health. A data source implements the interface and is selected with `VITE_DATA_SOURCE`:
+**Data layer.** Screens obtain data only through the UI data interface (`src/data`), one module per area: session, runs, incidents, entities, alerts, dataspace, system health, and the optional knowledge base. A data source implements the interface and is selected with `VITE_DATA_SOURCE`:
 - `mock` (default): runs in the browser with deterministic seeded data, a simulated run engine, and development controls for per-area latency and failure. No backend is needed.
 - `backend`: the operations the backend provides (runs and their stream, incident history, system health) over REST and WebSocket, with key mapping (snake_case ↔ camelCase), error mapping and stream reconnection. Every other operation is delegated to the mock source (`{ ...mock[area], ...backend[area] }`), so the whole UI stays usable while later phases bring their backends. Attaching it changed no screen.
 
@@ -222,7 +224,7 @@ Step content uses the field names of the UI's data interface, in snake_case; the
 ```
 POST /api/agent/escalate/{run_id}
   │
-  ├─ IFRIC lookup: GET /company/products/{machine_id} → company_ifric_id, company_name
+  ├─ IFRIC lookup: GET /company/assets/{machine_id}/manufacturer → company_ifric_id, company_name
   ├─ Gateway peer match: GET /participants/compatible
   ├─ Policy check (apply_policy): enforce DATA_SHARING_POLICY before sending
   │    → emits policy_check step event over WebSocket
@@ -274,6 +276,8 @@ The workflow reads through three protocols (`sources/base.py`), so a program can
 `testing.py` provides fake sources and scripted answers for every step; the scripted provider (`LLM_PROVIDER=scripted`) uses them, so a complete run works without a model. Alerts, dataspace gateway and IFRIC sources are not part of phase 1.
 
 #### Knowledge Base (`rag-tool`)
+
+> **Not part of the current system.** This section describes a possible later addition. Nothing in this repository provides this service.
 
 [`rag-tool-microservice`](rag-tool-microservice/README.md) is a
 separately-deployed service that gives the agent a document-grounded
@@ -442,7 +446,6 @@ GATEWAY_CLIENT_SECRET=...            # secret
 
 # IFRIC Registry
 IFRIC_URL=https://dev-registry.ifric.org
-IFRIC_REFRESH_TOKEN=...              # secret (Supabase service role key)
 FACTORY_ID=urn:ifric:...             # optional; PDT token claim is preferred
 
 # Auth (Keycloak for FO operator login)
@@ -509,6 +512,8 @@ helm/
     ├── xana-pdt/                    # single Helm chart (backend + frontend + ingress)
     └── rag-tool/                    # second Helm chart (rag-tool knowledge base)
 ```
+
+Not part of the current system: the `rag-tool` entries above are not deployed, and none of these files exist yet.
 
 The [`rag-tool`](#knowledge-base-rag-tool) knowledge base
 is a **second Helm release** (chart at
