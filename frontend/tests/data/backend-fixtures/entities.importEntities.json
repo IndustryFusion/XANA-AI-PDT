@@ -1,0 +1,12 @@
+{
+  "method": "POST",
+  "path": "/api/ngsi/import",
+  "status": 200,
+  "body": [
+    {
+      "id": "urn:ngsi-ld:Recording:mw5j04jq",
+      "result": "created",
+      "reason": null
+    }
+  ]
+}

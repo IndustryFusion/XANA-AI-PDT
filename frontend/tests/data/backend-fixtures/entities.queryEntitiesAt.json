@@ -1,0 +1,93 @@
+{
+  "method": "GET",
+  "path": "/api/ngsi/timeshift/entities?type=Machine&limit=2&at=2026-11-06T21%3A08%3A15.645Z",
+  "status": 200,
+  "body": [
+    {
+      "id": "urn:ngsi-ld:Machine:chiller-01",
+      "type": "Machine",
+      "configuration": {
+        "type": "JsonProperty",
+        "json": {
+          "firmware": "4.0.1",
+          "setPointC": 18,
+          "refrigerant": "R-513A"
+        },
+        "observedAt": "2026-11-05T20:50:25+00:00"
+      },
+      "machineType": {
+        "type": "Property",
+        "value": "Chiller",
+        "observedAt": "2026-11-05T20:50:25+00:00"
+      },
+      "manufacturer": {
+        "type": "Property",
+        "value": "CoolFlow Process Cooling",
+        "observedAt": "2026-11-05T20:50:25+00:00"
+      },
+      "name": {
+        "type": "Property",
+        "value": "Process chiller 01",
+        "observedAt": "2026-11-05T20:50:25+00:00"
+      },
+      "operatingMode": {
+        "type": "VocabularyProperty",
+        "vocab": "automatic",
+        "observedAt": "2026-11-05T20:50:25+00:00"
+      },
+      "partOf": {
+        "type": "Relationship",
+        "object": "urn:ngsi-ld:ProductionLine:line-a",
+        "observedAt": "2026-11-05T20:50:25+00:00"
+      },
+      "status": {
+        "type": "Property",
+        "value": "setup",
+        "observedAt": "2026-11-06T19:50:25+00:00"
+      }
+    },
+    {
+      "id": "urn:ngsi-ld:Machine:coating-01",
+      "type": "Machine",
+      "configuration": {
+        "type": "JsonProperty",
+        "json": {
+          "firmware": "1.9.3",
+          "guns": 2,
+          "cureTemperatureC": 180
+        },
+        "observedAt": "2026-11-05T20:50:25+00:00"
+      },
+      "machineType": {
+        "type": "Property",
+        "value": "Coating",
+        "observedAt": "2026-11-05T20:50:25+00:00"
+      },
+      "manufacturer": {
+        "type": "Property",
+        "value": "SurfaceTec Finishing",
+        "observedAt": "2026-11-05T20:50:25+00:00"
+      },
+      "name": {
+        "type": "Property",
+        "value": "Powder coating booth 01",
+        "observedAt": "2026-11-05T20:50:25+00:00"
+      },
+      "operatingMode": {
+        "type": "VocabularyProperty",
+        "vocab": "setup",
+        "observedAt": "2026-11-05T20:50:25+00:00"
+      },
+      "partOf": {
+        "type": "Relationship",
+        "object": "urn:ngsi-ld:ProductionLine:line-c",
+        "observedAt": "2026-11-05T20:50:25+00:00"
+      },
+      "status": {
+        "type": "Property",
+        "value": "running",
+        "observedAt": "2026-11-06T19:50:25+00:00"
+      }
+    }
+  ]
+}

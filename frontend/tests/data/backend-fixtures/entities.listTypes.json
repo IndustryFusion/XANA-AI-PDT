@@ -1,0 +1,12 @@
+{
+  "method": "GET",
+  "path": "/api/ngsi/types",
+  "status": 200,
+  "body": [
+    "Component",
+    "Factory",
+    "Machine",
+    "ProductionLine",
+    "Sensor"
+  ]
+}

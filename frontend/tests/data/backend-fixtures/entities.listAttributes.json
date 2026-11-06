@@ -1,0 +1,21 @@
+{
+  "method": "GET",
+  "path": "/api/ngsi/attributes",
+  "status": 200,
+  "body": [
+    "address",
+    "configuration",
+    "description",
+    "installedOn",
+    "location",
+    "machineType",
+    "manufacturer",
+    "measures",
+    "name",
+    "operatingMode",
+    "partOf",
+    "shifts",
+    "status",
+    "value"
+  ]
+}

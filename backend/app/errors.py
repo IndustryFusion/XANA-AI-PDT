@@ -31,14 +31,15 @@ HTTP_STATUS: dict[Kind, int] = {
 
 
 class Refused(Exception):
-    def __init__(self, kind: Kind, message: str) -> None:
+    def __init__(self, kind: Kind, message: str, status: int | None = None) -> None:
         super().__init__(message)
         self.kind = kind
         self.message = message
+        self._status = status
 
     @property
     def http_status(self) -> int:
-        return HTTP_STATUS[self.kind]
+        return self._status or HTTP_STATUS[self.kind]
 
     def as_dict(self) -> dict[str, str]:
         return {"kind": self.kind, "message": self.message}
@@ -62,3 +63,8 @@ def unauthorized(message: str) -> Refused:
 
 def unavailable(message: str) -> Refused:
     return Refused("unavailable", message)
+
+
+def bad_gateway(message: str) -> Refused:
+    """A service behind the backend cannot be used. The message names it, and holds no address or token."""
+    return Refused("unavailable", message, status=502)

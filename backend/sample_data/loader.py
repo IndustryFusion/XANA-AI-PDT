@@ -41,6 +41,22 @@ DDL_FILE = Path(__file__).with_name("attributes.sql")
 DEFAULT_VOCAB = "https://uri.etsi.org/ngsi-ld/default-context/"
 XSD = "http://www.w3.org/2001/XMLSchema#"
 MARKER = "attribute-history"
+SNAPSHOT_MARKER = "platform-layout"
+NGSI = "https://uri.etsi.org/ngsi-ld/"
+SNAPSHOT_AGE = timedelta(hours=25)
+NOT_ATTRIBUTES = {"id", "type", "@context", "scope", "createdAt", "modifiedAt"}
+METADATA = {
+    "type",
+    "value",
+    "object",
+    "json",
+    "languageMap",
+    "valueList",
+    "vocab",
+    "observedAt",
+    "unitCode",
+    "datasetId",
+}
 BATCH = 50
 
 
@@ -100,33 +116,122 @@ def history_rows(history: list[dict], now: datetime) -> list[tuple]:
         for i, value in enumerate(values):
             at = now - step * (len(values) - 1 - i)
             value_type = f"{XSD}double" if isinstance(value, int | float) else f"{XSD}string"
-            rows.append((at, item["entityId"], attribute_id, str(value), value_type))
+            identifier = row_id(item["entityId"], attribute_id)
+            rows.append((at, item["entityId"], attribute_id, str(value), value_type, identifier))
     return rows
 
 
-def load_history(settings: Settings, history: list[dict], now: datetime | None = None) -> int:
-    """Writes the history once; returns the number of rows written (0 if already loaded)."""
+def row_id(entity_id: str, attribute_id: str, parent: str | None = None) -> str:
+    """Unique per attribute and dataset, as on the platform. Sub-attributes extend their parent's."""
+    return f"{parent or entity_id}\\{attribute_id}\\@none"
+
+
+def _term(name: str) -> str:
+    return name if "://" in name or name.startswith("urn:") else f"{DEFAULT_VOCAB}{name}"
+
+
+def _stored(attribute: dict) -> tuple[str | None, str, str | None]:
+    """(value as text, node type, value type) of an attribute, as the platform stores them."""
+    kind = attribute.get("type")
+    if kind == "Relationship":
+        return str(attribute.get("object")), "@id", None
+    for member in ("json", "languageMap", "valueList"):
+        if member in attribute:
+            return json.dumps(attribute[member]), "@json", None
+    if "vocab" in attribute:
+        return str(attribute["vocab"]), "@id", None
+    value = attribute.get("value")
+    if isinstance(value, dict) and "@id" in value:
+        return str(value["@id"]), "@id", None
+    if isinstance(value, dict | list):
+        return json.dumps(value), "@json", None
+    if isinstance(value, bool):
+        return str(value).lower(), "@value", f"{XSD}boolean"
+    if isinstance(value, int | float):
+        return str(value), "@value", f"{XSD}double"
+    return (None if value is None else str(value)), "@value", f"{XSD}string"
+
+
+def snapshot_rows(entity: dict, at: datetime) -> list[tuple]:
+    """One row per attribute and sub-attribute of an entity, as they are at `at`."""
+    rows: list[tuple] = []
+
+    def add(name: str, attribute: dict, parent: str | None) -> None:
+        attribute_id = _term(name)
+        identifier = row_id(entity["id"], attribute_id, parent)
+        value, node_type, value_type = _stored(attribute)
+        kind = f"{NGSI}{attribute.get('type', 'Property')}"
+        unit = attribute.get("unitCode")
+        rows.append((identifier, parent, at, entity["id"], attribute_id, kind, node_type, value, value_type, unit))
+        for member, inner in attribute.items():
+            if member not in METADATA and isinstance(inner, dict) and "type" in inner:
+                add(member, inner, identifier)
+
+    for name, attribute in entity.items():
+        if name not in NOT_ATTRIBUTES and isinstance(attribute, dict):
+            add(name, attribute, None)
+    return rows
+
+
+def load_history(
+    settings: Settings, history: list[dict], now: datetime | None = None, entities: list[dict] | None = None
+) -> int:
+    """Writes the history once; returns the number of rows written (0 if already loaded).
+
+    With `entities`, it also writes their state from before the history starts, and their lifecycle,
+    once. A database loaded by an earlier version gains these and the platform's columns.
+    """
     table = settings.timescale_table
+    short = table.split(".")[-1]
     ddl = DDL_FILE.read_text(encoding="utf-8")
     ddl = sql.SQL(ddl).format(
-        table=sql.Identifier(*table.split(".")), index=sql.Identifier(f"{table.split('.')[-1]}_entity_time")
+        table=sql.Identifier(*table.split(".")),
+        index=sql.Identifier(f"{short}_entity_time"),
+        id_index=sql.Identifier(f"{short}_entity_row"),
+        entity_table=sql.Identifier(*settings.timescale_entity_table.split(".")),
     )
+    now = now or datetime.now(UTC).replace(microsecond=0)
     with psycopg.connect(settings.timescale_db_url.get_secret_value(), connect_timeout=10) as conn:
         conn.execute(ddl)
         if conn.execute("SELECT 1 FROM pg_extension WHERE extname = 'timescaledb'").fetchone():
             conn.execute(
                 "SELECT create_hypertable(%s, 'observedAt', if_not_exists => TRUE, migrate_data => TRUE)", (table,)
             )
-        if conn.execute("SELECT 1 FROM xana_sample_data WHERE name = %s", (MARKER,)).fetchone():
-            return 0
-        rows = history_rows(history, now or datetime.now(UTC).replace(microsecond=0))
-        insert = sql.SQL(
-            'INSERT INTO {} ("observedAt", "entityId", "attributeId", "value", "valueType") VALUES (%s, %s, %s, %s, %s)'
-        ).format(sql.Identifier(*table.split(".")))
-        with conn.cursor() as cur:
-            cur.executemany(insert, rows)
-        conn.execute("INSERT INTO xana_sample_data (name) VALUES (%s)", (MARKER,))
-    return len(rows)
+        written = 0
+        if entities is not None:
+            written += _load_snapshot(conn, settings, entities, now)
+        if not conn.execute("SELECT 1 FROM xana_sample_data WHERE name = %s", (MARKER,)).fetchone():
+            rows = history_rows(history, now)
+            insert = sql.SQL(
+                'INSERT INTO {} ("observedAt", "entityId", "attributeId", "value", "valueType", "id") '
+                "VALUES (%s, %s, %s, %s, %s, %s)"
+            ).format(sql.Identifier(*table.split(".")))
+            with conn.cursor() as cur:
+                cur.executemany(insert, rows)
+            conn.execute("INSERT INTO xana_sample_data (name) VALUES (%s)", (MARKER,))
+            written += len(rows)
+        # Tables made after PostgREST started are unknown to it until now.
+        conn.execute("NOTIFY pgrst, 'reload schema'")
+    return written
+
+
+def _load_snapshot(conn: psycopg.Connection, settings: Settings, entities: list[dict], now: datetime) -> int:
+    if conn.execute("SELECT 1 FROM xana_sample_data WHERE name = %s", (SNAPSHOT_MARKER,)).fetchone():
+        return 0
+    at = now - SNAPSHOT_AGE
+    rows = [row for entity in entities for row in snapshot_rows(entity, at)]
+    insert_row = sql.SQL(
+        'INSERT INTO {} ("id", "parentId", "observedAt", "entityId", "attributeId", "attributeType", "nodeType", '
+        '"value", "valueType", "unitCode") VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)'
+    ).format(sql.Identifier(*settings.timescale_table.split(".")))
+    insert_entity = sql.SQL('INSERT INTO {} ("id", "observedAt", "type") VALUES (%s, %s, %s)').format(
+        sql.Identifier(*settings.timescale_entity_table.split("."))
+    )
+    with conn.cursor() as cur:
+        cur.executemany(insert_row, rows)
+        cur.executemany(insert_entity, [(e["id"], at, _term(e["type"])) for e in entities])
+    conn.execute("INSERT INTO xana_sample_data (name) VALUES (%s)", (SNAPSHOT_MARKER,))
+    return len(rows) + len(entities)
 
 
 def load(settings: Settings, broker_wait_s: float = 300) -> None:
@@ -135,7 +240,7 @@ def load(settings: Settings, broker_wait_s: float = 300) -> None:
         wait_for_broker(settings, client, broker_wait_s)
         created, existing = load_entities(settings, data["entities"], client)
     log.info("Entities: %d created, %d already present (%s)", created, existing, settings.ngsi_url)
-    rows = load_history(settings, data["history"])
+    rows = load_history(settings, data["history"], entities=data["entities"])
     target = mask_url(settings.timescale_db_url.get_secret_value())
     if rows:
         log.info("Attribute history: %d rows written to %s", rows, target)

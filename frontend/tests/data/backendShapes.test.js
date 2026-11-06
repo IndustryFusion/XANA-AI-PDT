@@ -47,6 +47,23 @@ const ARGS = {
   'session.getSession': () => [],
   'session.signIn': () => [{ username: 'operator', password: 'operator' }],
   'session.signOut': () => [],
+  'entities.getLiveUpdateHealth': () => [],
+  'entities.getStats': () => [],
+  'entities.listTypes': () => [],
+  'entities.listAttributes': () => [],
+  'entities.queryEntities': () => [{ type: 'Machine', limit: 5 }],
+  'entities.getEntity': (f) => [f.body.id],
+  'entities.updateAttributes': () => ['urn:m', { a: { value: 1 } }],
+  'entities.appendAttributes': () => ['urn:m', { a: { type: 'Property', value: 1 } }],
+  'entities.deleteAttribute': () => ['urn:m', 'a'],
+  'entities.deleteEntity': () => ['urn:m'],
+  'entities.importEntities': () => [[]],
+  'entities.fetchImportDocument': () => ['https://example.org/a.json'],
+  'entities.deleteByTypes': () => [['T']],
+  'entities.getAttributeHistory': () => ['urn:m', 'value'],
+  'entities.getAttributeStatus': () => ['urn:m'],
+  'entities.listTypesAt': () => ['2026-01-01T00:00:00Z'],
+  'entities.queryEntitiesAt': () => ['2026-01-01T00:00:00Z', { type: 'Machine' }],
 }
 
 /** Answers every request with the recorded response; records the request method. */
@@ -63,9 +80,9 @@ function replay(fixture) {
 afterEach(() => vi.unstubAllGlobals())
 
 describe('backend source matches the documented shapes (recorded backend)', () => {
-  test('every operation the backend serves has a recording, except subscribeRun and reopenRun', () => {
+  test('every operation the backend serves has a recording, except the streams and reopenRun', () => {
     const served = Object.entries(backend.SERVED).flatMap(([area, ops]) => ops.map((op) => `${area}.${op}`))
-    const expected = served.filter((op) => !['runs.subscribeRun', 'runs.reopenRun'].includes(op)).sort()
+    const expected = served.filter((op) => !['runs.subscribeRun', 'runs.reopenRun', 'entities.subscribeEntities'].includes(op)).sort()
     expect(Object.keys(ARGS).sort()).toEqual(expected)
     for (const op of expected) expect(fixtures[op], op).toBeDefined()
   })

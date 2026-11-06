@@ -1,0 +1,31 @@
+{
+  "method": "GET",
+  "path": "/api/ngsi/stats",
+  "status": 200,
+  "body": {
+    "entity_count": 43,
+    "type_count": 5,
+    "by_type": [
+      {
+        "type": "Component",
+        "count": 18
+      },
+      {
+        "type": "Sensor",
+        "count": 13
+      },
+      {
+        "type": "Machine",
+        "count": 8
+      },
+      {
+        "type": "ProductionLine",
+        "count": 3
+      },
+      {
+        "type": "Factory",
+        "count": 1
+      }
+    ]
+  }
+}

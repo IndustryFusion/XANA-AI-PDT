@@ -50,8 +50,9 @@ function query(params = {}) {
 /**
  * Calls the backend and resolves with the mapped JSON result (undefined for an empty answer).
  *   request('runs', 'POST', '/api/agent/run', { body: { machine_id, issue } })
+ * With `raw`, keys stay as they are: attribute names are data, and `max_temp` must stay `max_temp`.
  */
-export async function request(area, method, path, { params, body } = {}) {
+export async function request(area, method, path, { params, body, raw = false } = {}) {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS)
   let response
@@ -73,7 +74,8 @@ export async function request(area, method, path, { params, body } = {}) {
   if (!response.ok) throw await refusal(area, response)
   if (response.status === 204) return undefined
   const text = await response.text()
-  return text ? fromBackend(JSON.parse(text)) : undefined
+  if (!text) return undefined
+  return raw ? JSON.parse(text) : fromBackend(JSON.parse(text))
 }
 
 /** A path segment from an identifier. */

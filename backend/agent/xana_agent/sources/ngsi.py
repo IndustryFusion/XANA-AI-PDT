@@ -36,6 +36,8 @@ class NgsiContextSource:
     `inverse_relationships` names the relationships through which other entities
     point to a machine (for example a component's `partOf`); NGSI-LD has no query
     for "any relationship pointing here". `token` gives the current bearer token, if any.
+    `context_url` names a JSON-LD context for short names: on data whose attributes are full
+    IRIs, a short name without one silently matches nothing.
     """
 
     def __init__(
@@ -46,10 +48,13 @@ class NgsiContextSource:
         inverse_relationships: tuple[str, ...] = DEFAULT_INVERSE_RELATIONSHIPS,
         transport: httpx.AsyncBaseTransport | None = None,
         token: Callable[[], str | None] | None = None,
+        context_url: str | None = None,
     ) -> None:
         headers = {"Accept": "application/json"}
         if tenant:
             headers["NGSILD-Tenant"] = tenant
+        if context_url:
+            headers["Link"] = context_link(context_url)
         self._client_args: dict[str, Any] = {
             "base_url": url.rstrip("/"),
             "headers": headers,
@@ -97,6 +102,11 @@ class NgsiContextSource:
                 if other.get("id") not in (own_id, None):
                     found.setdefault(other["id"], other)
         return list(found.values())[:limit]
+
+
+def context_link(url: str) -> str:
+    """The `Link` header value naming a JSON-LD context."""
+    return f'<{url}>; rel="http://www.w3.org/ns/json-ld#context"; type="application/ld+json"'
 
 
 def relationship_objects(entity: dict[str, Any]) -> list[str]:

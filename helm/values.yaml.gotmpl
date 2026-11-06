@@ -40,6 +40,15 @@ config:
   FACTORY_ID: {{ . | quote }}
   {{- end }}
   NGSI_URL: {{ .Values.ngsiUrl | quote }}
+  {{- with .Values.ngsiContextUrl }}
+  NGSI_CONTEXT_URL: {{ . | quote }}
+  {{- end }}
+  PGREST_URL: {{ .Values.pgrestUrl | quote }}
+  MQTT_BROKER_URL: {{ .Values.mqttBrokerUrl | quote }}
+  MQTT_MGMT_URL: {{ .Values.mqttMgmtUrl | quote }}
+  {{- with .Values.mqttBrokerNotifyUrl }}
+  MQTT_BROKER_NOTIFY_URL: {{ . | quote }}
+  {{- end }}
   POSTGRES_SSLMODE: {{ .Values.postgresSslMode | quote }}
   {{- range $name, $value := .Values.extraConfig }}
   {{ $name }}: {{ $value | quote }}

@@ -1,15 +1,15 @@
 {
   "method": "GET",
-  "path": "/api/agent/status/8c0e9ae0-26e2-480e-b6a3-8f1cb45f35eb",
+  "path": "/api/agent/status/59fcaea7-07fe-413f-991f-288b805f9906",
   "status": 200,
   "body": {
-    "run_id": "8c0e9ae0-26e2-480e-b6a3-8f1cb45f35eb",
-    "incident_id": 2,
+    "run_id": "59fcaea7-07fe-413f-991f-288b805f9906",
+    "incident_id": 8,
     "machine_id": "urn:ngsi-ld:Machine:laser-cutter-01",
     "issue": "Cut edges show burrs since this morning",
     "status": "awaiting_input",
-    "started_at": "2026-11-06T19:33:27.261609+00:00",
-    "updated_at": "2026-11-06T19:33:27.630261+00:00",
+    "started_at": "2026-11-06T22:08:11.059440+00:00",
+    "updated_at": "2026-11-06T22:08:11.596169+00:00",
     "escalation_ref": null,
     "data": {
       "question": "When did the issue start, and did anything change on the machine shortly before (maintenance, material, settings)?",
@@ -43,6 +43,51 @@
               "attribute": "value"
             }
           ],
+          "changes": [
+            {
+              "entity_id": "urn:ngsi-ld:Machine:laser-cutter-01",
+              "attribute": "status",
+              "at": "2026-11-06T13:50:25Z",
+              "value": "running",
+              "kind": "text"
+            },
+            {
+              "entity_id": "urn:ngsi-ld:Machine:laser-cutter-01",
+              "attribute": "status",
+              "at": "2026-11-06T11:50:25Z",
+              "value": "maintenance",
+              "kind": "text"
+            },
+            {
+              "entity_id": "urn:ngsi-ld:Machine:laser-cutter-01",
+              "attribute": "status",
+              "at": "2026-11-06T09:50:25Z",
+              "value": "running",
+              "kind": "text"
+            },
+            {
+              "entity_id": "urn:ngsi-ld:Machine:laser-cutter-01",
+              "attribute": "status",
+              "at": "2026-11-06T07:50:25Z",
+              "value": "maintenance",
+              "kind": "text"
+            },
+            {
+              "entity_id": "urn:ngsi-ld:Machine:laser-cutter-01",
+              "attribute": "status",
+              "at": "2026-11-06T01:50:25Z",
+              "value": "running",
+              "kind": "text"
+            },
+            {
+              "entity_id": "urn:ngsi-ld:Machine:laser-cutter-01",
+              "attribute": "status",
+              "at": "2026-11-05T23:50:25Z",
+              "value": "idle",
+              "kind": "text"
+            }
+          ],
+          "lifecycle": [],
           "sources": [
             {
               "source": "Context broker",
@@ -59,8 +104,8 @@
           "entities": [
             "urn:ngsi-ld:Machine:laser-cutter-01",
             "urn:ngsi-ld:ProductionLine:line-a",
-            "urn:ngsi-ld:Component:laser-cutter-01-laser-source",
             "urn:ngsi-ld:Component:laser-cutter-01-axis-drive",
+            "urn:ngsi-ld:Component:laser-cutter-01-laser-source",
             "urn:ngsi-ld:Component:laser-cutter-01-cutting-head",
             "urn:ngsi-ld:Sensor:laser-cutter-01-temperature",
             "urn:ngsi-ld:Sensor:laser-cutter-01-power"
@@ -68,7 +113,7 @@
           "machine_found": true,
           "machine_type": "LaserCutter"
         },
-        "at": "2026-11-06T19:33:27.490046+00:00",
+        "at": "2026-11-06T22:08:11.421792+00:00",
         "round": 1
       },
       {
@@ -107,7 +152,7 @@
             }
           ]
         },
-        "at": "2026-11-06T19:33:27.512231+00:00",
+        "at": "2026-11-06T22:08:11.442392+00:00",
         "round": 1
       },
       {
@@ -179,7 +224,7 @@
             }
           ]
         },
-        "at": "2026-11-06T19:33:27.615967+00:00",
+        "at": "2026-11-06T22:08:11.578166+00:00",
         "round": 1
       },
       {
@@ -193,16 +238,33 @@
           "confidence": 0.6,
           "threshold": 0.9,
           "question": "When did the issue start, and did anything change on the machine shortly before (maintenance, material, settings)?",
-          "past_incidents": [],
+          "past_incidents": [
+            {
+              "incident_id": "5",
+              "machine_id": "urn:ngsi-ld:Machine:laser-cutter-01",
+              "issue": "Cut edges show burrs (mw5imuz1)",
+              "root_cause": "Wear of a moving component",
+              "resolution": "Inspect the moving components named in the evidence and replace worn parts.",
+              "resolved_at": "2026-11-06T21:57:59.035261+00:00"
+            },
+            {
+              "incident_id": "1",
+              "machine_id": "urn:ngsi-ld:Machine:laser-cutter-01",
+              "issue": "Cut edges show burrs since this morning",
+              "root_cause": "Cooling or supply problem",
+              "resolution": "Check coolant level, flow and filters; clean or replace clogged filters.",
+              "resolved_at": "2026-11-06T21:52:51.763632+00:00"
+            }
+          ],
           "sources": [
             {
               "source": "Incident memory",
               "status": "ok",
-              "detail": "0 similar incidents found."
+              "detail": "2 similar incidents found."
             }
           ]
         },
-        "at": "2026-11-06T19:33:27.626525+00:00",
+        "at": "2026-11-06T22:08:11.590847+00:00",
         "round": 1
       }
     ],
