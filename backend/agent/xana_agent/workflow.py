@@ -26,7 +26,7 @@ workflow keeps nothing between calls; the caller owns the run.
 from __future__ import annotations
 
 import logging
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from datetime import timedelta
 from typing import Any
 
@@ -89,18 +89,26 @@ class Workflow:
         threshold: float = 0.9,
         llm_timeout_s: float = 120,
         history_window: timedelta = timedelta(hours=24),
+        callbacks: Sequence[Any] = (),
     ) -> None:
         if not 0 <= threshold <= 1:
             raise ValueError("threshold must be between 0 and 1")
         self.threshold = threshold
+        self._callbacks = list(callbacks)
         deps = Deps(llm, context, history, memory, llm_timeout_s, history_window)
         nodes = {"observe": observe, "hypothesize": hypothesize, "validate": validate, "decide": decide}
         self._analysis = _graph(nodes, deps)
         self._act = _graph({"act": act}, deps)
 
-    async def analyse(self, round_input: RoundInput) -> AsyncIterator[StepEvent | Outcome]:
-        """One analysis round. Ends with `awaiting_input`, `awaiting_confirmation` or `failed`."""
-        async for event in self._run(self._analysis, {"input": round_input, "threshold": self.threshold}):
+    async def analyse(
+        self, round_input: RoundInput, metadata: dict[str, Any] | None = None
+    ) -> AsyncIterator[StepEvent | Outcome]:
+        """One analysis round. Ends with `awaiting_input`, `awaiting_confirmation` or `failed`.
+
+        `metadata` goes to the callbacks with every model call of the round.
+        """
+        state = {"input": round_input, "threshold": self.threshold}
+        async for event in self._run(self._analysis, state, metadata):
             yield event
 
     async def act(
@@ -117,11 +125,13 @@ class Workflow:
         async for event in self._run(self._act, state):
             yield event
 
-    @staticmethod
-    async def _run(graph, state: dict[str, Any]) -> AsyncIterator[StepEvent | Outcome]:
+    async def _run(
+        self, graph, state: dict[str, Any], metadata: dict[str, Any] | None = None
+    ) -> AsyncIterator[StepEvent | Outcome]:
         outcome: Outcome | None = None
+        config = {"callbacks": self._callbacks, "metadata": metadata or {}}
         try:
-            async for chunk in graph.astream(state, stream_mode="updates"):
+            async for chunk in graph.astream(state, config, stream_mode="updates"):
                 for update in chunk.values():
                     if not update:
                         continue

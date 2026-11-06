@@ -35,6 +35,7 @@ from app.memory.store import Database, IncidentStore, RunStore
 from app.redact import RedactingFilter, Redactor
 from app.runs.machines import MachineResolver
 from app.runs.manager import RunManager
+from app.tracing import tracing_callbacks
 from xana_agent import NgsiContextSource, TimescaleHistorySource, Workflow
 from xana_agent.sources.base import ContextSource, HistorySource, IncidentMemory
 
@@ -79,6 +80,7 @@ def create_app(
     agent = agent or AgentDeps.from_settings(settings)
     db = Database(memory_url, settings.health_timeout_s, redactor)
     incident_store = IncidentStore(db)
+    callbacks = tracing_callbacks(settings)
 
     def workflow(memory: IncidentMemory) -> Workflow:
         return Workflow(
@@ -89,6 +91,7 @@ def create_app(
             threshold=settings.decision_confidence_threshold,
             llm_timeout_s=settings.llm_timeout_s,
             history_window=timedelta(hours=24),
+            callbacks=callbacks,
         )
 
     manager = RunManager(
@@ -98,6 +101,7 @@ def create_app(
         agent.machines,
         migrator,
         max_concurrent_rounds=settings.max_concurrent_rounds,
+        model_problem=health.model_problem,
     )
 
     @contextlib.asynccontextmanager

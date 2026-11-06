@@ -175,3 +175,52 @@ def test_app_starts_without_dependencies():
     body = response.json()
     assert body["overall"] == "error"
     assert {c["id"] for c in body["checks"]} == {"memory", "timeseries", "broker", "llm"}
+
+
+def openai_models(status=200, models=("m1",)):
+    def handle(request):
+        return httpx.Response(status, json={"object": "list", "data": [{"id": m} for m in models]})
+
+    return httpx.MockTransport(handle)
+
+
+async def test_openai_compatible_server_without_key():
+    s = make_settings(
+        llm_provider="openai", openai_base_url="http://ovms/v3", llm_model="m1", llm_provider_name="OpenVINO"
+    )
+    status, detail = await HealthService(s, Migrator(""), transport=openai_models())._llm()
+    assert status == "ok"
+    assert "OpenVINO" in detail
+
+
+async def test_openai_compatible_server_without_the_model():
+    s = make_settings(llm_provider="openai", openai_base_url="http://ovms/v3", llm_model="other")
+    status, detail = await HealthService(s, Migrator(""), transport=openai_models())._llm()
+    assert status == "degraded"
+    assert "does not list model other" in detail
+
+
+async def test_model_list_follows_the_language_model_check():
+    probes = {c: stub() for c in ("memory", "timeseries", "broker", "llm")}
+    report = await service(probes, llm_model="m1", llm_provider_name="OpenVINO").report()
+    assert report["models"] == [{"name": "m1", "role": "agent", "provider": "OpenVINO", "available": True}]
+    probes["llm"] = stub(status="degraded", detail="not downloaded")
+    report = await service(probes, llm_model="m1").report()
+    assert report["models"][0]["available"] is False
+
+
+async def test_scripted_model_is_listed_as_scripted():
+    report = await service({"llm": stub()}, llm_provider="scripted").report()
+    assert report["models"][0]["name"] == "scripted"
+
+
+async def test_model_problem():
+    assert await service({"llm": stub()}).model_problem() is None
+    problem = await service({"llm": stub(error=httpx.ConnectError("refused"))}).model_problem()
+    assert problem.startswith("The language model is not available: Not reachable")
+    assert await service({"memory": stub()}).model_problem() is None
+
+
+async def test_model_problem_within_the_timeout():
+    problem = await service({"llm": stub(delay=5)}, health_timeout_s=0.05).model_problem()
+    assert "No answer within" in problem

@@ -34,6 +34,14 @@
         "latency_ms": 29,
         "detail": "Scripted answers, no model"
       }
+    ],
+    "models": [
+      {
+        "name": "scripted",
+        "role": "agent",
+        "provider": "scripted",
+        "available": true
+      }
     ]
   }
 }

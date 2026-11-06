@@ -27,7 +27,7 @@ import asyncio
 import contextlib
 import logging
 import uuid
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any, Literal
@@ -73,10 +73,12 @@ class RunManager:
         max_concurrent_rounds: int = 2,
         queue_limit: int = QUEUE_LIMIT,
         clock: Callable[[], datetime] | None = None,
+        model_problem: Callable[[], Awaitable[str | None]] | None = None,
     ) -> None:
         self._store = store
         self._incidents = incidents
         self._workflow = workflow
+        self._model_problem = model_problem
         self._machines = machines
         self._migrator = migrator
         self._slots = asyncio.Semaphore(max_concurrent_rounds)
@@ -184,6 +186,7 @@ class RunManager:
         if len(issue) > MAX_ISSUE:
             raise invalid(f"The issue is longer than {MAX_ISSUE} characters.")
         await self.ready()
+        await self._require_model()
         return await self._create(await self._machines.resolve(machine_id), issue)
 
     async def _create(self, machine_id: str, issue: str) -> str:
@@ -206,6 +209,7 @@ class RunManager:
             text, kept = _operator_text(text), check_files(files)
             if not text and not kept:
                 raise invalid("Enter a clarification or attach a file.")
+            await self._require_model()
             s = rec.state
             step = self._step(
                 "clarification", {"question": s.data.get("question")}, {"text": text, "files": kept}, s.round
@@ -239,6 +243,7 @@ class RunManager:
                 return {"status": RUNNING}
             if not text:
                 raise invalid("Give a reason for rejecting the resolution.")
+            await self._require_model()
             rejection = {
                 "root_cause": proposal["root_cause"],
                 "recommended_action": proposal["recommended_action"],
@@ -292,6 +297,7 @@ class RunManager:
 
     async def reopen_incident(self, incident_id: int) -> str:
         await self.ready()
+        await self._require_model()
         async with self._reopen_lock:
             try:
                 incident = await self._incidents.get(incident_id)
@@ -327,6 +333,10 @@ class RunManager:
             rec.task.cancel()
             rec.task = None
 
+    async def _require_model(self) -> None:
+        if self._model_problem is not None and (problem := await self._model_problem()):
+            raise unavailable(problem)
+
     async def _round(self, rec: RunRecord, work: Work) -> None:
         task = asyncio.current_task()
         try:
@@ -343,7 +353,15 @@ class RunManager:
                 if work == "act":
                     events = workflow.act(round_input, state.last_decision() or {}, list(state.steps))
                 else:
-                    events = workflow.analyse(round_input)
+                    events = workflow.analyse(
+                        round_input,
+                        {
+                            "langfuse_session_id": state.run_id,
+                            "run_id": state.run_id,
+                            "machine_id": state.machine_id,
+                            "round": state.round,
+                        },
+                    )
                 async with contextlib.aclosing(events):
                     async for event in events:
                         async with rec.lock:

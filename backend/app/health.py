@@ -97,9 +97,24 @@ class HealthService:
                 "overall": overall([c.status for c in checks]),
                 "checked_at": datetime.now(UTC).isoformat(),
                 "checks": [asdict(c) for c in checks],
+                "models": self._models(checks),
             }
             self._cached = (now, result)
             return result
+
+    async def model_problem(self) -> str | None:
+        """Why the language model cannot be used right now, or None. Bounded by the check timeout."""
+        probe = self._probes.get("llm")
+        if probe is None:
+            return None
+        check = await self._run("llm", probe)
+        return None if check.status == "ok" else f"The language model is not available: {check.detail}"
+
+    def _models(self, checks: list[Check]) -> list[dict[str, object]]:
+        s = self._s
+        available = any(c.id == "llm" and c.status == "ok" for c in checks)
+        name = "scripted" if s.llm_provider == "scripted" else s.llm_model
+        return [{"name": name, "role": "agent", "provider": s.llm_label, "available": available}]
 
     async def _run(self, cid: str, probe: Probe) -> Check:
         start = time.perf_counter()
@@ -160,9 +175,10 @@ class HealthService:
                 response = await client.get(f"{s.ollama_url.rstrip('/')}/api/tags")
                 response.raise_for_status()
                 names = {m.get("name", "") for m in response.json().get("models", [])}
+                label = s.llm_provider_name or "Ollama"
                 if model in names or f"{model}:latest" in names:
-                    return "ok", f"Ollama at {s.ollama_url}, model {model} available"
-                return "degraded", f"Ollama at {s.ollama_url} is reachable, but model {model} is not downloaded yet"
+                    return "ok", f"{label} at {s.ollama_url}, model {model} available"
+                return "degraded", f"{label} at {s.ollama_url} is reachable, but model {model} is not downloaded yet"
             if s.llm_provider == "anthropic":
                 response = await client.get(
                     "https://api.anthropic.com/v1/models",
@@ -170,14 +186,16 @@ class HealthService:
                 )
             else:
                 base = (s.openai_base_url or "https://api.openai.com/v1").rstrip("/")
-                response = await client.get(
-                    f"{base}/models", headers={"Authorization": f"Bearer {s.openai_api_key.get_secret_value()}"}
-                )
+                key = s.openai_api_key
+                headers = {"Authorization": f"Bearer {key.get_secret_value()}"} if key else {}
+                response = await client.get(f"{base}/models", headers=headers)
+                if response.status_code == 200 and not _lists_model(response, model):
+                    return "degraded", f"{s.llm_label} is reachable, but does not list model {model}"
         if response.status_code in (401, 403):
-            return "error", f"{s.llm_provider} rejected the API key"
+            return "error", f"{s.llm_label} rejected the API key"
         if response.status_code != 200:
-            return "error", f"{s.llm_provider} answered HTTP {response.status_code}"
-        return "ok", f"{s.llm_provider} reachable, model {model}"
+            return "error", f"{s.llm_label} answered HTTP {response.status_code}"
+        return "ok", f"{s.llm_label} reachable, model {model}"
 
 
 async def _connect(url: str, connect_timeout_s: float) -> psycopg.AsyncConnection:
@@ -187,6 +205,15 @@ async def _connect(url: str, connect_timeout_s: float) -> psycopg.AsyncConnectio
 async def _select_one(url: str, connect_timeout_s: float) -> None:
     async with await _connect(url, connect_timeout_s) as conn:
         await conn.execute("SELECT 1")
+
+
+def _lists_model(response: httpx.Response, model: str) -> bool:
+    """Whether an OpenAI-style model list holds `model`. A list without entries proves nothing."""
+    try:
+        listed = {str(item.get("id")) for item in response.json().get("data", [])}
+    except (ValueError, AttributeError):
+        return True
+    return not listed or model in listed
 
 
 def _describe(error: Exception) -> str:

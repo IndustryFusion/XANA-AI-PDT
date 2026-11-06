@@ -85,7 +85,7 @@ xana_agent/
 
 - **Read-only.** The context source sends only GET requests; the history source runs read-only transactions. Validation checks are limited to the entities observed in the round, so text in an issue cannot widen what is read.
 - **Degradation.** An unreachable context broker, time-series store or incident memory is reported in the step (`sources`, `partial_data`); the round goes on with the data it has.
-- **Model failure.** A model call that times out (`llm_timeout_s`), or answers twice in a row with content that does not match the expected structure, fails the round with the step and a readable reason.
+- **Model failure.** A model call that times out (`llm_timeout_s`), or keeps answering with content that does not match the expected structure on the first try and three retries, fails the round with the step and a readable reason.
 - **Stateless.** Nothing is kept between calls. The caller passes the round number, the clarifications and the rejected root causes with their reasons.
 
 ## Tests

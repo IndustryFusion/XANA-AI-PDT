@@ -31,7 +31,9 @@ from pydantic import BaseModel, ValidationError
 from xana_agent import prompts
 from xana_agent.schemas import StepEvent
 from xana_agent.sources.base import ContextSource, HistorySource, IncidentMemory, SourceUnavailable
+from xana_agent.structured import structured_model
 
+MODEL_ATTEMPTS = 4  # the first answer and up to three retries
 RETRY_HINT = "Your previous answer did not match the requested structure. Answer again, in that structure only."
 
 
@@ -59,11 +61,12 @@ def step(node: str, input: dict[str, Any], output: dict[str, Any]) -> StepEvent:
 
 
 async def ask[Model: BaseModel](deps: Deps, node: str, schema: type[Model], prompt: str, **sections: Any) -> Model:
-    """One structured model answer. Retries once when the answer does not match `schema`."""
-    messages = prompts.messages(prompt, **sections)
-    runnable = deps.llm.with_structured_output(schema)
+    """One structured model answer. Retries up to three times when the answer does not match `schema`."""
+    first = prompts.messages(prompt, **sections)
+    messages = first
+    runnable = structured_model(deps.llm, schema)
     problem = "no answer"
-    for _ in range(2):
+    for _ in range(MODEL_ATTEMPTS):
         try:
             answer = await asyncio.wait_for(runnable.ainvoke(messages), deps.llm_timeout_s)
             if isinstance(answer, dict):
@@ -82,9 +85,10 @@ async def ask[Model: BaseModel](deps: Deps, node: str, schema: type[Model], prom
                     node, f"The language model did not answer within its timeout ({type(exc).__name__})."
                 ) from None
             raise StepFailed(node, f"The language model call failed ({type(exc).__name__}).") from None
-        messages = [*messages, HumanMessage(RETRY_HINT)]
+        messages = [*first, HumanMessage(RETRY_HINT)]
     raise StepFailed(
-        node, f"The language model's answer did not match the expected structure twice in a row ({problem})."
+        node,
+        f"The language model's answer did not match the expected structure in {MODEL_ATTEMPTS} attempts ({problem}).",
     )
 
 

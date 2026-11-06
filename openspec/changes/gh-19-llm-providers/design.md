@@ -25,6 +25,8 @@
 
 **Up to three retries, then the round fails.** Local models give malformed answers more often than cloud models, and a retry is cheap next to losing the round. Alternative: keeping one retry, which fails too often on local models.
 
+**OpenAI-compatible servers get the schema in the prompt.** With a base address, the schema is added to the prompt, and the answer is read from the content. OpenVINO Model Server 2026.2.1 on CPU exited with a segmentation fault on `response_format: json_schema` when tested. Alternative: a setting to choose between native and prompt, which would make the default crash that server, or leave cloud-compatible services to choose; a wrong answer is retried either way.
+
 **OpenAI-compatible servers need no API key.** With `OPENAI_BASE_URL` set, `OPENAI_API_KEY` is optional, because OpenVINO Model Server has no key. Servers that do need a key answer 401, and health reports it. Without a base URL, the key stays required. Alternative: requiring a placeholder key, which puts a fake secret in every OpenVINO Model Server deployment.
 
 **Readiness reuses the health check's model probe.** It lists the models with the health timeout, and spends no tokens. Alternative: a one-token model call, which is closer to a real call but costs money on cloud providers and can take long while a local model loads. A model that loads slowly or fails mid-call is still handled by the round's own failure handling.
@@ -42,7 +44,7 @@ No conflict with `architecture.md` beyond the retry count and the variables, whi
 ## Risks / Trade-offs
 
 - [The readiness probe can pass while the model then fails] → The round fails with a readable reason, as it does today.
-- [Servers may not offer a model list] → For an OpenAI-compatible server, a 404 on the model list counts as reachable, with a detail saying availability could not be confirmed, if the server has been checked to behave that way.
+- [A prompt-based answer can be malformed more often on a small model] → Retries handle it, and the round fails with a readable reason if they are used up.
 - [Thirty-two thousand tokens of context needs memory on the Ollama server] → `LLM_NUM_CTX` can be lowered.
 - [Langfuse's API may change] → Tests use a stand-in. Tracing failures are caught and logged.
 
