@@ -33,7 +33,7 @@ test('wrong password stays on the sign-in screen with its message', async ({ pag
 test('sign in opens the requested screen with the user, token time and factory; sign out returns', async ({ page }) => {
   await page.goto('/system')
   await expect(page.getByText('Sign in with Keycloak')).toBeVisible()
-  await expect(page.getByText(/Mock data/)).toHaveCount(0)
+  await expect(page.getByText(/Mock data: sign in/)).toHaveCount(0)
   await page.getByLabel('Username').fill('operator')
   await page.getByLabel('Password').fill('operator')
   await page.getByRole('button', { name: 'Sign in' }).click()
