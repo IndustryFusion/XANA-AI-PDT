@@ -185,6 +185,22 @@ describe('operations served by the backend', () => {
     expect(await incidents.reopenIncident('3')).toEqual({ runId: 'r9' })
   })
 
+  test('session: an unreachable backend at load leaves the app open, and a later failure stays a failure', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('connection refused') }))
+    expect(await backend.session.getAuthConfig()).toEqual({ enabled: false, provider: 'Keycloak' })
+    expect((await backend.session.getSession()).valid).toBe(false)
+
+    fakeFetch({ 'GET /api/auth/config': { body: { enabled: true, provider: 'Keycloak' } } })
+    expect((await backend.session.getAuthConfig()).enabled).toBe(true)
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('connection refused') }))
+    await expect(backend.session.getSession()).rejects.toMatchObject({ kind: 'unavailable' })
+  })
+
+  test('session: wrong credentials stay unauthorized', async () => {
+    fakeFetch({ 'POST /api/auth/connect': { status: 401, body: { error: { kind: 'unauthorized', message: 'No.' } } } })
+    await expect(backend.session.signIn({ username: 'a', password: 'b' })).rejects.toMatchObject({ kind: 'unauthorized' })
+  })
+
   test('system.getHealth, fresh or cached', async () => {
     const fetch = fakeFetch({
       'GET /api/diagnostics': { body: { overall: 'ok', checked_at: '2026-11-05T10:00:00+00:00', checks: [{ id: 'memory', latency_ms: 3 }] } },

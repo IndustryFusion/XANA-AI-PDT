@@ -49,6 +49,8 @@ The platform's `scorpio` client is public, and has no service account, so an una
 
 **Keycloak is optional, through `KEYCLOAK_URL`.** With no URL, sign-in is off and the app opens as it does today, so the local environment and its tests need no identity provider. In the local environment, Keycloak is under a Compose profile. Alternative: always on, which slows every local start and every integration run.
 
+**A backend that can't be reached while the UI loads counts as sign-in off.** The existing requirement says a stopped backend affects only the areas it serves, and session is now one of them. So the app opens, and each area shows its own state. This exposes nothing: there is no backend to read from, and the mock areas hold sample data only. Once the backend has answered, a failed check stays a failure, as it is no proof of expiry. If the backend returns while the app is open with sign-in on, a reload asks for sign-in. Alternative: showing only a session error, which breaks that requirement.
+
 **Tokens stay in memory.** Nothing is written to disk, and `session` responses carry the expiry time, never a token.
 
 ## Architectural implications
