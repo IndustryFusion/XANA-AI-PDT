@@ -105,3 +105,48 @@ async def test_timeseries_check_sees_the_table(fresh_database):
     assert (await service._timeseries())[0] == "degraded"
     load_history(settings, DATA["history"][:1])
     assert (await service._timeseries())[0] == "ok"
+
+
+OLD_LAYOUT = """
+CREATE TABLE attributes (
+    "observedAt" TIMESTAMPTZ NOT NULL, "entityId" TEXT NOT NULL, "attributeId" TEXT NOT NULL,
+    "attributeType" TEXT NOT NULL DEFAULT 'https://uri.etsi.org/ngsi-ld/Property',
+    "nodeType" TEXT NOT NULL DEFAULT '@value', "value" TEXT, "valueType" TEXT, "datasetId" TEXT,
+    "deleted" BOOLEAN NOT NULL DEFAULT false
+);
+CREATE TABLE xana_sample_data (name TEXT PRIMARY KEY, loaded_at TIMESTAMPTZ NOT NULL DEFAULT now());
+INSERT INTO xana_sample_data (name) VALUES ('attribute-history');
+INSERT INTO attributes ("observedAt", "entityId", "attributeId", "value") VALUES (now(), 'urn:old', 'urn:attr', '1');
+"""
+
+
+@pytest.mark.db
+def test_a_database_from_before_the_platforms_layout_gains_its_columns_and_keeps_its_data(fresh_database):
+    url = fresh_database()
+    with psycopg.connect(url) as conn:
+        conn.execute(OLD_LAYOUT)
+    settings = make_settings(timescale_db_url=url)
+    written = load_history(settings, DATA["history"], entities=DATA["entities"])
+    assert written > 0
+    with psycopg.connect(url) as conn:
+        kept = conn.execute("""SELECT "id", "datasetId" FROM attributes WHERE "entityId" = 'urn:old'""").fetchone()
+        assert kept == ("urn:old\\urn:attr\\@none", "@none")
+        assert conn.execute("SELECT count(*) FROM entities").fetchone()[0] == len(DATA["entities"])
+        # The old series isn't written again, only the state and lifecycle are added, once.
+        assert load_history(settings, DATA["history"], entities=DATA["entities"]) == 0
+        conn.execute("""INSERT INTO attributes ("id", "observedAt", "entityId", "attributeId", "deleted")
+                        VALUES ('x', now(), 'urn:n', 'urn:a', NULL)""")
+
+
+@pytest.mark.db
+def test_snapshot_rows_hang_sub_attributes_on_their_parent(fresh_database):
+    url = fresh_database()
+    load_history(make_settings(timescale_db_url=url), DATA["history"], entities=DATA["entities"])
+    with psycopg.connect(url) as conn:
+        orphans = conn.execute(
+            """SELECT count(*) FROM attributes c WHERE c."parentId" IS NOT NULL
+               AND NOT EXISTS (SELECT 1 FROM attributes p WHERE p."id" = c."parentId")"""
+        ).fetchone()[0]
+        children = conn.execute('SELECT count(*) FROM attributes WHERE "parentId" IS NOT NULL').fetchone()[0]
+    assert orphans == 0
+    assert children > 0
