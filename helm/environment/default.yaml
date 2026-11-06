@@ -25,6 +25,13 @@ llmProviderName: ""
 ollamaUrl: ""
 openaiBaseUrl: ""
 
+# Sign-in. Empty turns it off. Use Keycloak's external address, as tokens must match the
+# issuer that services check. Set XANA_KEYCLOAK_URL in the shell, or here.
+keycloakUrl: ""
+keycloakRealm: iff
+keycloakClientId: scorpio
+factoryId: ""
+
 ngsiUrl: http://scorpio-all-in-one-runner:9090
 databaseHost: acid-cluster
 databasePort: 5432

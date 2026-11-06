@@ -143,6 +143,13 @@ describe('service settings', () => {
 })
 
 describe('session', () => {
+  test('shows the time left on the token', async () => {
+    renderApp({ path: '/system', controls: { authEnabled: true } })
+    await signInMock()
+    const session = await region('Session')
+    expect(await within(session).findByTestId('token-countdown')).toHaveTextContent(/[0-5]:\d\d left/)
+  })
+
   test('shows the identity provider, the user and an active session', async () => {
     renderAppWith(signInMock, { path: '/system' })
     const session = await region('Session')

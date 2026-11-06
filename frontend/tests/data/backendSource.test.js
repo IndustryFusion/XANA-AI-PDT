@@ -198,11 +198,15 @@ describe('operations served by the backend', () => {
 describe('delegation to the mock', () => {
   test('the backend serves runs, incidents and health; the mock serves everything else', () => {
     expect(backend.SERVED).toEqual({
+      session: ['getAuthConfig', 'getSession', 'signIn', 'signOut'],
       runs: ['listActiveRuns', 'startRun', 'getRun', 'subscribeRun', 'clarify', 'confirmResolution', 'escalationPreflight', 'reopenRun', 'stopRun', 'archiveRun'],
       incidents: ['listIncidents', 'getIncident', 'reopenIncident'],
       system: ['getHealth'],
     })
-    for (const name of ['session', 'entities', 'alerts', 'dataspace']) expect(backend[name]).toEqual(mock[name])
+    for (const name of ['entities', 'alerts', 'dataspace']) expect(backend[name]).toEqual(mock[name])
+    expect(backend.session.getFactory).toBe(mock.session.getFactory)
+    expect(backend.session.signIn).not.toBe(mock.session.signIn)
+    expect(backend.info.signInHint).toBeUndefined()
     expect(backend.runs.escalate).toBe(mock.runs.escalate)
     expect(backend.runs.sendConversationAct).toBe(mock.runs.sendConversationAct)
     expect(backend.system.getServiceSettings).toBe(mock.system.getServiceSettings)

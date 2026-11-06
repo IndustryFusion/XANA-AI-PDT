@@ -15,8 +15,8 @@
 //
 
 /**
- * Backend data source. Serves what the backend provides (runs, incidents,
- * system health) and delegates every other operation to the mock source, so
+ * Backend data source. Serves what the backend provides (session, runs,
+ * incidents, system health) and delegates every other operation to the mock source, so
  * the whole UI stays usable while later phases bring their backends.
  *
  * Each area is `{ ...mock[area], ...backend[area] }`: delegation is visible here only.
@@ -25,9 +25,10 @@ import { AREAS } from '../../interface'
 import * as mock from '../mock'
 import { incidents as backendIncidents } from './incidents'
 import { runs as backendRuns } from './runs'
+import { session as backendSession } from './session'
 import { system as backendSystem } from './system'
 
-const backend = { runs: backendRuns, incidents: backendIncidents, system: backendSystem }
+const backend = { session: backendSession, runs: backendRuns, incidents: backendIncidents, system: backendSystem }
 
 /** Operations of each area that the backend serves; everything else comes from the mock. */
 export const SERVED = Object.fromEntries(Object.entries(backend).map(([name, ops]) => [name, Object.keys(ops)]))
@@ -36,7 +37,7 @@ const areas = Object.fromEntries(AREAS.map((name) => [name, { ...mock[name], ...
 
 export const { session, runs, incidents, entities, alerts, dataspace, knowledgeBase, system } = areas
 
-export const info = { ...mock.info, name: 'backend' }
+export const info = { ...mock.info, name: 'backend', signInHint: undefined }
 
 // The mock's development controls still drive the delegated areas.
 export const DevControls = mock.DevControls

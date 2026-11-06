@@ -21,8 +21,8 @@
 #   docker compose -f backend/compose.yaml up --build
 #   LLM_PROVIDER=scripted docker compose -f backend/compose.yaml up --build   (no model download)
 #
-# Host ports can be changed with XANA_DB_PORT, XANA_BROKER_PORT,
-# XANA_OLLAMA_PORT and XANA_BACKEND_PORT.
+# Host ports can be changed with XANA_DB_PORT, XANA_BROKER_PORT, XANA_OLLAMA_PORT,
+# XANA_KEYCLOAK_PORT and XANA_BACKEND_PORT.
 
 name: xana-ai-pdt
 
@@ -34,6 +34,10 @@ x-backend-env: &backend-env
   LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
   LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
   LANGFUSE_HOST: ${LANGFUSE_HOST:-}
+  KEYCLOAK_URL: ${KEYCLOAK_URL:-}
+  KEYCLOAK_REALM: ${KEYCLOAK_REALM:-iff}
+  KEYCLOAK_CLIENT_ID: ${KEYCLOAK_CLIENT_ID:-scorpio}
+  FACTORY_ID: ${FACTORY_ID:-}
   OLLAMA_URL: http://ollama:11434
   ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
   OPENAI_API_KEY: ${OPENAI_API_KEY:-}
@@ -62,6 +66,19 @@ services:
       interval: 5s
       timeout: 5s
       retries: 30
+
+  # Sign-in, on request. See backend/README.md.
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0
+    profiles: [auth]
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+    volumes:
+      - ./keycloak:/opt/keycloak/data/import:ro
+    ports:
+      - "127.0.0.1:${XANA_KEYCLOAK_PORT:-8081}:8080"
 
   broker:
     image: scorpiobroker/all-in-one-runner:java-latest

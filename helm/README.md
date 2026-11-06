@@ -46,6 +46,12 @@ Default addresses, in the release's namespace:
 
 Database connections use TLS (`POSTGRES_SSLMODE: require`).
 
+### Sign-in
+
+Set `XANA_KEYCLOAK_URL` to Keycloak's external address, for example `https://keycloak.example.org/auth`. Tokens must match the issuer that Scorpio checks, so don't use the in-cluster address. The platform's `scorpio` client in realm `iff` is used by default.
+
+**The backend's API has no protection of its own.** Anyone who can reach it can start runs with the signed-in operator's token, so keep it behind network rules. See [Sign-in](../backend/README.md#sign-in) for the other limits.
+
 ### Language model
 
 Set `llmProvider`, `llmModel` and `llmProviderName`, then one of these:

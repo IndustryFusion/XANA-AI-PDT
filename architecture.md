@@ -413,7 +413,7 @@ In **production** (K8s), non-sensitive config comes from a Helm-rendered ConfigM
 
 For **local development**, copy `backend/.env.example` to `backend/.env` and fill in credentials. `backend/.env.example` lists every variable the backend reads, with its default; an invalid value stops the backend at startup with a message naming the variable (never its value). Secrets are never returned or logged; connection URLs are shown with the password masked.
 
-Key variable groups (gateway, IFRIC and sign-in variables belong to later phases):
+Key variable groups (gateway and IFRIC variables belong to later phases):
 
 ```
 # LLM
@@ -445,7 +445,7 @@ ALERTA_API_KEY=...                   # secret
 # IFF Dataspace Gateway
 GATEWAY_URL=http://...
 GATEWAY_KEYCLOAK_URL=https://...
-GATEWAY_KEYCLOAK_REALM=...
+GATEWAY_KEYCLOAK_REALM=iff
 GATEWAY_CLIENT_ID=...
 GATEWAY_CLIENT_SECRET=...            # secret
 

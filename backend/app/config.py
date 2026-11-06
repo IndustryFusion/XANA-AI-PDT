@@ -58,6 +58,11 @@ class Settings(BaseSettings):
     decision_confidence_threshold: float = Field(0.9, ge=0, le=1)
     max_concurrent_rounds: int = Field(2, ge=1)
 
+    keycloak_url: str | None = None
+    keycloak_realm: str = "iff"
+    keycloak_client_id: str = "scorpio"
+    factory_id: str | None = None
+
     ngsi_url: str = "http://localhost:9090"
     ngsi_tenant: str | None = None
     timescale_db_url: SecretStr = SecretStr("postgresql://xana@localhost:5432/tsdb")

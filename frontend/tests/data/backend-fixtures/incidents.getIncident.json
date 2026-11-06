@@ -4,15 +4,15 @@
   "status": 200,
   "body": {
     "id": "1",
-    "number": 1,
+    "number": 2,
     "machine_id": "urn:ngsi-ld:Machine:laser-cutter-01",
     "issue": "Cut edges show burrs since this morning",
     "outcome": "completed",
     "root_cause": "Cooling or supply problem",
     "escalated": false,
     "escalation_ref": null,
-    "started_at": "2026-11-05T11:19:22.204788+00:00",
-    "closed_at": "2026-11-05T11:19:23.888768+00:00",
+    "started_at": "2026-11-06T19:33:27.261609+00:00",
+    "closed_at": "2026-11-06T19:33:28.915957+00:00",
     "reopened_run_id": null,
     "decision": {
       "sources": [
@@ -59,7 +59,7 @@
               "value": 4.2,
               "attribute": "value",
               "entity_id": "urn:ngsi-ld:Sensor:laser-cutter-01-power",
-              "assessment": "falling"
+              "assessment": "stable"
             }
           ],
           "sources": [
@@ -78,8 +78,8 @@
           "entities": [
             "urn:ngsi-ld:Machine:laser-cutter-01",
             "urn:ngsi-ld:ProductionLine:line-a",
-            "urn:ngsi-ld:Component:laser-cutter-01-axis-drive",
             "urn:ngsi-ld:Component:laser-cutter-01-laser-source",
+            "urn:ngsi-ld:Component:laser-cutter-01-axis-drive",
             "urn:ngsi-ld:Component:laser-cutter-01-cutting-head",
             "urn:ngsi-ld:Sensor:laser-cutter-01-temperature",
             "urn:ngsi-ld:Sensor:laser-cutter-01-power"
@@ -88,7 +88,7 @@
           "partial_data": false,
           "machine_found": true
         },
-        "at": "2026-11-05T11:19:22.448753+00:00",
+        "at": "2026-11-06T19:33:27.490046+00:00",
         "round": 1
       },
       {
@@ -103,7 +103,7 @@
               "title": "Wear of a moving component",
               "evidence": [
                 "Laser cutter 01 temperature: 30.2 (rising)",
-                "Laser cutter 01 power: 4.2 (falling)"
+                "Laser cutter 01 power: 4.2 (stable)"
               ],
               "confidence": 0.7
             },
@@ -112,7 +112,7 @@
               "title": "Cooling or supply problem",
               "evidence": [
                 "Laser cutter 01 temperature: 30.2 (rising)",
-                "Laser cutter 01 power: 4.2 (falling)"
+                "Laser cutter 01 power: 4.2 (stable)"
               ],
               "confidence": 0.5
             },
@@ -121,13 +121,13 @@
               "title": "Sensor or calibration fault",
               "evidence": [
                 "Laser cutter 01 temperature: 30.2 (rising)",
-                "Laser cutter 01 power: 4.2 (falling)"
+                "Laser cutter 01 power: 4.2 (stable)"
               ],
               "confidence": 0.3
             }
           ]
         },
-        "at": "2026-11-05T11:19:22.468211+00:00",
+        "at": "2026-11-06T19:33:27.512231+00:00",
         "round": 1
       },
       {
@@ -170,7 +170,7 @@
               "verdict": "plausible",
               "evidence": [
                 "Laser cutter 01 temperature: 30.2 (rising)",
-                "Laser cutter 01 power: 4.2 (falling)"
+                "Laser cutter 01 power: 4.2 (stable)"
               ],
               "confidence": 0.6,
               "validation": "Checked 3 of 3 planned data checks."
@@ -181,7 +181,7 @@
               "verdict": "plausible",
               "evidence": [
                 "Laser cutter 01 temperature: 30.2 (rising)",
-                "Laser cutter 01 power: 4.2 (falling)"
+                "Laser cutter 01 power: 4.2 (stable)"
               ],
               "confidence": 0.4,
               "validation": "Checked 3 of 3 planned data checks."
@@ -192,14 +192,14 @@
               "verdict": "refuted",
               "evidence": [
                 "Laser cutter 01 temperature: 30.2 (rising)",
-                "Laser cutter 01 power: 4.2 (falling)"
+                "Laser cutter 01 power: 4.2 (stable)"
               ],
               "confidence": 0.15,
               "validation": "Checked 3 of 3 planned data checks."
             }
           ]
         },
-        "at": "2026-11-05T11:19:22.581309+00:00",
+        "at": "2026-11-06T19:33:27.615967+00:00",
         "round": 1
       },
       {
@@ -222,7 +222,7 @@
           "past_incidents": [],
           "recommended_action": null
         },
-        "at": "2026-11-05T11:19:22.593336+00:00",
+        "at": "2026-11-06T19:33:27.626525+00:00",
         "round": 1
       },
       {
@@ -240,7 +240,7 @@
             }
           ]
         },
-        "at": "2026-11-05T11:19:22.700845+00:00",
+        "at": "2026-11-06T19:33:27.765177+00:00",
         "round": 1
       },
       {
@@ -265,7 +265,7 @@
               "value": 4.2,
               "attribute": "value",
               "entity_id": "urn:ngsi-ld:Sensor:laser-cutter-01-power",
-              "assessment": "falling"
+              "assessment": "stable"
             }
           ],
           "sources": [
@@ -284,8 +284,8 @@
           "entities": [
             "urn:ngsi-ld:Machine:laser-cutter-01",
             "urn:ngsi-ld:ProductionLine:line-a",
-            "urn:ngsi-ld:Component:laser-cutter-01-axis-drive",
             "urn:ngsi-ld:Component:laser-cutter-01-laser-source",
+            "urn:ngsi-ld:Component:laser-cutter-01-axis-drive",
             "urn:ngsi-ld:Component:laser-cutter-01-cutting-head",
             "urn:ngsi-ld:Sensor:laser-cutter-01-temperature",
             "urn:ngsi-ld:Sensor:laser-cutter-01-power"
@@ -294,7 +294,7 @@
           "partial_data": false,
           "machine_found": true
         },
-        "at": "2026-11-05T11:19:22.957695+00:00",
+        "at": "2026-11-06T19:33:27.952062+00:00",
         "round": 2
       },
       {
@@ -313,7 +313,7 @@
               "title": "Wear of a moving component",
               "evidence": [
                 "Laser cutter 01 temperature: 30.2 (rising)",
-                "Laser cutter 01 power: 4.2 (falling)"
+                "Laser cutter 01 power: 4.2 (stable)"
               ],
               "confidence": 0.7
             },
@@ -322,7 +322,7 @@
               "title": "Cooling or supply problem",
               "evidence": [
                 "Laser cutter 01 temperature: 30.2 (rising)",
-                "Laser cutter 01 power: 4.2 (falling)"
+                "Laser cutter 01 power: 4.2 (stable)"
               ],
               "confidence": 0.5
             },
@@ -331,13 +331,13 @@
               "title": "Sensor or calibration fault",
               "evidence": [
                 "Laser cutter 01 temperature: 30.2 (rising)",
-                "Laser cutter 01 power: 4.2 (falling)"
+                "Laser cutter 01 power: 4.2 (stable)"
               ],
               "confidence": 0.3
             }
           ]
         },
-        "at": "2026-11-05T11:19:22.968612+00:00",
+        "at": "2026-11-06T19:33:27.961624+00:00",
         "round": 2
       },
       {
@@ -380,7 +380,7 @@
               "verdict": "confirmed",
               "evidence": [
                 "Laser cutter 01 temperature: 30.2 (rising)",
-                "Laser cutter 01 power: 4.2 (falling)"
+                "Laser cutter 01 power: 4.2 (stable)"
               ],
               "confidence": 0.92,
               "validation": "Checked 3 of 3 planned data checks."
@@ -391,7 +391,7 @@
               "verdict": "plausible",
               "evidence": [
                 "Laser cutter 01 temperature: 30.2 (rising)",
-                "Laser cutter 01 power: 4.2 (falling)"
+                "Laser cutter 01 power: 4.2 (stable)"
               ],
               "confidence": 0.4,
               "validation": "Checked 3 of 3 planned data checks."
@@ -402,14 +402,14 @@
               "verdict": "refuted",
               "evidence": [
                 "Laser cutter 01 temperature: 30.2 (rising)",
-                "Laser cutter 01 power: 4.2 (falling)"
+                "Laser cutter 01 power: 4.2 (stable)"
               ],
               "confidence": 0.15,
               "validation": "Checked 3 of 3 planned data checks."
             }
           ]
         },
-        "at": "2026-11-05T11:19:23.102746+00:00",
+        "at": "2026-11-06T19:33:28.067072+00:00",
         "round": 2
       },
       {
@@ -435,7 +435,7 @@
           "past_incidents": [],
           "recommended_action": "Inspect the moving components named in the evidence and replace worn parts."
         },
-        "at": "2026-11-05T11:19:23.113980+00:00",
+        "at": "2026-11-06T19:33:28.075605+00:00",
         "round": 2
       },
       {
@@ -451,7 +451,7 @@
           "confirmed": false,
           "root_cause": "Wear of a moving component"
         },
-        "at": "2026-11-05T11:19:23.177010+00:00",
+        "at": "2026-11-06T19:33:28.230105+00:00",
         "round": 2
       },
       {
@@ -476,7 +476,7 @@
               "value": 4.2,
               "attribute": "value",
               "entity_id": "urn:ngsi-ld:Sensor:laser-cutter-01-power",
-              "assessment": "falling"
+              "assessment": "stable"
             }
           ],
           "sources": [
@@ -495,8 +495,8 @@
           "entities": [
             "urn:ngsi-ld:Machine:laser-cutter-01",
             "urn:ngsi-ld:ProductionLine:line-a",
-            "urn:ngsi-ld:Component:laser-cutter-01-axis-drive",
             "urn:ngsi-ld:Component:laser-cutter-01-laser-source",
+            "urn:ngsi-ld:Component:laser-cutter-01-axis-drive",
             "urn:ngsi-ld:Component:laser-cutter-01-cutting-head",
             "urn:ngsi-ld:Sensor:laser-cutter-01-temperature",
             "urn:ngsi-ld:Sensor:laser-cutter-01-power"
@@ -505,7 +505,7 @@
           "partial_data": false,
           "machine_found": true
         },
-        "at": "2026-11-05T11:19:23.401481+00:00",
+        "at": "2026-11-06T19:33:28.412582+00:00",
         "round": 3
       },
       {
@@ -534,7 +534,7 @@
               "title": "Cooling or supply problem",
               "evidence": [
                 "Laser cutter 01 temperature: 30.2 (rising)",
-                "Laser cutter 01 power: 4.2 (falling)"
+                "Laser cutter 01 power: 4.2 (stable)"
               ],
               "confidence": 0.7
             },
@@ -543,7 +543,7 @@
               "title": "Sensor or calibration fault",
               "evidence": [
                 "Laser cutter 01 temperature: 30.2 (rising)",
-                "Laser cutter 01 power: 4.2 (falling)"
+                "Laser cutter 01 power: 4.2 (stable)"
               ],
               "confidence": 0.5
             },
@@ -552,13 +552,13 @@
               "title": "Changed process parameters",
               "evidence": [
                 "Laser cutter 01 temperature: 30.2 (rising)",
-                "Laser cutter 01 power: 4.2 (falling)"
+                "Laser cutter 01 power: 4.2 (stable)"
               ],
               "confidence": 0.3
             }
           ]
         },
-        "at": "2026-11-05T11:19:23.410864+00:00",
+        "at": "2026-11-06T19:33:28.422633+00:00",
         "round": 3
       },
       {
@@ -601,7 +601,7 @@
               "verdict": "confirmed",
               "evidence": [
                 "Laser cutter 01 temperature: 30.2 (rising)",
-                "Laser cutter 01 power: 4.2 (falling)"
+                "Laser cutter 01 power: 4.2 (stable)"
               ],
               "confidence": 0.92,
               "validation": "Checked 3 of 3 planned data checks."
@@ -612,7 +612,7 @@
               "verdict": "plausible",
               "evidence": [
                 "Laser cutter 01 temperature: 30.2 (rising)",
-                "Laser cutter 01 power: 4.2 (falling)"
+                "Laser cutter 01 power: 4.2 (stable)"
               ],
               "confidence": 0.4,
               "validation": "Checked 3 of 3 planned data checks."
@@ -623,14 +623,14 @@
               "verdict": "refuted",
               "evidence": [
                 "Laser cutter 01 temperature: 30.2 (rising)",
-                "Laser cutter 01 power: 4.2 (falling)"
+                "Laser cutter 01 power: 4.2 (stable)"
               ],
               "confidence": 0.15,
               "validation": "Checked 3 of 3 planned data checks."
             }
           ]
         },
-        "at": "2026-11-05T11:19:23.532058+00:00",
+        "at": "2026-11-06T19:33:28.505671+00:00",
         "round": 3
       },
       {
@@ -656,7 +656,7 @@
           "past_incidents": [],
           "recommended_action": "Check coolant level, flow and filters; clean or replace clogged filters."
         },
-        "at": "2026-11-05T11:19:23.543599+00:00",
+        "at": "2026-11-06T19:33:28.514482+00:00",
         "round": 3
       },
       {
@@ -673,7 +673,7 @@
           "root_cause": "Cooling or supply problem",
           "recommended_action": "Check coolant level, flow and filters; clean or replace clogged filters."
         },
-        "at": "2026-11-05T11:19:23.651394+00:00",
+        "at": "2026-11-06T19:33:28.674522+00:00",
         "round": 3
       },
       {
@@ -687,10 +687,10 @@
           "incident_logged": true,
           "recommended_action": "Check coolant level, flow and filters; clean or replace clogged filters."
         },
-        "at": "2026-11-05T11:19:23.685850+00:00",
+        "at": "2026-11-06T19:33:28.707608+00:00",
         "round": 3
       }
     ],
-    "run_id": "587a7994-d81e-4cb0-859a-7cf682818303"
+    "run_id": "8c0e9ae0-26e2-480e-b6a3-8f1cb45f35eb"
   }
 }

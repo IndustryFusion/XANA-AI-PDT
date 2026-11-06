@@ -14,11 +14,28 @@
 // limitations under the License.
 //
 
+import { useEffect, useState } from 'react'
 import { useSession } from '../../app/session'
 import { useData } from '../../data/useData'
 import { Button, Card, StatusBadge } from '../../ui/components'
 
-/** Identity provider, signed-in user and session state (active, refreshing, expired). */
+const clock = (seconds) => `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
+
+/** The time left on the token, counting down from the last check; checks again when it runs out. */
+function TokenCountdown({ seconds, onElapsed }) {
+  const [left, setLeft] = useState(seconds)
+  useEffect(() => {
+    setLeft(seconds)
+    const id = setInterval(() => setLeft((s) => Math.max(0, s - 1)), 1000)
+    return () => clearInterval(id)
+  }, [seconds])
+  useEffect(() => {
+    if (left === 0) onElapsed()
+  }, [left, onElapsed])
+  return <><dt>Token</dt><dd data-testid="token-countdown">Renews automatically; {clock(left)} left</dd></>
+}
+
+/** Identity provider, signed-in user, session state (active, refreshing, expired) and time left on the token. */
 export default function SessionSection() {
   const { session, authEnabled } = useSession()
   const auth = useData('session', 'getAuthConfig')
@@ -45,6 +62,9 @@ export default function SessionSection() {
         {user?.email && <><dt>E-mail</dt><dd>{user.email}</dd></>}
         <dt>Session</dt>
         <dd><StatusBadge kind="session" value={state} label={state === 'unknown' ? 'Unknown (check failed)' : undefined} /></dd>
+        {state === 'active' && current.data?.tokenExpiresInS != null && (
+          <TokenCountdown seconds={current.data.tokenExpiresInS} onElapsed={current.refresh} />
+        )}
       </dl>
       {state === 'expired' && <p className="muted">The session has expired; you will be asked to sign in again.</p>}
     </Card>

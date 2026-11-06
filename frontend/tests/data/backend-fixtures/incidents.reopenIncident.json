@@ -3,6 +3,6 @@
   "path": "/api/incidents/1/reopen",
   "status": 202,
   "body": {
-    "run_id": "6cdd263d-f9ae-4495-a952-1671563d9d22"
+    "run_id": "c6487dbc-64f8-4c0c-a143-86ba7b795121"
   }
 }

@@ -39,6 +39,9 @@ config:
   LLM_PROVIDER: ollama
   LLM_MODEL: llama3.1
   LOG_LEVEL: INFO
+  # Sign-in: set KEYCLOAK_URL to Keycloak's external address to turn it on.
+  KEYCLOAK_REALM: iff
+  KEYCLOAK_CLIENT_ID: scorpio
   NGSI_URL: http://scorpio-all-in-one-runner:9090
   POSTGRES_SSLMODE: require
 

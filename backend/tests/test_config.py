@@ -219,3 +219,9 @@ def test_no_tls_settings_leave_the_urls_alone():
 def test_invalid_tls_mode_is_named():
     with pytest.raises(ConfigError, match="POSTGRES_SSLMODE"):
         load_settings(_env_file=None, postgres_sslmode="maybe")
+
+
+def test_sign_in_settings_have_defaults():
+    s = load_settings(_env_file=None)
+    assert s.keycloak_url is None
+    assert (s.keycloak_realm, s.keycloak_client_id) == ("iff", "scorpio")

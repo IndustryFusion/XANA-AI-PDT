@@ -72,7 +72,9 @@ class HealthService:
         probes: dict[str, Probe] | None = None,
         clock: Callable[[], float] = time.monotonic,
         transport: httpx.AsyncBaseTransport | None = None,
+        token: Callable[[], str | None] | None = None,
     ) -> None:
+        self._token = token
         self._s = settings
         self._transport = transport
         self._migrator = migrator
@@ -159,6 +161,8 @@ class HealthService:
         headers = {"Accept": "application/json"}
         if self._s.ngsi_tenant:
             headers["NGSILD-Tenant"] = self._s.ngsi_tenant
+        if self._token and (token := self._token()):
+            headers["Authorization"] = f"Bearer {token}"
         async with httpx.AsyncClient(timeout=self._s.health_timeout_s, transport=self._transport) as client:
             response = await client.get(f"{self._s.ngsi_url.rstrip('/')}/ngsi-ld/v1/types", headers=headers)
         if response.status_code != 200:
