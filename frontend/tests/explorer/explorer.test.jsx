@@ -14,6 +14,7 @@
 // limitations under the License.
 //
 
+import { statusOf } from '../../src/features/explorer/HistoryPane'
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { paths } from '../../src/app/router'
@@ -745,3 +746,15 @@ describe('live updates', () => {
   })
 })
 
+describe('latest recorded state of an attribute', () => {
+  const states = { 'https://x.example/temp': { deleted: true, observedAt: 't' }, 'status': { deleted: false, observedAt: 't' } }
+
+  test.each([
+    ['status', states.status],
+    ['https://x.example/temp', states['https://x.example/temp']],
+    ['temp', states['https://x.example/temp']],
+    ['other', null],
+  ])('%s', (name, expected) => expect(statusOf(states, name)).toEqual(expected))
+
+  test('nothing recorded', () => expect(statusOf(undefined, 'a')).toBeNull())
+})
