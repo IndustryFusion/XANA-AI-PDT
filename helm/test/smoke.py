@@ -27,6 +27,7 @@ import json
 import pathlib
 import sys
 import time
+from urllib.parse import urlsplit
 
 import httpx
 from websockets.asyncio.client import connect
@@ -52,10 +53,11 @@ def wait_for_machine(client: httpx.Client) -> str:
 
 
 async def stream_until_waiting(url: str, host: str | None, run_id: str) -> list[str]:
-    base = url.replace("http", "ws", 1)
-    headers = {"Host": host} if host else {}
+    # With --host, the address names that host, and the connection still goes to `url`.
+    target = urlsplit(url)
+    uri = f"ws://{host or target.netloc}/ws/run/{run_id}"
     steps: list[str] = []
-    async with connect(f"{base}/ws/run/{run_id}", additional_headers=headers) as socket:
+    async with connect(uri, host=target.hostname, port=target.port or 80) as socket:
         async with asyncio.timeout(120):
             async for raw in socket:
                 event = json.loads(raw)
