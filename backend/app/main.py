@@ -125,6 +125,12 @@ def create_app(
     app.state.runs = manager
     app.state.incidents = incident_store
     errors.install(app)
+
+    @app.get("/healthz", include_in_schema=False)
+    async def healthz() -> dict[str, str]:
+        """Liveness only: the backend works without its dependencies, so it does not check them."""
+        return {"status": "ok"}
+
     app.include_router(diagnostics.router)
     app.include_router(runs.router)
     app.include_router(incidents.router)

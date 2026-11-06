@@ -14,7 +14,8 @@
 # limitations under the License.
 #
 
-# Backend image for the local environment (development only).
+# Backend image, for production and for the local environment, which adds its own
+# settings and mounts. Runs as a non-root user; reloads only if BACKEND_RELOAD is set.
 FROM python:3.12-slim
 
 WORKDIR /srv/backend

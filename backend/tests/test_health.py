@@ -226,6 +226,11 @@ async def test_model_problem_within_the_timeout():
     assert "No answer within" in problem
 
 
+def test_liveness_answers_without_dependencies():
+    with TestClient(create_app(make_settings(llm_provider="scripted"))) as client:
+        assert client.get("/healthz").json() == {"status": "ok"}
+
+
 @pytest.mark.parametrize("status", [404, 405, 501])
 async def test_a_server_without_a_model_list_does_not_block_work(status):
     s = make_settings(llm_provider="openai", llm_model="m1", openai_base_url="http://ovms/v3")

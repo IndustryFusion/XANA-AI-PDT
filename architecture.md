@@ -479,14 +479,14 @@ XANA AI PDT uses a two-layer deployment model:
                         │ image pull
                         ▼
 ┌──────────────────────────────────────────────────────┐
-│  Kubernetes cluster — namespace: xana-ai-pdt         │
+│  Kubernetes cluster — namespace: iff                 │
 │                                                      │
 │  Ingress (nginx)                                     │
 │       │                                              │
 │       ▼                                              │
-│  frontend Pod (nginx:alpine)                         │
+│  frontend Pod (unprivileged nginx)                   │
 │  ├─ serves built React SPA                           │
-│  ├─ proxy_pass /api/ → backend:8000                  │
+│  ├─ proxy_pass /api/ → backend:8000 (upgrade)        │
 │  └─ proxy_pass /ws/  → backend:8000 (upgrade)        │
 │       │                                              │
 │       ▼                                              │
@@ -501,34 +501,25 @@ XANA AI PDT uses a two-layer deployment model:
          Keycloak │ Dataspace Gateway │ IFRIC Registry
 ```
 
-The frontend nginx config is rendered as a K8s ConfigMap at deploy time (`frontend-configmap.yaml`), which injects the backend service DNS name (`xana-pdt-backend:8000`) so the proxy target is never hardcoded in the image.
+The frontend's nginx configuration is part of its image, and takes the backend's address from `XANA_BACKEND_URL` at container start. A release goes in the platform's namespace by default, so it can read the database operator's generated Secret. See [`helm/README.md`](helm/README.md).
 
-Deployment is managed with Helmfile 1.7.x:
+Deployment is managed with Helmfile 1.x:
 
 ```
 helm/
-├── helmfile.yaml.gotmpl            # releases (xana-pdt + rag-tool), environments
-├── values.yaml.gotmpl              # bridges env vars to xana-pdt chart values
-├── values-rag-tool.yaml.gotmpl     # bridges env vars to rag-tool chart values
+├── helmfile.yaml.gotmpl            # release xana-pdt, environments
+├── values.yaml.gotmpl              # bridges environment settings to the chart's values
 ├── environment/
-│   ├── default.yaml                # IFF cluster URLs, ingress host, ragTool* keys
-│   └── production.yaml             # pinned image tag, TLS secret
+│   ├── default.yaml                # platform service addresses, ingress
+│   ├── production.yaml             # pinned image tag, TLS secret
+│   └── local.yaml                  # a local cluster with stand-in services
+├── test/                           # stand-in services and a smoke test, used by CI
 └── charts/
-    ├── xana-pdt/                    # single Helm chart (backend + frontend + ingress)
-    └── rag-tool/                    # second Helm chart (rag-tool knowledge base)
+    └── xana-pdt/                   # Helm chart (backend + frontend + ingress)
 ```
 
-Not part of the current system: the `rag-tool` entries above are not deployed, and none of these files exist yet.
 
-The [`rag-tool`](#knowledge-base-rag-tool) knowledge base
-is a **second Helm release** (chart at
-`helm/charts/rag-tool`), appended to the same
-`helmfile.yaml.gotmpl` and deployed into the **same** `xana-ai-pdt`
-namespace, so it shares this app's Ingress (an extra `/mcp` path routed to
-the `rag-tool-mcp` Service) and Postgres cluster (its own dedicated `rag`
-database, alongside `tsdb`/`memory`) rather than provisioning its own. See
-[`rag-tool-microservice/docs/kubernetes.md`](rag-tool-microservice/docs/kubernetes.md)
-for the full deployment walkthrough, including creating the `rag` database.
+Not part of the current system: if the [`rag-tool`](#knowledge-base-rag-tool) knowledge base returns, it would be a second Helm release in the same namespace.
 
 ---
 
