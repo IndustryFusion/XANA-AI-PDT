@@ -224,3 +224,8 @@ async def test_model_problem():
 async def test_model_problem_within_the_timeout():
     problem = await service({"llm": stub(delay=5)}, health_timeout_s=0.05).model_problem()
     assert "No answer within" in problem
+
+
+def test_liveness_answers_without_dependencies():
+    with TestClient(create_app(make_settings(llm_provider="scripted"))) as client:
+        assert client.get("/healthz").json() == {"status": "ok"}

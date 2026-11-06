@@ -1,0 +1,95 @@
+#
+# Copyright (c) 2026 IndustryFusion Foundation
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# Stand-ins for the platform's PostgreSQL and context broker, for trying the chart on a
+# local cluster. Development only: the database trusts every connection, and the Secret
+# holds a placeholder. Never use this on a shared cluster.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ngb.acid-cluster.credentials
+stringData:
+  username: xana
+  password: unused
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: acid-cluster
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: acid-cluster }
+  template:
+    metadata:
+      labels: { app: acid-cluster }
+    spec:
+      containers:
+        - name: db
+          image: timescale/timescaledb-ha:pg16
+          imagePullPolicy: IfNotPresent
+          env:
+            - { name: POSTGRES_USER, value: xana }
+            - { name: POSTGRES_DB, value: memory }
+            - { name: POSTGRES_HOST_AUTH_METHOD, value: trust }
+          volumeMounts:
+            - { name: init, mountPath: /docker-entrypoint-initdb.d }
+          readinessProbe:
+            exec:
+              command: [pg_isready, -U, xana, -d, memory]
+      volumes:
+        - name: init
+          configMap:
+            name: xana-db-init
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: acid-cluster
+spec:
+  selector: { app: acid-cluster }
+  ports:
+    - port: 5432
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: scorpio-all-in-one-runner
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: scorpio }
+  template:
+    metadata:
+      labels: { app: scorpio }
+    spec:
+      containers:
+        - name: broker
+          image: scorpiobroker/all-in-one-runner:java-latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - { name: DBHOST, value: acid-cluster }
+            - { name: DBUSER, value: xana }
+            - { name: DBPASS, value: unused }
+            - { name: DBNAME, value: ngb }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: scorpio-all-in-one-runner
+spec:
+  selector: { app: scorpio }
+  ports:
+    - port: 9090

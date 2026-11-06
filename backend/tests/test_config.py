@@ -187,3 +187,35 @@ def test_tracing_keys_come_together():
 def test_tracing_secret_is_redacted():
     s = load_settings(_env_file=None, langfuse_public_key="pk", langfuse_secret_key="sk-lf-secret")
     assert "sk-lf-secret" not in s.redactor()("key sk-lf-secret")
+
+
+def test_database_tls_applies_to_both_urls():
+    s = load_settings(
+        _env_file=None,
+        postgres_memory_url="postgresql://u:p@db:5432/memory",
+        timescale_db_url="postgresql://u:p@db:5432/tsdb?application_name=x",
+        postgres_sslmode="verify-full",
+        postgres_sslrootcert="/certs/ca.crt",
+    )
+    assert s.postgres_memory_url.get_secret_value().endswith(
+        "/memory?sslmode=verify-full&sslrootcert=%2Fcerts%2Fca.crt"
+    )
+    assert "application_name=x" in s.timescale_db_url.get_secret_value()
+    assert "sslmode=verify-full" in s.timescale_db_url.get_secret_value()
+
+
+def test_database_url_keeps_its_own_tls_mode():
+    s = load_settings(
+        _env_file=None, postgres_memory_url="postgresql://u@db/m?sslmode=disable", postgres_sslmode="require"
+    )
+    assert s.postgres_memory_url.get_secret_value() == "postgresql://u@db/m?sslmode=disable"
+
+
+def test_no_tls_settings_leave_the_urls_alone():
+    s = load_settings(_env_file=None, postgres_memory_url="postgresql://u:p@db/m")
+    assert s.postgres_memory_url.get_secret_value() == "postgresql://u:p@db/m"
+
+
+def test_invalid_tls_mode_is_named():
+    with pytest.raises(ConfigError, match="POSTGRES_SSLMODE"):
+        load_settings(_env_file=None, postgres_sslmode="maybe")

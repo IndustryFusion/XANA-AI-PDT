@@ -106,6 +106,12 @@ python3.12 -m venv .venv
 - **Health:** `/api/diagnostics` also lists `models`: `[{name, role, provider, available}]`.
 - **Tracing (optional):** install with `pip install -e ".[tracing]"` and set `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY`. Model calls are traced with the run ID as session, plus the machine and round. Without the keys or the package, nothing is traced and nothing changes.
 
+## Deployment
+
+The image in `Dockerfile` is the one used in production and by the local environment. It runs as a non-root user, and `/healthz` answers without checking dependencies. To install on Kubernetes, see [`helm/README.md`](../helm/README.md).
+
+Database TLS: `POSTGRES_SSLMODE` and `POSTGRES_SSLROOTCERT` are added to both database URLs, unless a URL already states them.
+
 ## Tests and checks
 
 ```bash

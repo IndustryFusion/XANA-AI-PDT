@@ -21,6 +21,10 @@ The development server forwards `/api` and `/ws` to the backend at `XANA_BACKEND
 
 `backend/sample_data/sample-data.json` is exported from the mock seed, so the backend's sample machines are the mock's. After changing the seed, run `npx vite-node scripts/export-sample-data.mjs`; a unit test fails while the two differ.
 
+## Image
+
+`Dockerfile` builds the UI on the backend data source, served by nginx on port 8080. nginx forwards `/api` and `/ws` to `XANA_BACKEND_URL`, including WebSockets, with a 300 second timeout and a 64 MB body limit. To deploy, see [`helm/README.md`](../helm/README.md).
+
 ## Commands
 
 | Command | What it does |

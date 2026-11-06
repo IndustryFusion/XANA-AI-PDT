@@ -1,0 +1,39 @@
+#
+# Copyright (c) 2026 IndustryFusion Foundation
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# The digital twin platform's services, in the release's namespace.
+namespace: iff
+imageRegistry: ghcr.io/industryfusion
+imageTag: ""
+imagePullPolicy: IfNotPresent
+
+llmProvider: ollama
+llmModel: llama3.1
+llmProviderName: ""
+ollamaUrl: ""
+openaiBaseUrl: ""
+
+ngsiUrl: http://scorpio-all-in-one-runner:9090
+databaseHost: acid-cluster
+databasePort: 5432
+databaseCredentialsSecret: ngb.acid-cluster.credentials
+postgresSslMode: require
+existingSecret: ""
+
+# The platform's default ingress controller is Traefik; nginx is also supported.
+ingressEnabled: true
+ingressClass: traefik
+ingressHost: xana.local
+ingressTlsSecret: ""

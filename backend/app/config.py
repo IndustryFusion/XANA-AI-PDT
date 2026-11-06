@@ -23,6 +23,7 @@ from __future__ import annotations
 import re
 from functools import lru_cache
 from typing import Literal
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from pydantic import Field, SecretStr, ValidationError, field_validator, model_validator
@@ -62,6 +63,8 @@ class Settings(BaseSettings):
     timescale_db_url: SecretStr = SecretStr("postgresql://xana@localhost:5432/tsdb")
     timescale_table: str = "attributes"
     postgres_memory_url: SecretStr = SecretStr("postgresql://xana@localhost:5432/memory")
+    postgres_sslmode: Literal["disable", "allow", "prefer", "require", "verify-ca", "verify-full"] | None = None
+    postgres_sslrootcert: str | None = None
 
     health_timeout_s: float = Field(3, gt=0)
     health_cache_s: float = Field(10, ge=0)
@@ -99,6 +102,13 @@ class Settings(BaseSettings):
             raise ValueError("LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY must be set together")
         return self
 
+    @model_validator(mode="after")
+    def _apply_database_tls(self) -> Settings:
+        tls = {"sslmode": self.postgres_sslmode, "sslrootcert": self.postgres_sslrootcert}
+        self.postgres_memory_url = SecretStr(_with_query(self.postgres_memory_url.get_secret_value(), tls))
+        self.timescale_db_url = SecretStr(_with_query(self.timescale_db_url.get_secret_value(), tls))
+        return self
+
     @property
     def llm_label(self) -> str:
         """The provider as operators know it, for example `OpenVINO`."""
@@ -115,6 +125,14 @@ class Settings(BaseSettings):
                 url_password(self.postgres_memory_url.get_secret_value()),
             ]
         )
+
+
+def _with_query(url: str, values: dict[str, str | None]) -> str:
+    """The URL with `values` added to its query, keeping what it already states."""
+    parts = urlsplit(url)
+    stated = dict(parse_qsl(parts.query))
+    added = {k: v for k, v in values.items() if v and k not in stated}
+    return urlunsplit(parts._replace(query=urlencode({**stated, **added}))) if added else url
 
 
 def load_settings(**overrides: object) -> Settings:
