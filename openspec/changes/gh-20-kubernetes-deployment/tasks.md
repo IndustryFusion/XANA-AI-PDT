@@ -1,0 +1,42 @@
+# Tasks
+
+## 1. Images
+
+- [ ] 1.1 Add `frontend/Dockerfile` and its nginx template with proxies for `/api`, `/ws` and `/api/ngsi/ws`, a 300 second proxy timeout and a 64 MB body limit; verify by running the image against a backend, including a WebSocket and an upload over 1 MB
+- [ ] 1.2 Make the backend image production-ready, and add `/healthz`; verify the image starts as a non-root user with no dependencies reachable, and `/healthz` answers
+
+## 2. Settings
+
+- [ ] 2.1 Add `POSTGRES_SSLMODE` and `POSTGRES_SSLROOTCERT`, and apply them to both database URLs; verify with config tests, including URLs that already state them
+
+## 3. Chart
+
+- [ ] 3.1 Add the chart `xana-pdt`: Deployments, Services, ConfigMap, Ingress, probes, resources, the default in-cluster addresses; verify with `helm lint` and `helm template`
+- [ ] 3.2 Add the three secret sources in order of preference; verify with `helm template` for each, and that no secret value appears in a ConfigMap
+- [ ] 3.3 Add Helmfile and environment values; verify `helmfile template` for each environment
+
+## 4. CI
+
+- [ ] 4.1 Add a workflow that builds both images, and checks the chart on pull requests; verify it runs green on this Pull Request
+- [ ] 4.2 Add publishing from version tags; verify by reading the workflow, as no tag is pushed in this change
+
+## 5. Install
+
+- [ ] 5.1 Install from the documented steps on a fresh local cluster with stand-in services; verify all Pods reach ready
+- [ ] 5.2 On that install, start a run and follow its live stream through the Ingress; verify the run reaches a waiting state with steps delivered
+- [ ] 5.3 On that install, restart the backend; verify runs and incidents are kept
+- [ ] 5.4 Install on a cluster running the platform; verify all Pods reach ready, and the health report shows each connection ok
+- [ ] 5.5 Confirm no credentials or environment-specific hosts are committed; verify by searching the change
+
+## 6. Documents
+
+- [ ] 6.1 Add `helm/README.md`, update `backend/README.md` and `frontend/README.md`, and correct Deployment Architecture in `architecture.md`; verify the steps are the ones used in 5.1
+
+## 7. Integration check
+
+- [ ] 7.1 Run backend and frontend tests, lint and `openspec validate --all --strict`; verify they pass locally and in CI
+- [ ] 7.2 Check each scenario in the delta specs and report the result per scenario in the Pull Request; verify the report covers every scenario
+
+## Workflow follow-up
+
+- After merge, run `/opsx:archive gh-20-kubernetes-deployment` in a follow-up Pull Request from a fork, with `Closes #20` in its description.
