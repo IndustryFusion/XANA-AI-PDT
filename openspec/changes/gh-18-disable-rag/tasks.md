@@ -22,10 +22,10 @@
 
 ## 4. Integration check
 
-- [ ] 4.1 Run all frontend tests, lint and `openspec validate --all --strict`; verify they pass locally and in CI
+- [x] 4.1 Run all frontend tests, lint and `openspec validate --all --strict`; verify they pass locally and in CI
 - [x] 4.2 Confirm the scope in the proposal: no changes to agent memory lookup, the `documents` sharing category or `backend/`; verify with `git diff --stat` against `main`
 - [x] 4.3 Follow the documented re-enable step; verify the screen, its operations and the mock step return
-- [ ] 4.4 Check each scenario in the delta specs and report the result per scenario in the Pull Request; verify the report covers every scenario
+- [x] 4.4 Check each scenario in the delta specs and report the result per scenario in the Pull Request; verify the report covers every scenario
 
 ## Workflow follow-up
 
