@@ -29,7 +29,10 @@ ngsiUrl: http://scorpio-all-in-one-runner:9090
 databaseHost: acid-cluster
 databasePort: 5432
 databaseCredentialsSecret: ngb.acid-cluster.credentials
+databaseCaSecret: ""
 postgresSslMode: require
+# Any other backend setting that is not secret, by variable name. See backend/.env.example.
+extraConfig: {}
 existingSecret: ""
 
 # The platform's default ingress controller is Traefik; nginx is also supported.

@@ -41,6 +41,8 @@ spec:
       securityContext:
         runAsNonRoot: true
         runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: backend
           image: {{ include "xana-pdt.image" (dict "root" . "name" .Values.backend.image) }}
@@ -79,6 +81,12 @@ spec:
             - name: POSTGRES_MEMORY_URL
               value: postgresql://$(DB_USER):$(DB_PASSWORD)@{{ $d.host }}:{{ $d.port }}/{{ $d.memoryName }}
           {{- end }}
+          {{- with $d.caCert.secret }}
+          volumeMounts:
+            - name: database-ca
+              mountPath: {{ dir (include "xana-pdt.databaseCaPath" $) }}
+              readOnly: true
+          {{- end }}
           startupProbe:
             httpGet: { path: /healthz, port: http }
             periodSeconds: 3
@@ -90,3 +98,12 @@ spec:
             httpGet: { path: /healthz, port: http }
             periodSeconds: 10
           resources: {{- toYaml .Values.backend.resources | nindent 12 }}
+      {{- with $d.caCert.secret }}
+      volumes:
+        - name: database-ca
+          secret:
+            secretName: {{ . }}
+            items:
+              - key: {{ $d.caCert.key }}
+                path: ca.crt
+      {{- end }}

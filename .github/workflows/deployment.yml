@@ -22,9 +22,17 @@ on:
       - "frontend/Dockerfile"
       - "frontend/nginx/**"
       - "frontend/package*.json"
+      - "frontend/index.html"
+      - "frontend/vite.config.js"
+      - "frontend/src/**"
       - "backend/Dockerfile"
       - "backend/pyproject.toml"
+      - "backend/app/**"
+      - "backend/migrations/**"
+      - "backend/sample_data/**"
       - "backend/agent/pyproject.toml"
+      - "backend/agent/xana_agent/**"
+      - "backend/db-init/**"
       - "helm/**"
       - ".github/workflows/deployment.yml"
   push:
@@ -33,9 +41,17 @@ on:
       - "frontend/Dockerfile"
       - "frontend/nginx/**"
       - "frontend/package*.json"
+      - "frontend/index.html"
+      - "frontend/vite.config.js"
+      - "frontend/src/**"
       - "backend/Dockerfile"
       - "backend/pyproject.toml"
+      - "backend/app/**"
+      - "backend/migrations/**"
+      - "backend/sample_data/**"
       - "backend/agent/pyproject.toml"
+      - "backend/agent/xana_agent/**"
+      - "backend/db-init/**"
       - "helm/**"
       - ".github/workflows/deployment.yml"
     tags: ["v*"]
@@ -57,12 +73,10 @@ jobs:
           version: v3.17.3 # Helmfile 1.1 does not support Helm 4
       - name: Lint
         run: helm lint helm/charts/xana-pdt
-      - name: Render with each secret source
-        working-directory: helm/charts/xana-pdt
+      - name: Check what the chart renders
         run: |
-          helm template x . > /dev/null
-          helm template x . --set secrets.existingSecret=s > /dev/null
-          helm template x . --set database.credentialsSecret= --set secrets.values.TIMESCALE_DB_URL=u > /dev/null
+          pip install pyyaml
+          python helm/test/check_render.py helm/charts/xana-pdt
 
   # The documented install on a local cluster, with stand-ins for the platform's services.
   install:
@@ -83,6 +97,21 @@ jobs:
           for environment in default production local; do
             helmfile -e "$environment" template > /dev/null
           done
+      - name: Check secrets from the shell reach the Secret, and never the ConfigMap
+        working-directory: helm
+        env:
+          XANA_ANTHROPIC_API_KEY: helmfile-test-value
+        run: |
+          pip install pyyaml
+          helmfile -e default template > rendered.yaml
+          python - <<'EOF'
+          import yaml
+          docs = [d for d in yaml.safe_load_all(open("rendered.yaml")) if d]
+          [secret] = [d for d in docs if d["kind"] == "Secret"]
+          assert secret["stringData"]["ANTHROPIC_API_KEY"] == "helmfile-test-value"
+          assert not [d for d in docs if d["kind"] == "ConfigMap" and "helmfile-test-value" in str(d)]
+          EOF
+          rm rendered.yaml
       - uses: helm/kind-action@v1
         with:
           cluster_name: xana
@@ -127,6 +156,7 @@ jobs:
           kubectl -n iff logs deploy/xana-pdt-backend --tail 200
 
   images:
+    needs: [chart, install]
     runs-on: ubuntu-latest
     permissions:
       contents: read

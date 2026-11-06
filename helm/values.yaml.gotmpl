@@ -33,12 +33,30 @@ config:
   {{- end }}
   NGSI_URL: {{ .Values.ngsiUrl | quote }}
   POSTGRES_SSLMODE: {{ .Values.postgresSslMode | quote }}
+  {{- range $name, $value := .Values.extraConfig }}
+  {{ $name }}: {{ $value | quote }}
+  {{- end }}
 database:
   host: {{ .Values.databaseHost }}
   port: {{ .Values.databasePort }}
   credentialsSecret: {{ .Values.databaseCredentialsSecret | quote }}
+  caCert:
+    secret: {{ .Values.databaseCaSecret | quote }}
 secrets:
   existingSecret: {{ env "XANA_EXISTING_SECRET" | default .Values.existingSecret | quote }}
+  values:
+    {{- with env "XANA_ANTHROPIC_API_KEY" }}
+    ANTHROPIC_API_KEY: {{ . | quote }}
+    {{- end }}
+    {{- with env "XANA_OPENAI_API_KEY" }}
+    OPENAI_API_KEY: {{ . | quote }}
+    {{- end }}
+    {{- with env "XANA_LANGFUSE_PUBLIC_KEY" }}
+    LANGFUSE_PUBLIC_KEY: {{ . | quote }}
+    {{- end }}
+    {{- with env "XANA_LANGFUSE_SECRET_KEY" }}
+    LANGFUSE_SECRET_KEY: {{ . | quote }}
+    {{- end }}
 ingress:
   enabled: {{ .Values.ingressEnabled }}
   className: {{ .Values.ingressClass | quote }}

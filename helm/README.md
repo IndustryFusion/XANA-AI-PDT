@@ -34,7 +34,12 @@ To remove the release: `helmfile -e default destroy`. Data in the database is ke
 
 ## Configuration
 
-Settings are in `environment/default.yaml`. `values.yaml.gotmpl` passes them to the chart, and the chart's [`values.yaml`](charts/xana-pdt/values.yaml) lists everything it accepts. `config` holds any backend setting from [`backend/.env.example`](../backend/.env.example) that is not secret.
+Settings are in `environment/default.yaml`. `values.yaml.gotmpl` passes them to the chart, and the chart's [`values.yaml`](charts/xana-pdt/values.yaml) lists everything it accepts. For any other backend setting from [`backend/.env.example`](../backend/.env.example) that is not secret, such as `LLM_NUM_CTX` or `TIMESCALE_TABLE`, add it to `extraConfig`:
+
+```yaml
+extraConfig:
+  LLM_NUM_CTX: 32768
+```
 
 Default addresses, in the release's namespace:
 
@@ -44,7 +49,7 @@ Default addresses, in the release's namespace:
 | TimescaleDB | `acid-cluster:5432/tsdb` |
 | Memory database | `acid-cluster:5432/memory` |
 
-Database connections use TLS (`POSTGRES_SSLMODE: require`).
+Database connections use TLS (`POSTGRES_SSLMODE: require`), which encrypts the connection but doesn't check the server. To check it, set `postgresSslMode` to `verify-ca` or `verify-full`, and `databaseCaSecret` to a Secret holding the CA certificate under key `ca.crt`. The chart mounts it and sets `POSTGRES_SSLROOTCERT`.
 
 ### Language model
 
@@ -64,11 +69,15 @@ The backend takes its secrets from the first of these that applies:
 2. **`database.credentialsSecret`:** the operator's Secret, with keys `username` and `password`. The chart builds the two database URLs from it. Its password must not need URL encoding, which holds for generated passwords.
 3. **`secrets.values`:** values given at install time, such as an API key, kept in a Secret the chart creates. With 2, these supply everything other than the database URLs.
 
+For 3, Helmfile reads `XANA_ANTHROPIC_API_KEY`, `XANA_OPENAI_API_KEY`, `XANA_LANGFUSE_PUBLIC_KEY` and `XANA_LANGFUSE_SECRET_KEY` from the shell:
+
 ```bash
-helm upgrade --install xana-pdt charts/xana-pdt -n iff --reuse-values --set secrets.values.ANTHROPIC_API_KEY="$KEY"
+XANA_ANTHROPIC_API_KEY="$KEY" helmfile -e default sync
 ```
 
-Never commit a secret. Settings in `config` end up in a ConfigMap.
+**Set them on every `sync`.** Helmfile doesn't keep earlier values, so a `sync` without them removes them from the Secret. To avoid repeating them, use `XANA_EXISTING_SECRET`.
+
+Never commit a secret. Settings in `config` and `extraConfig` end up in a ConfigMap.
 
 ### Ingress
 
