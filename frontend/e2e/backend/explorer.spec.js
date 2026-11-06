@@ -114,6 +114,14 @@ test('time-shift shows the machine as it was', async ({ page }) => {
   await expect(attribute(node(page, MACHINE), 'status')).toBeVisible()
 })
 
+test('the history of a deleted attribute says so, and still shows its values', async ({ page }) => {
+  await page.route('**/api/ngsi/attr-status**', (route) => route.fulfill({ json: { 'https://uri.etsi.org/ngsi-ld/default-context/value': { deleted: true, observedAt: '2026-11-01T10:00:00Z' } } }))
+  await open(page, SENSOR)
+  await attribute(node(page, SENSOR), 'value').getByRole('button', { name: /history/i }).click()
+  await expect(page.getByRole('status').filter({ hasText: 'This attribute was deleted' })).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Values of value' }).locator('tbody tr').first()).toBeVisible()
+})
+
 test('statuses of PostgREST and the broker are told apart in errors', async ({ page }) => {
   await page.route('**/api/ngsi/history**', (route) => route.fulfill({ status: 502, json: { error: { kind: 'unavailable', message: 'The history service (PostgREST) cannot be reached (ConnectError).' } } }))
   await open(page, SENSOR)
