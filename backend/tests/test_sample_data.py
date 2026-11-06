@@ -130,12 +130,16 @@ def test_a_database_from_before_the_platforms_layout_gains_its_columns_and_keeps
     assert written > 0
     with psycopg.connect(url) as conn:
         kept = conn.execute("""SELECT "id", "datasetId" FROM attributes WHERE "entityId" = 'urn:old'""").fetchone()
-        assert kept == ("urn:old\\urn:attr\\@none", "@none")
-        assert conn.execute("SELECT count(*) FROM entities").fetchone()[0] == len(DATA["entities"])
-        # The old series isn't written again, only the state and lifecycle are added, once.
-        assert load_history(settings, DATA["history"], entities=DATA["entities"]) == 0
-        conn.execute("""INSERT INTO attributes ("id", "observedAt", "entityId", "attributeId", "deleted")
-                        VALUES ('x', now(), 'urn:n', 'urn:a', NULL)""")
+        entities = conn.execute("SELECT count(*) FROM entities").fetchone()[0]
+    assert kept == ("urn:old\\urn:attr\\@none", "@none")
+    assert entities == len(DATA["entities"])
+    # The old series isn't written again, and the state and lifecycle are added only once.
+    assert load_history(settings, DATA["history"], entities=DATA["entities"]) == 0
+    with psycopg.connect(url) as conn:
+        conn.execute(
+            """INSERT INTO attributes ("id", "observedAt", "entityId", "attributeId", "deleted")
+               VALUES ('x', now(), 'urn:n', 'urn:a', NULL)"""
+        )
 
 
 @pytest.mark.db
