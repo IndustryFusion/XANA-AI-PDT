@@ -47,6 +47,22 @@ const ARGS = {
   'session.getSession': () => [],
   'session.signIn': () => [{ username: 'operator', password: 'operator' }],
   'session.signOut': () => [],
+  'entities.getStats': () => [],
+  'entities.listTypes': () => [],
+  'entities.listAttributes': () => [],
+  'entities.queryEntities': () => [{ type: 'Machine', limit: 5 }],
+  'entities.getEntity': (f) => [f.body.id],
+  'entities.updateAttributes': () => ['urn:m', { a: { value: 1 } }],
+  'entities.appendAttributes': () => ['urn:m', { a: { type: 'Property', value: 1 } }],
+  'entities.deleteAttribute': () => ['urn:m', 'a'],
+  'entities.deleteEntity': () => ['urn:m'],
+  'entities.importEntities': () => [[]],
+  'entities.fetchImportDocument': () => ['https://example.org/a.json'],
+  'entities.deleteByTypes': () => [['T']],
+  'entities.getAttributeHistory': () => ['urn:m', 'value'],
+  'entities.getAttributeStatus': () => ['urn:m'],
+  'entities.listTypesAt': () => ['2026-01-01T00:00:00Z'],
+  'entities.queryEntitiesAt': () => ['2026-01-01T00:00:00Z', { type: 'Machine' }],
 }
 
 /** Answers every request with the recorded response; records the request method. */

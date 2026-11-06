@@ -24,6 +24,7 @@ from collections.abc import Callable
 import httpx
 
 from app.errors import invalid
+from xana_agent.sources.ngsi import context_link
 
 log = logging.getLogger(__name__)
 
@@ -39,8 +40,10 @@ class MachineResolver:
         timeout_s: float = 3,
         transport: httpx.AsyncBaseTransport | None = None,
         token: Callable[[], str | None] | None = None,
+        context_url: str | None = None,
     ) -> None:
         self._token = token
+        self._context_url = context_url
         self._url = url.rstrip("/")
         self._tenant = tenant
         self._timeout = timeout_s
@@ -62,6 +65,8 @@ class MachineResolver:
         headers = {"Accept": "application/json"}
         if self._tenant:
             headers["NGSILD-Tenant"] = self._tenant
+        if self._context_url:
+            headers["Link"] = context_link(self._context_url)
         if self._token and (token := self._token()):
             headers["Authorization"] = f"Bearer {token}"
         try:

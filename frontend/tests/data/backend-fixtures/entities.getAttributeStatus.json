@@ -1,0 +1,23 @@
+{
+  "method": "GET",
+  "path": "/api/ngsi/attr-status?entity_id=urn%3Angsi-ld%3ASensor%3Alaser-cutter-01-temperature",
+  "status": 200,
+  "body": {
+    "installedOn": {
+      "deleted": false,
+      "observedAt": "2026-11-05T20:50:25+00:00"
+    },
+    "measures": {
+      "deleted": false,
+      "observedAt": "2026-11-05T20:50:25+00:00"
+    },
+    "name": {
+      "deleted": false,
+      "observedAt": "2026-11-05T20:50:25+00:00"
+    },
+    "value": {
+      "deleted": false,
+      "observedAt": "2026-11-06T21:50:25+00:00"
+    }
+  }
+}

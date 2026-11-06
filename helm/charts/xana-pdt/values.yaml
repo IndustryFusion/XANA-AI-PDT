@@ -43,6 +43,7 @@ config:
   KEYCLOAK_REALM: iff
   KEYCLOAK_CLIENT_ID: scorpio
   NGSI_URL: http://scorpio-all-in-one-runner:9090
+  PGREST_URL: http://pgrest:3000
   POSTGRES_SSLMODE: require
 
 # Database addresses. The chart builds TIMESCALE_DB_URL and POSTGRES_MEMORY_URL from

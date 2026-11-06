@@ -4,15 +4,15 @@
   "status": 200,
   "body": {
     "id": "1",
-    "number": 2,
+    "number": 1,
     "machine_id": "urn:ngsi-ld:Machine:laser-cutter-01",
     "issue": "Cut edges show burrs since this morning",
     "outcome": "completed",
     "root_cause": "Cooling or supply problem",
     "escalated": false,
     "escalation_ref": null,
-    "started_at": "2026-11-06T19:33:27.261609+00:00",
-    "closed_at": "2026-11-06T19:33:28.915957+00:00",
+    "started_at": "2026-11-06T21:52:50.276618+00:00",
+    "closed_at": "2026-11-06T21:52:51.977892+00:00",
     "reopened_run_id": null,
     "decision": {
       "sources": [
@@ -44,6 +44,50 @@
           "machine_id": "urn:ngsi-ld:Machine:laser-cutter-01"
         },
         "output": {
+          "changes": [
+            {
+              "at": "2026-11-06T13:50:25Z",
+              "kind": "text",
+              "value": "running",
+              "attribute": "status",
+              "entity_id": "urn:ngsi-ld:Machine:laser-cutter-01"
+            },
+            {
+              "at": "2026-11-06T11:50:25Z",
+              "kind": "text",
+              "value": "maintenance",
+              "attribute": "status",
+              "entity_id": "urn:ngsi-ld:Machine:laser-cutter-01"
+            },
+            {
+              "at": "2026-11-06T09:50:25Z",
+              "kind": "text",
+              "value": "running",
+              "attribute": "status",
+              "entity_id": "urn:ngsi-ld:Machine:laser-cutter-01"
+            },
+            {
+              "at": "2026-11-06T07:50:25Z",
+              "kind": "text",
+              "value": "maintenance",
+              "attribute": "status",
+              "entity_id": "urn:ngsi-ld:Machine:laser-cutter-01"
+            },
+            {
+              "at": "2026-11-06T01:50:25Z",
+              "kind": "text",
+              "value": "running",
+              "attribute": "status",
+              "entity_id": "urn:ngsi-ld:Machine:laser-cutter-01"
+            },
+            {
+              "at": "2026-11-05T23:50:25Z",
+              "kind": "text",
+              "value": "idle",
+              "attribute": "status",
+              "entity_id": "urn:ngsi-ld:Machine:laser-cutter-01"
+            }
+          ],
           "signals": [
             {
               "name": "Laser cutter 01 temperature",
@@ -78,17 +122,18 @@
           "entities": [
             "urn:ngsi-ld:Machine:laser-cutter-01",
             "urn:ngsi-ld:ProductionLine:line-a",
-            "urn:ngsi-ld:Component:laser-cutter-01-laser-source",
             "urn:ngsi-ld:Component:laser-cutter-01-axis-drive",
+            "urn:ngsi-ld:Component:laser-cutter-01-laser-source",
             "urn:ngsi-ld:Component:laser-cutter-01-cutting-head",
             "urn:ngsi-ld:Sensor:laser-cutter-01-temperature",
             "urn:ngsi-ld:Sensor:laser-cutter-01-power"
           ],
+          "lifecycle": [],
           "machine_type": "LaserCutter",
           "partial_data": false,
           "machine_found": true
         },
-        "at": "2026-11-06T19:33:27.490046+00:00",
+        "at": "2026-11-06T21:52:50.578402+00:00",
         "round": 1
       },
       {
@@ -127,7 +172,7 @@
             }
           ]
         },
-        "at": "2026-11-06T19:33:27.512231+00:00",
+        "at": "2026-11-06T21:52:50.588111+00:00",
         "round": 1
       },
       {
@@ -199,7 +244,7 @@
             }
           ]
         },
-        "at": "2026-11-06T19:33:27.615967+00:00",
+        "at": "2026-11-06T21:52:50.701654+00:00",
         "round": 1
       },
       {
@@ -222,7 +267,7 @@
           "past_incidents": [],
           "recommended_action": null
         },
-        "at": "2026-11-06T19:33:27.626525+00:00",
+        "at": "2026-11-06T21:52:50.709412+00:00",
         "round": 1
       },
       {
@@ -240,7 +285,7 @@
             }
           ]
         },
-        "at": "2026-11-06T19:33:27.765177+00:00",
+        "at": "2026-11-06T21:52:50.787335+00:00",
         "round": 1
       },
       {
@@ -250,6 +295,50 @@
           "machine_id": "urn:ngsi-ld:Machine:laser-cutter-01"
         },
         "output": {
+          "changes": [
+            {
+              "at": "2026-11-06T13:50:25Z",
+              "kind": "text",
+              "value": "running",
+              "attribute": "status",
+              "entity_id": "urn:ngsi-ld:Machine:laser-cutter-01"
+            },
+            {
+              "at": "2026-11-06T11:50:25Z",
+              "kind": "text",
+              "value": "maintenance",
+              "attribute": "status",
+              "entity_id": "urn:ngsi-ld:Machine:laser-cutter-01"
+            },
+            {
+              "at": "2026-11-06T09:50:25Z",
+              "kind": "text",
+              "value": "running",
+              "attribute": "status",
+              "entity_id": "urn:ngsi-ld:Machine:laser-cutter-01"
+            },
+            {
+              "at": "2026-11-06T07:50:25Z",
+              "kind": "text",
+              "value": "maintenance",
+              "attribute": "status",
+              "entity_id": "urn:ngsi-ld:Machine:laser-cutter-01"
+            },
+            {
+              "at": "2026-11-06T01:50:25Z",
+              "kind": "text",
+              "value": "running",
+              "attribute": "status",
+              "entity_id": "urn:ngsi-ld:Machine:laser-cutter-01"
+            },
+            {
+              "at": "2026-11-05T23:50:25Z",
+              "kind": "text",
+              "value": "idle",
+              "attribute": "status",
+              "entity_id": "urn:ngsi-ld:Machine:laser-cutter-01"
+            }
+          ],
           "signals": [
             {
               "name": "Laser cutter 01 temperature",
@@ -284,17 +373,18 @@
           "entities": [
             "urn:ngsi-ld:Machine:laser-cutter-01",
             "urn:ngsi-ld:ProductionLine:line-a",
-            "urn:ngsi-ld:Component:laser-cutter-01-laser-source",
             "urn:ngsi-ld:Component:laser-cutter-01-axis-drive",
+            "urn:ngsi-ld:Component:laser-cutter-01-laser-source",
             "urn:ngsi-ld:Component:laser-cutter-01-cutting-head",
             "urn:ngsi-ld:Sensor:laser-cutter-01-temperature",
             "urn:ngsi-ld:Sensor:laser-cutter-01-power"
           ],
+          "lifecycle": [],
           "machine_type": "LaserCutter",
           "partial_data": false,
           "machine_found": true
         },
-        "at": "2026-11-06T19:33:27.952062+00:00",
+        "at": "2026-11-06T21:52:51.055756+00:00",
         "round": 2
       },
       {
@@ -337,7 +427,7 @@
             }
           ]
         },
-        "at": "2026-11-06T19:33:27.961624+00:00",
+        "at": "2026-11-06T21:52:51.064436+00:00",
         "round": 2
       },
       {
@@ -409,7 +499,7 @@
             }
           ]
         },
-        "at": "2026-11-06T19:33:28.067072+00:00",
+        "at": "2026-11-06T21:52:51.182130+00:00",
         "round": 2
       },
       {
@@ -435,7 +525,7 @@
           "past_incidents": [],
           "recommended_action": "Inspect the moving components named in the evidence and replace worn parts."
         },
-        "at": "2026-11-06T19:33:28.075605+00:00",
+        "at": "2026-11-06T21:52:51.192119+00:00",
         "round": 2
       },
       {
@@ -451,7 +541,7 @@
           "confirmed": false,
           "root_cause": "Wear of a moving component"
         },
-        "at": "2026-11-06T19:33:28.230105+00:00",
+        "at": "2026-11-06T21:52:51.260240+00:00",
         "round": 2
       },
       {
@@ -461,6 +551,50 @@
           "machine_id": "urn:ngsi-ld:Machine:laser-cutter-01"
         },
         "output": {
+          "changes": [
+            {
+              "at": "2026-11-06T13:50:25Z",
+              "kind": "text",
+              "value": "running",
+              "attribute": "status",
+              "entity_id": "urn:ngsi-ld:Machine:laser-cutter-01"
+            },
+            {
+              "at": "2026-11-06T11:50:25Z",
+              "kind": "text",
+              "value": "maintenance",
+              "attribute": "status",
+              "entity_id": "urn:ngsi-ld:Machine:laser-cutter-01"
+            },
+            {
+              "at": "2026-11-06T09:50:25Z",
+              "kind": "text",
+              "value": "running",
+              "attribute": "status",
+              "entity_id": "urn:ngsi-ld:Machine:laser-cutter-01"
+            },
+            {
+              "at": "2026-11-06T07:50:25Z",
+              "kind": "text",
+              "value": "maintenance",
+              "attribute": "status",
+              "entity_id": "urn:ngsi-ld:Machine:laser-cutter-01"
+            },
+            {
+              "at": "2026-11-06T01:50:25Z",
+              "kind": "text",
+              "value": "running",
+              "attribute": "status",
+              "entity_id": "urn:ngsi-ld:Machine:laser-cutter-01"
+            },
+            {
+              "at": "2026-11-05T23:50:25Z",
+              "kind": "text",
+              "value": "idle",
+              "attribute": "status",
+              "entity_id": "urn:ngsi-ld:Machine:laser-cutter-01"
+            }
+          ],
           "signals": [
             {
               "name": "Laser cutter 01 temperature",
@@ -495,17 +629,18 @@
           "entities": [
             "urn:ngsi-ld:Machine:laser-cutter-01",
             "urn:ngsi-ld:ProductionLine:line-a",
-            "urn:ngsi-ld:Component:laser-cutter-01-laser-source",
             "urn:ngsi-ld:Component:laser-cutter-01-axis-drive",
+            "urn:ngsi-ld:Component:laser-cutter-01-laser-source",
             "urn:ngsi-ld:Component:laser-cutter-01-cutting-head",
             "urn:ngsi-ld:Sensor:laser-cutter-01-temperature",
             "urn:ngsi-ld:Sensor:laser-cutter-01-power"
           ],
+          "lifecycle": [],
           "machine_type": "LaserCutter",
           "partial_data": false,
           "machine_found": true
         },
-        "at": "2026-11-06T19:33:28.412582+00:00",
+        "at": "2026-11-06T21:52:51.518644+00:00",
         "round": 3
       },
       {
@@ -558,7 +693,7 @@
             }
           ]
         },
-        "at": "2026-11-06T19:33:28.422633+00:00",
+        "at": "2026-11-06T21:52:51.534281+00:00",
         "round": 3
       },
       {
@@ -630,7 +765,7 @@
             }
           ]
         },
-        "at": "2026-11-06T19:33:28.505671+00:00",
+        "at": "2026-11-06T21:52:51.642013+00:00",
         "round": 3
       },
       {
@@ -656,7 +791,7 @@
           "past_incidents": [],
           "recommended_action": "Check coolant level, flow and filters; clean or replace clogged filters."
         },
-        "at": "2026-11-06T19:33:28.514482+00:00",
+        "at": "2026-11-06T21:52:51.648550+00:00",
         "round": 3
       },
       {
@@ -673,7 +808,7 @@
           "root_cause": "Cooling or supply problem",
           "recommended_action": "Check coolant level, flow and filters; clean or replace clogged filters."
         },
-        "at": "2026-11-06T19:33:28.674522+00:00",
+        "at": "2026-11-06T21:52:51.741904+00:00",
         "round": 3
       },
       {
@@ -687,10 +822,10 @@
           "incident_logged": true,
           "recommended_action": "Check coolant level, flow and filters; clean or replace clogged filters."
         },
-        "at": "2026-11-06T19:33:28.707608+00:00",
+        "at": "2026-11-06T21:52:51.772224+00:00",
         "round": 3
       }
     ],
-    "run_id": "8c0e9ae0-26e2-480e-b6a3-8f1cb45f35eb"
+    "run_id": "617ed5a2-8a1a-460c-a44f-f36eed0f3335"
   }
 }

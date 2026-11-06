@@ -1,0 +1,11 @@
+{
+  "method": "POST",
+  "path": "/api/ngsi/delete-by-types",
+  "status": 200,
+  "body": [
+    {
+      "type": "Recordingmw5ige9d",
+      "count": 1
+    }
+  ]
+}

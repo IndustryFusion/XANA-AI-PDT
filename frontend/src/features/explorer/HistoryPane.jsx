@@ -31,6 +31,14 @@ export const RANGES = [
   { id: 'custom', label: 'Custom range' },
 ]
 
+/** The latest recorded state of an attribute: by its exact name, or its IRI ending in that name. */
+export function statusOf(states, name) {
+  if (!states) return null
+  if (states[name]) return states[name]
+  const key = Object.keys(states).find((k) => k.endsWith(`/${name}`) || k.endsWith(`#${name}`))
+  return key ? states[key] : null
+}
+
 const toLocalInput = (ms) => {
   const d = new Date(ms - new Date(ms).getTimezoneOffset() * 60_000)
   return d.toISOString().slice(0, 16)
@@ -51,6 +59,8 @@ export default function HistoryPane({ entityId, name, unit, headingLevel = 3, on
   }, [range, applied])
   const validCustom = range !== 'custom' || (!Number.isNaN(Date.parse(custom.from)) && !Number.isNaN(Date.parse(custom.to)) && Date.parse(custom.from) < Date.parse(custom.to))
   const result = useData('entities', 'getAttributeHistory', [entityId, name, span])
+  const states = useData('entities', 'getAttributeStatus', [entityId])
+  const state = statusOf(states.data, name)
 
   return (
     <section className="card history" aria-labelledby={ids.title}>
@@ -81,6 +91,7 @@ export default function HistoryPane({ entityId, name, unit, headingLevel = 3, on
           )}
         </div>
         {!validCustom && <p className="field__error">The start of the range must be before its end.</p>}
+        {state?.deleted && <p className="muted" role="status">This attribute was deleted on <time dateTime={state.observedAt}>{formatTime(state.observedAt)}</time>. Its earlier values are shown below.</p>}
         <DataView
           result={result}
           errorTitle="Could not load the history"
@@ -104,8 +115,8 @@ export default function HistoryPane({ entityId, name, unit, headingLevel = 3, on
                     </caption>
                     <thead><tr><th scope="col">Time</th><th scope="col">Value{unit ? ` (${unit})` : ''}</th></tr></thead>
                     <tbody>
-                      {[...points].reverse().map((p) => (
-                        <tr key={p.at}><td><time dateTime={p.at}>{formatTime(p.at)}</time></td><td>{String(p.value)}</td></tr>
+                      {[...points].reverse().map((p, i) => (
+                        <tr key={`${p.at}-${i}`}><td><time dateTime={p.at}>{formatTime(p.at)}</time></td><td>{String(p.value)}</td></tr>
                       ))}
                     </tbody>
                   </table>

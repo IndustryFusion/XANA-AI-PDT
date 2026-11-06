@@ -19,7 +19,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from xana_agent.sources.base import SignalHistory
+from xana_agent.sources.base import ChangeHistorySource, SignalHistory
+from xana_agent.sources.timescale import short_name
 from xana_agent.state import AgentState
 from xana_agent.steps import Deps, entity_name, facts, numeric_attributes, source_error, step
 
@@ -27,6 +28,7 @@ MAX_ENTITIES = 20
 MAX_SIGNALS = 30
 BROKER = "Context broker"
 TIMESERIES = "Time-series database"
+CHANGES = "Change history"
 
 
 async def observe(state: AgentState, deps: Deps) -> dict[str, Any]:
@@ -74,11 +76,14 @@ async def observe(state: AgentState, deps: Deps) -> dict[str, Any]:
         sources.append({"source": TIMESERIES, "status": "unavailable", "detail": history_missing})
         partial = True
 
+    changes, lifecycle = await _changes(deps, entity_ids, sources)
     signals = _signals(entities, history)
     machine_type = _machine_type(machine)
     output = {
         "summary": _summary(run.machine_id, machine, related, signals, history, history_missing, sources, window_h),
         "signals": signals,
+        "changes": changes,
+        "lifecycle": lifecycle,
         "sources": sources,
         "partial_data": partial,
         "entities": [e["id"] for e in entities],
@@ -96,12 +101,32 @@ async def observe(state: AgentState, deps: Deps) -> dict[str, Any]:
     }
 
 
+async def _changes(
+    deps: Deps, entity_ids: list[str], sources: list[dict[str, Any]]
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Relationship and text changes, and entity lifecycle. Neither is needed to go on."""
+    if not isinstance(deps.history, ChangeHistorySource):
+        return [], []
+    found: dict[str, list[dict[str, Any]]] = {"changes": [], "lifecycle": []}
+    problems = []
+    for name, read in (("changes", deps.history.changes), ("lifecycle", deps.history.lifecycle)):
+        try:
+            found[name] = [item.model_dump(mode="json") for item in await read(entity_ids, deps.history_window)]
+        except Exception as exc:
+            problems.append(source_error(exc, CHANGES))
+    if problems:
+        sources.append({"source": CHANGES, "status": "unavailable", "detail": " ".join(dict.fromkeys(problems))})
+    return found["changes"], found["lifecycle"]
+
+
 def _signals(entities: list[dict[str, Any]], history: list[SignalHistory]) -> list[dict[str, Any]]:
     by_key = {(h.entity_id, h.attribute): h for h in history}
     names = {e["id"]: entity_name(e) for e in entities}
     signals: list[dict[str, Any]] = []
 
     def add(entity_id: str, attribute: str, value: float, unit: str | None) -> None:
+        # History holds short names; on platform data, the entity's attributes are full IRIs.
+        attribute = short_name(attribute)
         past = by_key.pop((entity_id, attribute), None)
         name = names.get(entity_id, entity_id)
         signals.append(

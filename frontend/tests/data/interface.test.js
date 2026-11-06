@@ -117,6 +117,7 @@ describe('mock source matches the documented shapes', () => {
       fetchImportDocument: () => ['https://samples.example.org/ngsi-ld/line-d.json'],
       deleteByTypes: () => [['Component']],
       getAttributeHistory: () => [SENSOR, 'value', { from: new Date(Date.now() - 3600_000).toISOString() }],
+      getAttributeStatus: () => [SENSOR],
       listTypesAt: () => [new Date(Date.now() - 86400_000).toISOString()],
       queryEntitiesAt: () => [new Date(Date.now() - 86400_000).toISOString(), { type: 'Machine' }],
       getValueHints: () => [{ entityType: 'Machine', attribute: 'status' }],

@@ -51,6 +51,8 @@ async def hypothesize(state: AgentState, deps: Deps) -> dict[str, Any]:
             "summary": observation["summary"],
             "entities": list(state["entities"].values()),
             "signals": observation["signals"],
+            "changes": observation.get("changes", []),
+            "lifecycle": observation.get("lifecycle", []),
             "sources": observation["sources"],
         },
         clarifications=run.clarifications,

@@ -27,12 +27,14 @@ from datetime import timedelta
 from fastapi import FastAPI
 from langchain_core.language_models import BaseChatModel
 
-from app.api import auth, diagnostics, errors, incidents, runs, stream
+from app.api import auth, diagnostics, errors, incidents, ngsi, runs, stream
 from app.auth import KeycloakSession
 from app.config import Settings, get_llm, load_settings
 from app.health import HealthService
 from app.memory.migrate import Migrator
 from app.memory.store import Database, IncidentStore, RunStore
+from app.ngsi.broker import ContextBroker
+from app.ngsi.history import AttributeHistory
 from app.redact import RedactingFilter, Redactor
 from app.runs.machines import MachineResolver
 from app.runs.manager import RunManager
@@ -64,9 +66,13 @@ class AgentDeps:
     def from_settings(cls, s: Settings, token: Callable[[], str | None] | None = None) -> AgentDeps:
         return cls(
             llm=get_llm(s),
-            context=NgsiContextSource(s.ngsi_url, s.ngsi_tenant, token=token),
-            history=TimescaleHistorySource(s.timescale_db_url.get_secret_value(), s.timescale_table),
-            machines=MachineResolver(s.ngsi_url, s.ngsi_tenant, s.health_timeout_s, token=token),
+            context=NgsiContextSource(s.ngsi_url, s.ngsi_tenant, token=token, context_url=s.ngsi_context_url),
+            history=TimescaleHistorySource(
+                s.timescale_db_url.get_secret_value(), s.timescale_table, entity_table=s.timescale_entity_table
+            ),
+            machines=MachineResolver(
+                s.ngsi_url, s.ngsi_tenant, s.health_timeout_s, token=token, context_url=s.ngsi_context_url
+            ),
         )
 
 
@@ -133,6 +139,8 @@ def create_app(
     app.state.health = health
     app.state.runs = manager
     app.state.incidents = incident_store
+    app.state.broker = ContextBroker(settings, session.token)
+    app.state.attribute_history = AttributeHistory(settings, session.token)
     errors.install(app)
 
     @app.get("/healthz", include_in_schema=False)
@@ -144,5 +152,6 @@ def create_app(
     app.include_router(diagnostics.router)
     app.include_router(runs.router)
     app.include_router(incidents.router)
+    app.include_router(ngsi.router)
     app.include_router(stream.router)
     return app

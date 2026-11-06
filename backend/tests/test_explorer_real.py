@@ -1,0 +1,395 @@
+#
+# Copyright (c) 2026 IndustryFusion Foundation
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+"""The explorer against real services: a broker (TEST_BROKER_URL) and PostgREST (TEST_PGREST_URL) over
+the time-series database (TEST_TSDB_URL). Rows are written in the platform's table layout, with
+the columns it has, and full IRIs as attribute names."""
+
+import os
+import uuid
+from datetime import UTC, datetime, timedelta
+
+import httpx
+import psycopg
+import pytest
+from fastapi.testclient import TestClient
+
+from tests.explorer_support import app_with
+
+pytestmark = pytest.mark.services
+BROKER = os.environ.get("TEST_BROKER_URL")
+PGREST = os.environ.get("TEST_PGREST_URL")
+TSDB = os.environ.get("TEST_TSDB_URL")
+IRI = "https://industry-fusion.com/types/v0.9/"
+NGSI = "https://uri.etsi.org/ngsi-ld/"
+XSD = "http://www.w3.org/2001/XMLSchema#"
+
+needs_broker = pytest.mark.skipif(not BROKER, reason="TEST_BROKER_URL not set")
+needs_history = pytest.mark.skipif(not (PGREST and TSDB), reason="TEST_PGREST_URL and TEST_TSDB_URL not set")
+
+
+def unique(kind: str = "m") -> str:
+    return f"urn:test:{kind}:{uuid.uuid4().hex[:12]}"
+
+
+@pytest.fixture
+def api():
+    token = os.environ.get("TEST_TOKEN")
+    app = app_with(
+        token=lambda: token, ngsi_url=BROKER or "http://127.0.0.1:1", pgrest_url=PGREST or "http://127.0.0.1:1"
+    )
+    # Real services here: the transports of the fakes are replaced.
+    app.state.broker._transport = None
+    app.state.attribute_history._transport = None
+    return TestClient(app)
+
+
+@pytest.fixture
+def entity(api):
+    """An entity named by full IRIs, removed afterwards."""
+    entity_id = unique()
+    body = {
+        "id": entity_id,
+        "type": f"{IRI}cutter_{uuid.uuid4().hex[:8]}",
+        f"{IRI}temp": {
+            "type": "Property",
+            "value": 42,
+            "unitCode": "CEL",
+            f"{IRI}limit": {"type": "Property", "value": 99},
+            f"{IRI}low": {"type": "Property", "value": 1},
+        },
+        f"{IRI}state": {"type": "Property", "value": "ON"},
+        f"{IRI}hasFilter": {"type": "Relationship", "object": "urn:test:filter:1"},
+        f"{IRI}many": [
+            {"type": "Property", "value": 1, "datasetId": "urn:d:1"},
+            {"type": "Property", "value": 2, "datasetId": "urn:d:2"},
+        ],
+        "max_temp": {"type": "Property", "value": 7},
+    }
+    assert api.post("/api/ngsi/import", json=[body]).json()[0]["result"] == "created"
+    yield body
+    api.delete(f"/api/ngsi/entities/{entity_id}")
+
+
+def path(body):
+    return f"/api/ngsi/entities/{body['id']}"
+
+
+@needs_broker
+def test_read_back_with_names_unchanged(api, entity):
+    stored = api.get(path(entity)).json()
+    assert stored[f"{IRI}temp"]["unitCode"] == "CEL"
+    assert "max_temp" in stored
+    assert entity["type"] in api.get("/api/ngsi/types").json()
+    assert f"{IRI}temp" in api.get("/api/ngsi/attributes").json()
+
+
+@needs_broker
+def test_stats_count_for_real(api, entity):
+    stats = api.get("/api/ngsi/stats").json()
+    assert {"type": entity["type"], "count": 1} in stats["by_type"]
+    assert stats["entity_count"] >= 1
+
+
+@needs_broker
+def test_queries_on_iri_data(api, entity):
+    def found(**params):
+        return [e["id"] for e in api.get("/api/ngsi/entities", params=params).json()]
+
+    assert found(type=entity["type"]) == [entity["id"]]
+    assert found(id=entity["id"]) == [entity["id"]]
+    assert entity["id"] in found(id_pattern="urn:test:m:.*", limit=1000)
+    assert found(type=entity["type"], q=f'{IRI}state=="ON"') == [entity["id"]]
+    assert found(type=entity["type"], q=f'{IRI}state=="OFF"') == []
+    assert found(type=entity["type"], q=f"{IRI}temp>40;{IRI}state") == [entity["id"]]
+    assert found(type=entity["type"], q="max_temp==7") == [entity["id"]]
+    # Why a context is needed: a short name silently matches nothing on such data.
+    assert found(type=entity["type"], q='state=="ON"') == []
+
+
+@needs_broker
+def test_bad_expression_is_invalid_not_the_brokers_internal_error(api, entity):
+    answer = api.get("/api/ngsi/entities", params={"type": entity["type"], "q": "(("})
+    assert answer.status_code == 422
+
+
+@needs_broker
+def test_edit_keeps_unit_and_sub_attributes(api, entity):
+    assert api.patch(f"{path(entity)}/attrs", json={f"{IRI}temp": {"value": 43}}).status_code == 204
+    stored = api.get(path(entity)).json()[f"{IRI}temp"]
+    assert stored["value"] == 43
+    assert stored["unitCode"] == "CEL"
+    assert stored[f"{IRI}limit"]["value"] == 99
+    assert stored["observedAt"]
+
+
+@needs_broker
+def test_add_and_change_a_sub_attribute(api, entity):
+    fragment = {f"{IRI}temp": {f"{IRI}new": {"type": "Property", "value": 5}}}
+    assert api.patch(f"{path(entity)}/attrs", json=fragment).status_code == 204
+    stored = api.get(path(entity)).json()[f"{IRI}temp"]
+    assert stored["value"] == 42
+    assert stored[f"{IRI}new"]["value"] == 5
+    assert stored[f"{IRI}limit"]["value"] == 99
+
+
+@needs_broker
+def test_one_dataset_changes(api, entity):
+    fragment = {f"{IRI}many": {"value": 22, "datasetId": "urn:d:2"}}
+    assert api.patch(f"{path(entity)}/attrs", json=fragment).status_code == 204
+    stored = {i["datasetId"]: i["value"] for i in api.get(path(entity)).json()[f"{IRI}many"]}
+    assert stored == {"urn:d:1": 1, "urn:d:2": 22}
+
+
+@needs_broker
+def test_refusals_the_broker_would_not_give(api, entity):
+    assert api.patch(f"{path(entity)}/attrs", json={f"{IRI}none": {"value": 1}}).status_code == 404
+    assert api.patch(f"{path(entity)}/attrs", json={f"{IRI}temp": {"value": "abc"}}).status_code == 422
+    conflict = {f"{IRI}state": {"type": "Property", "value": "X"}}
+    assert api.post(f"{path(entity)}/attrs", json=conflict).status_code == 409
+    assert api.delete(f"{path(entity)}/attrs", params={"name": f"{IRI}none"}).status_code == 404
+    assert api.get(path(entity)).json()[f"{IRI}state"]["value"] == "ON"
+
+
+@needs_broker
+def test_add_and_delete_attributes(api, entity):
+    added = {f"{IRI}fresh": {"type": "Property", "value": 1}}
+    assert api.post(f"{path(entity)}/attrs", json=added).status_code == 204
+    assert api.delete(f"{path(entity)}/attrs", params={"name": f"{IRI}fresh"}).status_code == 204
+    assert f"{IRI}fresh" not in api.get(path(entity)).json()
+    assert api.delete(f"{path(entity)}/attrs", params={"name": f"{IRI}many"}).status_code == 204
+    assert f"{IRI}many" not in api.get(path(entity)).json()
+
+
+@needs_broker
+def test_delete_sub_attribute_only(api, entity):
+    params = {"name": f"{IRI}temp", "sub_attribute": f"{IRI}low"}
+    assert api.delete(f"{path(entity)}/attrs", params=params).status_code == 204
+    stored = api.get(path(entity)).json()[f"{IRI}temp"]
+    assert f"{IRI}low" not in stored
+    assert stored[f"{IRI}limit"]["value"] == 99
+    assert stored["value"] == 42
+
+
+@needs_broker
+def test_delete_entity(api, entity):
+    assert api.delete(path(entity)).status_code == 204
+    assert api.get(path(entity)).status_code == 404
+
+
+@needs_broker
+def test_import_created_updated_failed(api, entity):
+    new = unique()
+    body = [
+        {"id": entity["id"], "type": entity["type"], f"{IRI}added": {"type": "Property", "value": 1}},
+        {"id": new, "type": entity["type"]},
+        {"id": unique(), "type": "T", "broken": {"type": "Property"}},
+        {"id": "no uri", "type": "T"},
+    ]
+    try:
+        answer = api.post("/api/ngsi/import", json=body)
+        assert answer.status_code == 207
+        rows = answer.json()
+        assert [r["result"] for r in rows[:2]] == ["updated", "created"]
+        assert rows[3]["result"] == "failed"
+        stored = api.get(path(entity)).json()
+        assert stored[f"{IRI}added"]["value"] == 1
+        assert stored[f"{IRI}state"]["value"] == "ON"
+    finally:
+        api.delete(f"/api/ngsi/entities/{new}")
+        api.delete(f"/api/ngsi/entities/{body[2]['id']}")
+
+
+@needs_broker
+def test_import_with_and_without_a_context(api):
+    ids = [unique(), unique()]
+    body = [
+        {"id": ids[0], "type": "T"},
+        {"@context": "https://uri.etsi.org/ngsi-ld/v1/ngsi-ld-core-context.jsonld", "id": ids[1], "type": "T"},
+    ]
+    try:
+        answer = api.post("/api/ngsi/import", json=body)
+        assert answer.status_code == 200, answer.text
+        assert [r["result"] for r in answer.json()] == ["created", "created"]
+    finally:
+        for entity_id in ids:
+            api.delete(f"/api/ngsi/entities/{entity_id}")
+
+
+@needs_broker
+def test_delete_by_types_including_more_than_a_page(api):
+    kind = f"{IRI}bulk_{uuid.uuid4().hex[:8]}"
+    entities = [{"id": unique("b"), "type": kind} for _ in range(1100)]
+    assert {r["result"] for r in api.post("/api/ngsi/import", json=entities).json()} == {"created"}
+    answer = api.post("/api/ngsi/delete-by-types", json={"types": [kind, "*"]})
+    assert answer.json() == [{"type": kind, "count": 1100}, {"type": "*", "count": 0}]
+    assert api.get("/api/ngsi/entities", params={"type": kind}).json() == []
+
+
+def test_stopped_services_give_502():
+    app = app_with(token=lambda: None, ngsi_url="http://127.0.0.1:1", pgrest_url="http://127.0.0.1:1")
+    app.state.broker._transport = None
+    app.state.attribute_history._transport = None
+    client = TestClient(app)
+    assert client.get("/api/ngsi/types").status_code == 502
+    assert client.get("/api/ngsi/history", params={"entity_id": "urn:x", "attribute": "a"}).status_code == 502
+
+
+# History, in the platform's layout -----------------------------------------------------------
+
+
+def _write(entity_id, entity_type, rows, entity_rows):
+    with psycopg.connect(TSDB) as conn, conn.cursor() as cur:
+        for at, name, value, extra in rows:
+            dataset = extra.get("dataset", "@none")
+            kind = extra.get("kind", "Property")
+            cur.execute(
+                'INSERT INTO attributes ("id", "parentId", "observedAt", "modifiedAt", "entityId", "attributeId", '
+                '"attributeType", "datasetId", "nodeType", "value", "valueType", "unitCode", "deleted") '
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                (
+                    extra.get("id", f"{entity_id}\\{name}\\{dataset}"),
+                    extra.get("parent"),
+                    at,
+                    at,
+                    entity_id,
+                    f"{IRI}{name}",
+                    f"{NGSI}{kind}",
+                    dataset,
+                    "@id" if kind == "Relationship" else "@value",
+                    value,
+                    extra.get("value_type"),
+                    extra.get("unit"),
+                    extra.get("deleted", False),
+                ),
+            )
+        for at, deleted in entity_rows:
+            cur.execute(
+                'INSERT INTO entities ("id", "observedAt", "modifiedAt", "type", "deleted") '
+                "VALUES (%s, %s, %s, %s, %s)",
+                (entity_id, at, at, entity_type, deleted),
+            )
+
+
+@pytest.fixture
+def recorded():
+    """An entity's rows from 5 hours ago up to 1 hour ago, and when it was deleted."""
+    entity_id = unique("h")
+    entity_type = f"{IRI}hist_{uuid.uuid4().hex[:8]}"
+    now = datetime.now(UTC).replace(microsecond=0)
+    ago = lambda hours: now - timedelta(hours=hours)  # noqa: E731
+    parent = f"{entity_id}\\temp\\@none"
+    rows = [
+        (ago(5), "temp", "40", {"unit": "CEL", "value_type": f"{XSD}double"}),
+        (ago(5), "limit", "90", {"id": f"{parent}\\limit", "parent": parent}),
+        (ago(5), "gone", "1", {}),
+        (ago(5), "hasFilter", "urn:f:1", {"kind": "Relationship"}),
+        (ago(5), "many", "1", {"dataset": "urn:d:1"}),
+        (ago(5), "many", "2", {"dataset": "urn:d:2"}),
+        (ago(4), "temp", "41", {"unit": "CEL", "deleted": None}),
+        (ago(3), "gone", None, {"deleted": True}),
+        (ago(3), "hasFilter", "urn:f:2", {"kind": "Relationship"}),
+        (ago(3), "state", "ON", {"value_type": f"{XSD}string"}),
+        (ago(1), "temp", "99", {"unit": "CEL"}),
+    ]
+    _write(entity_id, entity_type, rows, [(ago(5), None), (ago(1), True)])
+    return {"id": entity_id, "type": entity_type, "ago": ago}
+
+
+def iso(moment):
+    return moment.isoformat()
+
+
+@needs_history
+def test_history_on_the_platform_layout(api, recorded):
+    params = {"entity_id": recorded["id"], "attribute": f"{IRI}temp"}
+    assert [p["value"] for p in api.get("/api/ngsi/history", params=params).json()] == [40, 41, 99]
+    narrow = {**params, "from": iso(recorded["ago"](4.5)), "to": iso(recorded["ago"](2))}
+    assert [p["value"] for p in api.get("/api/ngsi/history", params=narrow).json()] == [41]
+    short = {**params, "attribute": "temp"}
+    assert [p["value"] for p in api.get("/api/ngsi/history", params=short).json()] == [40, 41, 99]
+    relation = {**params, "attribute": f"{IRI}hasFilter"}
+    assert [p["value"] for p in api.get("/api/ngsi/history", params=relation).json()] == ["urn:f:1", "urn:f:2"]
+    sub = {**params, "attribute": f"{IRI}limit"}
+    assert [p["value"] for p in api.get("/api/ngsi/history", params=sub).json()] == [90]
+
+
+@needs_history
+@pytest.mark.parametrize(
+    "hostile",
+    ['x",attributeId.like."*', "x),or=(deleted.is.true", 'a"b', "back\\slash", "with,comma", "(paren)", "%25"],
+)
+def test_a_real_postgrest_takes_hostile_names_literally(api, recorded, hostile):
+    if "*" in hostile:
+        hostile = hostile.replace("*", "")
+    answer = api.get("/api/ngsi/history", params={"entity_id": recorded["id"], "attribute": hostile})
+    assert answer.status_code == 200
+    assert answer.json() == []
+
+
+@needs_history
+def test_a_real_postgrest_takes_a_hostile_entity_literally(api, recorded):
+    entity = f"{recorded['id']}&attributeId=like.*"
+    answer = api.get("/api/ngsi/history", params={"entity_id": entity, "attribute": f"{IRI}temp"})
+    assert answer.json() == []
+
+
+@needs_history
+def test_attribute_status(api, recorded):
+    status = api.get("/api/ngsi/attr-status", params={"entity_id": recorded["id"]}).json()
+    assert status[f"{IRI}gone"]["deleted"] is True
+    assert status[f"{IRI}temp"]["deleted"] is False
+    assert f"{IRI}limit" not in status
+
+
+@needs_history
+def test_time_shift_on_the_platform_layout(api, recorded):
+    def shifted(hours, **params):
+        at = iso(recorded["ago"](hours))
+        return api.get("/api/ngsi/timeshift/entities", params={"at": at, "id": recorded["id"], **params}).json()
+
+    def types(hours):
+        return api.get("/api/ngsi/timeshift/types", params={"at": iso(recorded["ago"](hours))}).json()
+
+    assert shifted(6) == []
+    assert recorded["type"] not in types(6)
+
+    [early] = shifted(4.5)
+    assert early["type"] == recorded["type"]
+    assert early[f"{IRI}temp"]["value"] == 40
+    assert early[f"{IRI}temp"]["unitCode"] == "CEL"
+    assert early[f"{IRI}temp"][f"{IRI}limit"]["value"] == 90
+    assert early[f"{IRI}gone"]["value"] == 1
+    assert early[f"{IRI}hasFilter"]["object"] == "urn:f:1"
+    assert {i["datasetId"] for i in early[f"{IRI}many"]} == {"urn:d:1", "urn:d:2"}
+    assert recorded["type"] in types(4.5)
+
+    [later] = shifted(2)
+    assert later[f"{IRI}temp"]["value"] == 41
+    assert f"{IRI}gone" not in later
+    assert later[f"{IRI}hasFilter"]["object"] == "urn:f:2"
+    assert later[f"{IRI}state"]["value"] == "ON"
+
+    assert shifted(2, q=f"{IRI}temp==41")[0]["id"] == recorded["id"]
+    assert shifted(2, q=f"{IRI}temp==40") == []
+    assert shifted(0.5) == []
+    assert recorded["type"] not in types(0.5)
+
+
+def test_token_is_needed_without_an_anonymous_role():
+    url = os.environ.get("TEST_PGREST_NO_ANON_URL")
+    if not url:
+        pytest.skip("TEST_PGREST_NO_ANON_URL not set")
+    assert httpx.get(f"{url}/attributes", params={"limit": 1}).status_code == 401
