@@ -19,6 +19,7 @@ import asyncio
 import base64
 import json
 import logging
+import time
 
 import httpx
 import pytest
@@ -27,7 +28,7 @@ from fastapi.testclient import TestClient
 from app.auth import KeycloakSession, token_claims
 from app.errors import Refused
 from app.health import HealthService
-from app.main import AgentDeps, create_app
+from app.main import AgentDeps, Database, create_app
 from app.memory.migrate import Migrator
 from app.runs.machines import MachineResolver
 from tests.conftest import make_settings
@@ -259,11 +260,19 @@ def test_api_and_nothing_secret_in_responses_or_logs(caplog):
         assert signed_in.status_code == 200
         bodies += [refused.text, signed_in.text, client.get("/api/auth/status").text]
         assert client.get("/api/auth/status").json()["user"]["username"] == "op"
+        first_token = app.state.session.token()
+        deadline = time.monotonic() + 5
+        while provider.issued < 2:  # a token this short is refreshed about a second after it is issued
+            assert time.monotonic() < deadline, "the token was not refreshed"
+            time.sleep(0.02)
+        assert "refresh_token" in [form["grant_type"] for path, form in provider.calls if path.endswith("/token")]
         token = app.state.session.token()
+        assert token != first_token
+        bodies.append(client.get("/api/auth/status").text)
         assert client.post("/api/auth/logout").status_code == 204
         assert client.get("/api/auth/status").json()["valid"] is False
     everything = "\n".join(bodies) + caplog.text
-    for secret in (PASSWORD, "wrong-password", token, "refresh-1"):
+    for secret in (PASSWORD, "wrong-password", first_token, token, "refresh-1", "refresh-2"):
         assert secret not in everything
 
 
@@ -348,3 +357,244 @@ async def test_app_wires_the_session_token_to_the_agent():
     agent = AgentDeps.from_settings(settings, token=lambda: "the-token")
     assert agent.context._token() == "the-token"
     assert agent.machines._token() == "the-token"
+
+
+# ── Unexpected answers ──────────────────────────────────────────────────────
+
+
+class Answering(Provider):
+    """A provider that gives one fixed answer to chosen grants."""
+
+    def __init__(self, answer, grant="refresh_token", **kwargs):
+        super().__init__(**kwargs)
+        self.answer = answer
+        self.grant = grant
+
+    def __call__(self, request):
+        form = dict(pair.split("=", 1) for pair in request.content.decode().split("&"))
+        if form.get("grant_type") == self.grant and not request.url.path.endswith("/logout"):
+            self.calls.append((request.url.path, form))
+            return self.answer()
+        return super().__call__(request)
+
+
+UNEXPECTED = [
+    lambda: httpx.Response(200, text="<html>a proxy page</html>"),
+    lambda: httpx.Response(200, json=["not", "an", "object"]),
+    lambda: httpx.Response(200, json={"refresh_token": "r", "expires_in": 60}),
+    lambda: httpx.Response(200, json={"access_token": "a"}),
+    lambda: httpx.Response(200, json={"access_token": "a", "expires_in": "soon"}),
+    lambda: httpx.Response(200, json={"access_token": ["a"], "expires_in": 60}),
+]
+
+
+@pytest.mark.parametrize("answer", UNEXPECTED)
+async def test_an_unexpected_sign_in_answer_is_unavailable_and_keeps_the_session(answer):
+    provider = Answering(answer, grant="password")
+    s = session(provider)
+    with pytest.raises(Refused) as refused:
+        await s.connect("op", PASSWORD)
+    assert (refused.value.kind, refused.value.http_status) == ("unavailable", 503)
+    assert s.status()["valid"] is False
+
+    good = Provider()
+    s = session(good)
+    await s.connect("op", PASSWORD)
+    token = s.token()
+    task = s._task
+    s._transport = httpx.MockTransport(provider)
+    with pytest.raises(Refused):
+        await s.connect("op", PASSWORD)
+    assert s.token() == token
+    assert s._task is task and not task.done()
+    await s.close()
+
+
+@pytest.mark.parametrize("answer", UNEXPECTED)
+async def test_unexpected_refresh_answers_count_as_failures(answer, caplog):
+    provider = Answering(answer, expires_in=61)
+    s = session(provider)
+    await s.connect("op", PASSWORD)
+    secret = s.token()
+    with caplog.at_level(logging.WARNING):
+        await until(lambda: s.token() is None, within=4)
+    refreshes = [c for c in provider.calls if c[1].get("grant_type") == "refresh_token"]
+    assert len(refreshes) == 5
+    assert "failed in a row" in caplog.text
+    assert secret not in caplog.text
+    await s.logout()
+    await s.close()
+
+
+async def test_sign_out_and_close_work_after_a_failed_refresh():
+    provider = Answering(UNEXPECTED[0], expires_in=61)
+    s = session(provider)
+    await s.connect("op", PASSWORD)
+    await until(lambda: len([c for c in provider.calls if c[1].get("grant_type") == "refresh_token"]) >= 1, within=4)
+    await s.logout()
+    assert s.status()["valid"] is False
+    assert any(path.endswith("/logout") for path, _ in provider.calls)
+    await s.close()
+
+
+def test_close_always_closes_the_database(monkeypatch):
+    closed = []
+    original = Database.close
+
+    async def recording_close(db):
+        closed.append(True)
+        await original(db)
+
+    async def broken_shut_down():
+        raise RuntimeError("shut-down failed")
+
+    monkeypatch.setattr(Database, "close", recording_close)
+    settings = make_settings(keycloak_url=URL, llm_provider="scripted")
+    app = create_app(settings, session=KeycloakSession(settings, transport=httpx.MockTransport(Provider())))
+    monkeypatch.setattr(app.state.runs, "shut_down", broken_shut_down)
+    with pytest.raises(RuntimeError, match="shut-down failed"), TestClient(app):
+        pass
+    assert closed == [True]
+
+
+@pytest.mark.parametrize("payload", ["[1, 2]", '"text"', "3"])
+def test_a_token_whose_claims_are_not_an_object_has_none(payload):
+    encoded = base64.urlsafe_b64encode(payload.encode()).decode().rstrip("=")
+    assert token_claims(f"h.{encoded}.s") == {}
+
+
+async def test_claims_of_the_wrong_type_are_not_shown():
+    s = session(Provider(ifric_factory_id=["f"], ifric_company_id={"a": 1}))
+    status = await s.connect("op", PASSWORD)
+    await s.close()
+    assert status["factory_id"] is None
+    assert status["company_id"] is None
+
+
+# ── One change at a time ────────────────────────────────────────────────────
+
+
+class Slow(Provider):
+    """A provider whose answers wait until they are let through."""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.gate = asyncio.Event()
+        self.waiting = 0
+
+    async def handle_async_request(self, request):
+        self.waiting += 1
+        await self.gate.wait()
+        return self(request)
+
+
+class _SlowTransport(httpx.AsyncBaseTransport):
+    def __init__(self, provider):
+        self.provider = provider
+
+    async def handle_async_request(self, request):
+        await request.aread()
+        return await self.provider.handle_async_request(request)
+
+
+def slow_session(provider):
+    return KeycloakSession(make_settings(keycloak_url=URL), transport=_SlowTransport(provider), retry_s=0.01)
+
+
+async def test_two_sign_ins_leave_one_refresh_loop():
+    provider = Slow(expires_in=300)
+    s = slow_session(provider)
+    before = {t for t in asyncio.all_tasks()}
+    both = asyncio.gather(s.connect("op", PASSWORD), s.connect("op", PASSWORD))
+    await until(lambda: provider.waiting >= 1)
+    provider.gate.set()
+    await both
+    loops = [t for t in asyncio.all_tasks() - before if t.get_coro().__qualname__.endswith("_keep_fresh")]
+    assert loops == [s._task]
+    await s.logout()
+    assert s._task is None
+    assert not [t for t in asyncio.all_tasks() - before if t.get_coro().__qualname__.endswith("_keep_fresh")]
+
+
+async def test_sign_out_during_a_sign_in_ends_signed_out():
+    provider = Slow(expires_in=300)
+    s = slow_session(provider)
+    signing_in = asyncio.create_task(s.connect("op", PASSWORD))
+    await until(lambda: provider.waiting >= 1)
+    signing_out = asyncio.create_task(s.logout())
+    await asyncio.sleep(0.01)
+    provider.gate.set()
+    await signing_in
+    await signing_out
+    assert s.status()["valid"] is False
+    assert s._task is None
+
+
+async def test_a_refresh_cannot_bring_back_a_signed_out_session():
+    provider = Slow(expires_in=61)
+    s = slow_session(provider)
+    provider.gate.set()
+    await s.connect("op", PASSWORD)
+    provider.gate.clear()
+    await until(lambda: provider.waiting >= 2, within=4)
+    signing_out = asyncio.create_task(s.logout())
+    await asyncio.sleep(0.01)
+    provider.gate.set()
+    await signing_out
+    assert s.status()["valid"] is False
+    assert s.token() is None
+
+
+async def test_a_replaced_session_is_ended_at_the_provider():
+    provider = Provider()
+    s = session(provider)
+    await s.connect("op", PASSWORD)
+    await s.connect("op", PASSWORD)
+    await s.close()
+    ended = [form["refresh_token"] for path, form in provider.calls if path.endswith("/logout")]
+    assert ended == ["refresh-1"]
+    assert s.token() == jwt(2)
+
+
+async def test_a_failed_sign_in_does_not_end_the_session_at_the_provider():
+    provider = Provider()
+    s = session(provider)
+    await s.connect("op", PASSWORD)
+    with pytest.raises(Refused):
+        await s.connect("op", "wrong")
+    await s.close()
+    assert not [c for c in provider.calls if c[0].endswith("/logout")]
+    assert s.status()["valid"] is True
+
+
+# ── Refusals and limits ─────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("status", "body", "kind", "message"),
+    [
+        (401, {"error": "invalid_grant"}, "unauthorized", "not correct"),
+        (400, {"error": "invalid_grant"}, "unauthorized", "not correct"),
+        (401, None, "unauthorized", "not correct"),
+        (400, {"error": "unauthorized_client"}, "unavailable", "unauthorized_client"),
+        (401, {"error": "invalid_client"}, "unavailable", "invalid_client"),
+        (400, None, "unavailable", "HTTP 400"),
+    ],
+)
+async def test_refusals_tell_credentials_from_the_client(status, body, kind, message):
+    def answer():
+        return httpx.Response(status, json=body) if body else httpx.Response(status, text="no")
+
+    s = session(Answering(answer, grant="password"))
+    with pytest.raises(Refused) as refused:
+        await s.connect("op", PASSWORD)
+    assert refused.value.kind == kind
+    assert message in str(refused.value)
+
+
+def test_retries_last_for_most_of_the_refresh_margin():
+    from app.auth import MAX_REFRESH_FAILURES, PROVIDER_TIMEOUT_S, REFRESH_MARGIN_S, REFRESH_RETRY_S
+
+    span = (MAX_REFRESH_FAILURES - 1) * REFRESH_RETRY_S
+    assert REFRESH_MARGIN_S * 0.75 <= span < REFRESH_MARGIN_S
+    assert PROVIDER_TIMEOUT_S > make_settings().health_timeout_s

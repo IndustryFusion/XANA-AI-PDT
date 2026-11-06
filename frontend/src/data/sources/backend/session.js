@@ -17,10 +17,10 @@
 /**
  * Sign-in served by the backend (`/api/auth`). The factory's details come from a later phase.
  *
- * A stopped backend affects only the areas it serves, so if it can't be reached while the UI
- * loads, sign-in counts as off: the app opens, and each area shows its own state. The backend
- * protects nothing in the browser, and without it there is nothing to read. Once the backend
- * has answered, a failed session check stays a failure, as it is no proof of expiry.
+ * A stopped backend affects only the areas it serves, so if it has not answered since the UI
+ * loaded, `getAuthConfig` says so with `backendUnreachable`: the app opens, each area shows its
+ * own state, and the session gate checks again until the backend answers. Once the backend has
+ * answered, a failed read stays a failure, as it is no proof that sign-in is off or has expired.
  */
 import { request } from './http'
 
@@ -36,9 +36,8 @@ export const session = {
       backendAnswered = true
       return config
     } catch (error) {
-      if (error.kind !== 'unavailable') throw error
-      backendAnswered = false
-      return { enabled: false, provider: PROVIDER }
+      if (error.kind !== 'unavailable' || backendAnswered) throw error
+      return { enabled: false, provider: PROVIDER, backendUnreachable: true }
     }
   },
   getSession: async () => {

@@ -24,13 +24,12 @@ from __future__ import annotations
 import asyncio
 import base64
 import binascii
-import contextlib
 import json
 import logging
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, NoReturn
 
 import httpx
 
@@ -40,7 +39,9 @@ from app.errors import conflict, unauthorized, unavailable
 log = logging.getLogger(__name__)
 
 REFRESH_MARGIN_S = 60
-REFRESH_RETRY_S = 5
+# Five tries, this far apart, last for most of the margin, so that a provider restart doesn't end a session.
+REFRESH_RETRY_S = 12
+PROVIDER_TIMEOUT_S = 10
 MAX_REFRESH_FAILURES = 5
 PROVIDER = "Keycloak"
 
@@ -58,9 +59,26 @@ def token_claims(token: str) -> dict[str, Any]:
     """The claims of a JWT, unverified: for display only, from a token the provider just sent us."""
     try:
         payload = token.split(".")[1]
-        return json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
+        claims = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
     except (IndexError, ValueError, binascii.Error):
         return {}
+    return claims if isinstance(claims, dict) else {}
+
+
+def _refuse_sign_in(response: httpx.Response) -> NoReturn:
+    """Tells wrong credentials from a provider refusing this client, which a new password can't fix."""
+    try:
+        code = response.json().get("error")
+    except (ValueError, AttributeError):
+        code = None
+    if code == "invalid_grant" or (code is None and response.status_code == 401):
+        raise unauthorized("The username or password is not correct.")
+    known = code if isinstance(code, str) and code.replace("_", "").isalpha() else f"HTTP {response.status_code}"
+    raise unavailable(f"The identity provider refused the sign-in: {known}.")
+
+
+def _text(value: Any) -> str | None:
+    return value if isinstance(value, str) else None
 
 
 class KeycloakSession:
@@ -77,6 +95,7 @@ class KeycloakSession:
         self._retry_s = retry_s
         self._tokens: _Tokens | None = None
         self._task: asyncio.Task[None] | None = None
+        self._changing = asyncio.Lock()  # sign-in, sign-out and refresh change the session one at a time
         self.on_sign_in: list[SignInHook] = []
 
     @property
@@ -104,8 +123,8 @@ class KeycloakSession:
                 "name": str(claims.get("name") or claims.get("preferred_username", "")),
                 "email": str(claims.get("email", "")),
             },
-            "factory_id": claims.get("ifric_factory_id") or self._s.factory_id,
-            "company_id": claims.get("ifric_company_id"),
+            "factory_id": _text(claims.get("ifric_factory_id")) or self._s.factory_id,
+            "company_id": _text(claims.get("ifric_company_id")),
             "token_expires_in_s": max(0, round(self._tokens.expires_at - self._clock())),
         }
 
@@ -113,29 +132,32 @@ class KeycloakSession:
         if not self.enabled:
             raise conflict("Sign-in is not enabled on this backend.")
         grant = {"grant_type": "password", "username": username, "password": password}
-        try:
-            response = await self._post("token", grant)
-        except httpx.HTTPError:
-            raise unavailable("The identity provider could not be reached.") from None
-        if response.status_code in (400, 401):
-            raise unauthorized("The username or password is not correct.")
-        if response.status_code != 200:
-            raise unavailable(f"The identity provider answered HTTP {response.status_code}.")
-        await self._stop_refresh()
-        self._store(response.json())
-        self._task = asyncio.create_task(self._keep_fresh())
+        async with self._changing:
+            try:
+                response = await self._post("token", grant)
+            except httpx.HTTPError:
+                raise unavailable("The identity provider could not be reached.") from None
+            if response.status_code in (400, 401):
+                _refuse_sign_in(response)
+            if response.status_code != 200:
+                raise unavailable(f"The identity provider answered HTTP {response.status_code}.")
+            try:
+                tokens = self._tokens_from(response)
+            except ValueError:
+                raise unavailable("The identity provider sent an unexpected answer.") from None
+            replaced = self._tokens
+            await self._stop_refresh()
+            self._tokens = tokens
+            self._task = asyncio.create_task(self._keep_fresh())
+            await self._end_at_provider(replaced)
         await self._run_hooks()
         return self.status()
 
     async def logout(self) -> None:
-        tokens, self._tokens = self._tokens, None
-        await self._stop_refresh()
-        if tokens is None or not tokens.refresh:
-            return
-        try:
-            await self._post("logout", {"refresh_token": tokens.refresh})
-        except httpx.HTTPError as error:
-            log.warning("The identity provider was not told about the sign-out (%s).", type(error).__name__)
+        async with self._changing:
+            tokens, self._tokens = self._tokens, None
+            await self._stop_refresh()
+            await self._end_at_provider(tokens)
 
     async def close(self) -> None:
         await self._stop_refresh()
@@ -145,20 +167,39 @@ class KeycloakSession:
     async def _post(self, endpoint: str, form: dict[str, str]) -> httpx.Response:
         s = self._s
         url = f"{s.keycloak_url.rstrip('/')}/realms/{s.keycloak_realm}/protocol/openid-connect/{endpoint}"
-        async with httpx.AsyncClient(timeout=s.health_timeout_s, transport=self._transport) as client:
+        async with httpx.AsyncClient(timeout=PROVIDER_TIMEOUT_S, transport=self._transport) as client:
             return await client.post(url, data={"client_id": s.keycloak_client_id, **form})
 
-    def _store(self, answer: dict[str, Any]) -> None:
-        self._tokens = _Tokens(
-            answer["access_token"], answer.get("refresh_token"), self._clock() + answer["expires_in"]
-        )
+    def _tokens_from(self, response: httpx.Response) -> _Tokens:
+        """The tokens in a provider's answer. Anything unexpected raises a ValueError, naming no value."""
+        answer = response.json()
+        if not isinstance(answer, dict):
+            raise ValueError("not an object")
+        access, refresh, expires_in = answer.get("access_token"), answer.get("refresh_token"), answer.get("expires_in")
+        if not access or not isinstance(access, str):
+            raise ValueError("no access token")
+        if refresh is not None and not isinstance(refresh, str):
+            raise ValueError("unusable refresh token")
+        if isinstance(expires_in, bool) or not isinstance(expires_in, int | float) or expires_in <= 0:
+            raise ValueError("unusable expiry")
+        return _Tokens(access, refresh, self._clock() + expires_in)
+
+    async def _end_at_provider(self, tokens: _Tokens | None) -> None:
+        """Tells the provider a session is over, if it can be told. The session has ended here either way."""
+        if tokens is None or not tokens.refresh:
+            return
+        try:
+            response = await self._post("logout", {"refresh_token": tokens.refresh})
+            if response.status_code >= 400:
+                log.warning("The identity provider refused to end a session: HTTP %d.", response.status_code)
+        except httpx.HTTPError as error:
+            log.warning("The identity provider was not told about the sign-out (%s).", type(error).__name__)
 
     async def _stop_refresh(self) -> None:
         task, self._task = self._task, None
         if task is not None and task is not asyncio.current_task():
             task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await task
+            await asyncio.wait({task})
 
     async def _keep_fresh(self) -> None:
         failures = 0
@@ -175,17 +216,20 @@ class KeycloakSession:
                 self._tokens = None
 
     async def _refresh(self) -> bool:
-        try:
-            response = await self._post(
-                "token", {"grant_type": "refresh_token", "refresh_token": self._tokens.refresh or ""}
-            )
-            if response.status_code == 200:
-                self._store(response.json())
-                return True
-            log.warning("Token refresh failed: HTTP %d.", response.status_code)
-        except httpx.HTTPError as error:
-            log.warning("Token refresh failed: %s.", type(error).__name__)
-        return False
+        async with self._changing:
+            if self._tokens is None:
+                return True  # signed out in the meantime
+            try:
+                response = await self._post(
+                    "token", {"grant_type": "refresh_token", "refresh_token": self._tokens.refresh or ""}
+                )
+                if response.status_code == 200:
+                    self._tokens = self._tokens_from(response)
+                    return True
+                log.warning("Token refresh failed: HTTP %d.", response.status_code)
+            except Exception as error:  # noqa: BLE001 - any failure counts towards ending the session
+                log.warning("Token refresh failed: %s.", type(error).__name__)
+            return False
 
     async def _run_hooks(self) -> None:
         for hook in self.on_sign_in:

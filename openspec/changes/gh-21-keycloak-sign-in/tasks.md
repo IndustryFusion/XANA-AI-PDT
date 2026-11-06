@@ -36,6 +36,18 @@
 - [x] 6.1 Run backend and frontend tests, lint and `openspec validate --all --strict`; verify they pass locally and in CI
 - [x] 6.2 Check each scenario in the delta specs and report the result per scenario in the Pull Request; verify the report covers every scenario
 
+## 7. Review follow-ups
+
+- [x] 7.1 A failed configuration read doesn't sign out a working operator; verify with the real session gate on the backend source
+- [x] 7.2 A backend out of reach at load isn't treated as sign-in off for good, and the gate recovers without a reload; verify with the real session gate
+- [x] 7.3 Unexpected provider answers are failures that count, log nothing secret, and don't break sign-out or close, and the database always closes; verify with tests for each answer form
+- [x] 7.4 Session changes happen one at a time; verify with concurrent tests for two sign-ins, sign-out during sign-in, and a refresh during sign-out
+- [x] 7.5 A failed sign-out shows an error and keeps the app open; verify with a component test
+- [x] 7.6 The documents state what decisions 1 and 2 mean, and warn about plain HTTP; verify by reading `design.md` and `helm/README.md`
+- [x] 7.7 The full session test really refreshes; verify it fails if no refresh happens
+- [x] 7.8 Sign-in refusals tell credentials from the client, and a replaced session ends at the provider; verify with tests
+- [x] 7.9 The header's name and the token countdown follow the session; verify with component tests
+
 ## Workflow follow-up
 
 - After merge, run `/opsx:archive gh-21-keycloak-sign-in` in a follow-up Pull Request from a fork, with `Closes #21` in its description.

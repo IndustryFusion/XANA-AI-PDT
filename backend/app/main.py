@@ -120,9 +120,11 @@ def create_app(
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await task
-        await manager.shut_down()
-        await session.close()
-        await db.close()
+        try:
+            await manager.shut_down()
+            await session.close()
+        finally:
+            await db.close()
 
     app = FastAPI(title="XANA AI PDT backend", version="0.1.0", lifespan=lifespan)
     app.state.settings = settings

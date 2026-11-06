@@ -108,14 +108,14 @@ python3.12 -m venv .venv
 
 ## Sign-in
 
-Sign-in is on when `KEYCLOAK_URL` is set. The backend signs in on the operator's behalf, and keeps the token fresh in memory: it refreshes 60 seconds before expiry, and ends the session after 5 failed refreshes. Requests to the context broker carry the token when one exists.
+Sign-in is on when `KEYCLOAK_URL` is set. The backend signs in on the operator's behalf, and keeps the token fresh in memory: it refreshes 60 seconds before expiry, retries every 12 seconds, and ends the session after 5 failed refreshes. Requests to the context broker carry the token when one exists.
 
 To check sign-in in a browser, run `XANA_E2E_SIGNIN=1 XANA_E2E_BACKEND=1 npx playwright test signin` in `frontend/`, with the local environment started with the `auth` profile.
 
 **Current limits, decided in `gh-21-keycloak-sign-in`:**
 
 - One session per backend process: whoever signs in supplies the token for all platform calls, and signing out ends it for everyone.
-- **The backend's own API is not protected.** Anyone who can reach it can start runs that read platform data with the signed-in operator's token, so limit network access to it.
+- **The backend doesn't know who is calling, and its own API is not protected.** While anyone is signed in, anyone who can reach it can pass the sign-in screen, start runs that read platform data with the operator's token, read the operator's name and e-mail, and sign the operator out or replace the session. Limit network access to it, and use TLS, or the password crosses the network in plain HTTP.
 - After a restart, or with nobody signed in, broker requests carry no token. A broker that requires one refuses them, and runs show the source as unavailable.
 
 ## Language model

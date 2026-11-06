@@ -187,12 +187,14 @@ describe('operations served by the backend', () => {
 
   test('session: an unreachable backend at load leaves the app open, and a later failure stays a failure', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('connection refused') }))
-    expect(await backend.session.getAuthConfig()).toEqual({ enabled: false, provider: 'Keycloak' })
+    expect(await backend.session.getAuthConfig()).toEqual({ enabled: false, provider: 'Keycloak', backendUnreachable: true })
     expect((await backend.session.getSession()).valid).toBe(false)
 
     fakeFetch({ 'GET /api/auth/config': { body: { enabled: true, provider: 'Keycloak' } } })
     expect((await backend.session.getAuthConfig()).enabled).toBe(true)
     vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('connection refused') }))
+    await expect(backend.session.getSession()).rejects.toMatchObject({ kind: 'unavailable' })
+    await expect(backend.session.getAuthConfig()).rejects.toMatchObject({ kind: 'unavailable' })
     await expect(backend.session.getSession()).rejects.toMatchObject({ kind: 'unavailable' })
   })
 

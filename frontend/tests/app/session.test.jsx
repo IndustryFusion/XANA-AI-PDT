@@ -99,3 +99,20 @@ test('a session service that cannot be reached at start offers retry', async () 
   await user.click(screen.getByRole('button', { name: 'Retry' }))
   expect(await screen.findByLabelText('Username')).toBeVisible()
 })
+
+test('a failed sign-out says so and keeps the session, and it can be tried again', async () => {
+  const user = userEvent.setup()
+  renderApp()
+  await screen.findByLabelText('Username')
+  await signIn(user)
+  await user.click(await screen.findByRole('button', { name: /account and factory details/ }))
+  writeControls({ failure: { session: 'unavailable' } })
+  await user.click(screen.getByRole('button', { name: 'Sign out' }))
+  expect(await screen.findByRole('alert')).toHaveTextContent('Could not sign out')
+  expect(screen.queryByLabelText('Username')).not.toBeInTheDocument()
+
+  writeControls({ failure: {} })
+  await user.click(screen.getByRole('button', { name: 'Sign out' }))
+  expect(await screen.findByLabelText('Username')).toBeVisible()
+})
+

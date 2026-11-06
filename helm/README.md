@@ -55,7 +55,14 @@ Database connections use TLS (`POSTGRES_SSLMODE: require`), which encrypts the c
 
 Set `XANA_KEYCLOAK_URL` to Keycloak's external address, for example `https://keycloak.example.org/auth`. Tokens must match the issuer that Scorpio checks, so don't use the in-cluster address. The platform's `scorpio` client in realm `iff` is used by default.
 
-**The backend's API has no protection of its own.** Anyone who can reach it can start runs with the signed-in operator's token, so keep it behind network rules. See [Sign-in](../backend/README.md#sign-in) for the other limits.
+> **Warning: use TLS, and restrict who can reach the UI and the backend.** With no TLS Secret (`ingressTlsSecret`, empty by default outside `production`), the operator's password crosses the Ingress in plain HTTP. The backend also doesn't know who is calling. So while anyone is signed in, anyone who can reach it can:
+>
+> - pass the sign-in screen without credentials;
+> - start runs that use the operator's token;
+> - read the operator's name and e-mail;
+> - sign the operator out, or replace the session with their own.
+>
+> See [Sign-in](../backend/README.md#sign-in).
 
 ### Language model
 

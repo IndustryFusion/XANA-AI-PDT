@@ -73,7 +73,7 @@ export function DataspaceIndicator({ refreshMs = CONNECTION_POLL_MS }) {
 }
 
 export function UserMenu() {
-  const { session, authEnabled, signOut } = useSession()
+  const { session, authEnabled, signOut, signOutError } = useSession()
   const [open, setOpen] = useState(false)
   const ref = useRef(null)
   const panelId = useId()
@@ -105,6 +105,7 @@ export function UserMenu() {
             </dl>
             <FactoryDetails result={factory} fallbackId={session?.factoryId} />
             {authEnabled && <Button onClick={signOut}>Sign out</Button>}
+            {signOutError && <p role="alert">Could not sign out, so the session may still be active. Try again.</p>}
           </div>
         </div>
       )}
