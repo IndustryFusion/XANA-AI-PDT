@@ -88,7 +88,7 @@ Built with React 18 + Vite in JavaScript. Structured views, no chat interface. E
 
 **Data layer.** Screens obtain data only through the UI data interface (`src/data`), one module per area: session, runs, incidents, entities, alerts, dataspace, system health, and the optional knowledge base. A data source implements the interface and is selected with `VITE_DATA_SOURCE`:
 - `mock` (default): runs in the browser with deterministic seeded data, a simulated run engine, and development controls for per-area latency and failure. No backend is needed.
-- `backend`: the operations the backend provides (runs and their stream, incident history, system health) over REST and WebSocket, with key mapping (snake_case ↔ camelCase), error mapping and stream reconnection. Every other operation is delegated to the mock source (`{ ...mock[area], ...backend[area] }`), so the whole UI stays usable while later phases bring their backends. Attaching it changed no screen.
+- `backend`: the operations the backend provides (session, runs and their stream, incident history, system health) over REST and WebSocket, with key mapping (snake_case ↔ camelCase), error mapping and stream reconnection. Every other operation is delegated to the mock source (`{ ...mock[area], ...backend[area] }`), so the whole UI stays usable while later phases bring their backends. Attaching it changed no screen.
 
 The interface is documented in `frontend/docs/data-interface.md`. Lint rules forbid screens from importing a data source or doing network I/O directly.
 
@@ -216,6 +216,8 @@ Step content uses the field names of the UI's data interface, in snake_case; the
 **Rounds.** A clarification (`POST /api/agent/clarify/{run_id}`) or a rejected resolution starts a new round from `observe`. The round's input carries all clarifications and all rejected root causes with their reasons; `hypothesize` sees them, and `decide` never proposes a rejected root cause again.
 
 **Model calls.** Every call asks for a structured answer: through the schema as `format` on Ollama, accepting content or a tool call; in the prompt on OpenAI-compatible servers set through `OPENAI_BASE_URL`; and through `with_structured_output` on cloud providers. Calls have a timeout of `LLM_TIMEOUT_S` and up to three retries when the answer does not match the structure. A timeout or a fourth mismatch fails the round with the step and a readable reason. Prompts (`agent/xana_agent/prompts/`) pass every value as JSON in a named section; operator text is marked as data, never as instructions.
+
+**Sign-in.** With `KEYCLOAK_URL` set, the backend signs in to Keycloak for the operator with the password grant, keeps the token fresh in memory, and sends it to the context broker. There is one session per backend process, and the backend's own API is not protected, so network access to it must be limited. With nobody signed in, broker requests carry no token. These are open decisions, recorded in the `gh-21-keycloak-sign-in` design.
 
 **Read-only.** Sources only read: the context source sends GET requests, the history source runs read-only transactions. The validation plan is limited to the entities observed in the round, so text in the issue cannot widen what is read. Memory is written only by `act`.
 

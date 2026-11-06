@@ -2,6 +2,7 @@
 
 Python 3.12 / FastAPI backend of XANA AI PDT. It is built in phases (issue #12). Today it provides:
 - the service runtime: configuration, language model selection, and a health report of every dependency;
+- sign-in through Keycloak, and the operator's token for the context broker ([Sign-in](#sign-in));
 - the incident memory database and its migrations;
 - runs that operators start, clarify, confirm or reject, stop and archive, with a live stream and the incident history ([API](#api));
 - a local environment with sample machine data;
