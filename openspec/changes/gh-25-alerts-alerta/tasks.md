@@ -31,5 +31,5 @@
 
 ## 6. Integration check
 
-- [ ] 6.1 Run backend and frontend tests, lint and `openspec validate --all --strict`; verify locally and in CI
-- [ ] 6.2 Check each scenario in the delta specs and report per scenario in the Pull Request
+- [x] 6.1 Run backend and frontend tests, lint and `openspec validate --all --strict`; verify locally and in CI
+- [x] 6.2 Check each scenario in the delta specs and report per scenario in the Pull Request
