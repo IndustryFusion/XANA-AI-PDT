@@ -122,3 +122,24 @@ def test_other_providers_use_structured_output():
             return schema
 
     assert structured_model(Other(), Inner) is Inner
+
+
+def test_reasoning_with_braces_is_not_part_of_the_answer():
+    message = AIMessage(content='<think>use {x} and {y}</think>{"a": 1}')
+    assert parse_answer(message) == {"a": 1}
+
+
+def test_unfinished_reasoning_holds_no_answer():
+    with pytest.raises(ValueError, match="no JSON object"):
+        parse_answer(AIMessage(content='<think>maybe {"a": 1}'))
+
+
+def test_a_valid_tool_call_survives_broken_content():
+    call = {"name": "answer", "args": {"a": 1}, "id": "1"}
+    assert parse_answer(AIMessage(content="use {x", tool_calls=[call])) == {"a": 1}
+    assert parse_answer(AIMessage(content="{not json}", tool_calls=[call])) == {"a": 1}
+
+
+def test_broken_content_without_a_tool_call_is_malformed():
+    with pytest.raises(ValueError):
+        parse_answer(AIMessage(content="{not json}"))

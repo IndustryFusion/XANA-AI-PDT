@@ -219,3 +219,14 @@ def test_no_tls_settings_leave_the_urls_alone():
 def test_invalid_tls_mode_is_named():
     with pytest.raises(ConfigError, match="POSTGRES_SSLMODE"):
         load_settings(_env_file=None, postgres_sslmode="maybe")
+
+
+def test_the_configured_openai_key_is_used():
+    llm = get_llm(Settings(_env_file=None, llm_provider="openai", llm_model="m", openai_api_key="sk-configured"))
+    assert llm.openai_api_key.get_secret_value() == "sk-configured"
+
+
+def test_a_server_without_a_key_gets_a_placeholder():
+    llm = get_llm(Settings(_env_file=None, llm_provider="openai", llm_model="m", openai_base_url="http://ovms/v3"))
+    assert llm.openai_api_key.get_secret_value() == "not-needed"
+    assert llm.openai_api_base == "http://ovms/v3"

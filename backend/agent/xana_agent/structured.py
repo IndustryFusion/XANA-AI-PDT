@@ -25,12 +25,14 @@ prompt. Both cases read the answer the same way.
 from __future__ import annotations
 
 import json
+import re
 from typing import Any, Protocol
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage
 from pydantic import BaseModel
 
+THINKING = re.compile(r"<think>.*?(</think>|$)", re.DOTALL)
 SCHEMA_REQUEST = "Answer with one JSON object only, with no other text, that matches this JSON schema:\n{schema}"
 
 
@@ -60,17 +62,27 @@ def inline_references(schema: dict[str, Any]) -> dict[str, Any]:
 
 
 def parse_answer(message: Any) -> dict[str, Any]:
-    """The JSON object in a model's content, else the arguments of its first tool call."""
+    """The JSON object in a model's content, else the arguments of its first tool call.
+
+    Reasoning in `<think>` tags is not part of the answer, and a broken object in the content
+    doesn't hide a valid tool call. Anything else raises a ValueError: a malformed answer.
+    """
     content = message.content if isinstance(message.content, str) else ""
+    content = THINKING.sub("", content)
     start, end = content.find("{"), content.rfind("}")  # some models wrap the object in text or a code block
+    broken: ValueError | None = None
     if start != -1 and end > start:
-        answer = json.loads(content[start : end + 1])  # a ValueError counts as a malformed answer
-        if isinstance(answer, dict):
-            return answer
+        try:
+            answer = json.loads(content[start : end + 1])
+        except ValueError as error:
+            broken = error
+        else:
+            if isinstance(answer, dict):
+                return answer
     for call in getattr(message, "tool_calls", None) or []:
         if isinstance(call.get("args"), dict) and call["args"]:
             return call["args"]
-    raise ValueError("The answer holds no JSON object")
+    raise broken or ValueError("The answer holds no JSON object")
 
 
 class _OllamaStructured:
