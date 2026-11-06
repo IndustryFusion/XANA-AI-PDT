@@ -27,7 +27,8 @@ from datetime import timedelta
 from fastapi import FastAPI
 from langchain_core.language_models import BaseChatModel
 
-from app.api import auth, diagnostics, errors, incidents, ngsi, runs, shacl, stream
+from app.alerta import AlertaClient
+from app.api import alerta, auth, diagnostics, errors, incidents, ngsi, runs, shacl, stream
 from app.auth import KeycloakSession
 from app.config import Settings, get_llm, load_settings
 from app.health import HealthService
@@ -41,8 +42,8 @@ from app.runs.machines import MachineResolver
 from app.runs.manager import RunManager
 from app.tracing import tracing_callbacks
 from xana_agent import NgsiContextSource, TimescaleHistorySource, Workflow
-from xana_agent.sources import FusekiOntologySource
-from xana_agent.sources.base import ContextSource, HistorySource, IncidentMemory
+from xana_agent.sources import AlertaAlertSource, FusekiOntologySource
+from xana_agent.sources.base import AlertSource, ContextSource, HistorySource, IncidentMemory
 
 log = logging.getLogger(__name__)
 
@@ -63,6 +64,7 @@ class AgentDeps:
     context: ContextSource
     history: HistorySource
     machines: MachineResolver
+    alerts: AlertSource | None = None
 
     @classmethod
     def from_settings(cls, s: Settings, token: Callable[[], str | None] | None = None) -> AgentDeps:
@@ -75,6 +77,7 @@ class AgentDeps:
             machines=MachineResolver(
                 s.ngsi_url, s.ngsi_tenant, s.health_timeout_s, token=token, context_url=s.ngsi_context_url
             ),
+            alerts=AlertaAlertSource(s.alerta_url, s.alerta_api_key and s.alerta_api_key.get_secret_value()),
         )
 
 
@@ -105,6 +108,7 @@ def create_app(
             llm_timeout_s=settings.llm_timeout_s,
             history_window=timedelta(hours=24),
             callbacks=callbacks,
+            alerts=agent.alerts,
         )
 
     manager = RunManager(
@@ -153,6 +157,7 @@ def create_app(
 
     session.on_sign_in.append(start_live_updates)
     app.state.attribute_history = AttributeHistory(settings, session.token)
+    app.state.alerta = AlertaClient(settings)
     app.state.ontology = FusekiOntologySource(
         settings.fuseki_url,
         settings.fuseki_dataset,
@@ -173,5 +178,6 @@ def create_app(
     app.include_router(incidents.router)
     app.include_router(ngsi.router)
     app.include_router(shacl.router)
+    app.include_router(alerta.router)
     app.include_router(stream.router)
     return app

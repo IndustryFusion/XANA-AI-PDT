@@ -31,6 +31,7 @@ class AgentState(TypedDict, total=False):
     entities: dict[str, dict[str, Any]]  # compact facts by entity ID, machine included
     signals: list[dict[str, Any]]
     observation: dict[str, Any]
+    alerts: list[dict[str, Any]]  # active alerts, highest weight first; also machine data for later use
     history_missing: str | None  # why history could not be read, if it could not
     # hypothesize, validate, decide
     hypotheses: list[dict[str, Any]]

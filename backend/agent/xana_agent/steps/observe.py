@@ -17,6 +17,8 @@
 
 from __future__ import annotations
 
+import asyncio
+from datetime import UTC, datetime
 from typing import Any
 
 from xana_agent.sources.base import ChangeHistorySource, SignalHistory
@@ -29,6 +31,14 @@ MAX_SIGNALS = 30
 BROKER = "Context broker"
 TIMESERIES = "Time-series database"
 CHANGES = "Change history"
+ALERTS = "Alerta"
+MAX_RELATED_FOR_ALERTS = 5
+MAX_ALERTS = 20
+ALERT_TIMEOUT_S = 5
+HALF_LIFE_H = 24
+# A fresh warning shouldn't outweigh a critical alert from yesterday, which age alone would do.
+SEVERITY_WEIGHT = {"security": 1.0, "critical": 1.0, "down": 1.0, "major": 0.8, "minor": 0.6, "warning": 0.5}
+OTHER_SEVERITY = 0.3
 
 
 async def observe(state: AgentState, deps: Deps) -> dict[str, Any]:
@@ -77,11 +87,15 @@ async def observe(state: AgentState, deps: Deps) -> dict[str, Any]:
         partial = True
 
     changes, lifecycle = await _changes(deps, entity_ids, sources)
+    alerts, alerts_failed = await _alerts(deps, run.machine_id, entities, sources)
+    partial = partial or alerts_failed
     signals = _signals(entities, history)
     machine_type = _machine_type(machine)
     output = {
-        "summary": _summary(run.machine_id, machine, related, signals, history, history_missing, sources, window_h),
+        "summary": _summary(run.machine_id, machine, related, signals, history, history_missing, sources, window_h)
+        + _alert_summary(alerts),
         "signals": signals,
+        "alerts": alerts,
         "changes": changes,
         "lifecycle": lifecycle,
         "sources": sources,
@@ -95,10 +109,82 @@ async def observe(state: AgentState, deps: Deps) -> dict[str, Any]:
         "machine_type": machine_type,
         "entities": {e["id"]: facts(e) for e in entities},
         "signals": signals,
+        "alerts": alerts,
         "observation": output,
         "history_missing": history_missing,
         "step": step("observe", {"machine_id": run.machine_id, "issue": run.issue}, output),
     }
+
+
+async def _alerts(
+    deps: Deps, machine_id: str, entities: list[dict[str, Any]], sources: list[dict[str, Any]]
+) -> tuple[list[dict[str, Any]], bool]:
+    """Active alerts of the machine and up to 5 related entities, and whether all of the reads failed."""
+    if deps.alerts is None:
+        return [], False
+    related = [e["id"] for e in entities if e["id"] != machine_id][:MAX_RELATED_FOR_ALERTS]
+    asked = [machine_id, *related]
+
+    async def read(entity_id: str) -> list[dict[str, Any]]:
+        return await asyncio.wait_for(deps.alerts.active(entity_id), ALERT_TIMEOUT_S)
+
+    answers = await asyncio.gather(*(read(entity_id) for entity_id in asked), return_exceptions=True)
+    failures = [answer for answer in answers if isinstance(answer, BaseException)]
+    now = datetime.now(UTC)
+    unique: dict[str, dict[str, Any]] = {}
+    for answer in answers:
+        for alert in [] if isinstance(answer, BaseException) else answer:
+            key = str(alert.get("id") or (alert.get("resource"), alert.get("event")))
+            unique.setdefault(key, _weighed(alert, now))
+    alerts = sorted(unique.values(), key=lambda a: a["weight"], reverse=True)[:MAX_ALERTS]
+    if failures:
+        first = failures[0]
+        reason = source_error(first, ALERTS) if isinstance(first, Exception) else f"{ALERTS} failed."
+        detail = (
+            f"{len(failures)} of {len(asked)} reads failed: {reason} {_count(len(alerts), 'alert', 'alerts')} found."
+        )
+        sources.append({"source": ALERTS, "status": "unavailable", "detail": detail})
+    else:
+        detail = (
+            f"{_count(len(alerts), 'active alert', 'active alerts')} on {_count(len(asked), 'entity', 'entities')}."
+        )
+        sources.append({"source": ALERTS, "status": "ok", "detail": detail})
+    return alerts, len(failures) == len(asked)
+
+
+def _weighed(alert: dict[str, Any], now: datetime) -> dict[str, Any]:
+    severity = str(alert.get("severity") or "")
+    received = alert.get("lastReceiveTime") or alert.get("createTime")
+    age_h = _age_hours(received, now)
+    weight = SEVERITY_WEIGHT.get(severity, OTHER_SEVERITY) * 0.5 ** (age_h / HALF_LIFE_H)
+    return {
+        "id": alert.get("id"),
+        "resource": alert.get("resource"),
+        "event": alert.get("event"),
+        "severity": severity,
+        "status": alert.get("status"),
+        "text": alert.get("text"),
+        "value": alert.get("value"),
+        "service": alert.get("service"),
+        "environment": alert.get("environment"),
+        "last_received": received,
+        "age_hours": round(age_h, 2),
+        "weight": round(weight, 4),
+    }
+
+
+def _age_hours(when: Any, now: datetime) -> float:
+    try:
+        at = datetime.fromisoformat(str(when).replace("Z", "+00:00"))
+    except ValueError:
+        return 24 * 7.0  # unknown age counts as old
+    if at.tzinfo is None:
+        at = at.replace(tzinfo=UTC)
+    return max(0.0, (now - at).total_seconds() / 3600)
+
+
+def _alert_summary(alerts: list[dict[str, Any]]) -> str:
+    return f" {_count(len(alerts), 'active alert', 'active alerts')}." if alerts else ""
 
 
 async def _changes(

@@ -1,18 +1,18 @@
 {
   "method": "GET",
-  "path": "/api/incidents/19",
+  "path": "/api/incidents/26",
   "status": 200,
   "body": {
-    "id": "19",
-    "number": 18,
+    "id": "26",
+    "number": 25,
     "machine_id": "urn:ngsi-ld:Machine:laser-cutter-01",
     "issue": "Cut edges show burrs since this morning",
     "outcome": "completed",
     "root_cause": "Cooling or supply problem",
     "escalated": false,
     "escalation_ref": null,
-    "started_at": "2026-11-06T22:19:54.865802+00:00",
-    "closed_at": "2026-11-06T22:19:56.565032+00:00",
+    "started_at": "2026-11-06T22:27:34.605299+00:00",
+    "closed_at": "2026-11-06T22:27:37.631721+00:00",
     "reopened_run_id": null,
     "decision": {
       "sources": [
@@ -31,28 +31,28 @@
       "hypothesis_id": "h3-1",
       "past_incidents": [
         {
+          "issue": "Cut edges show burrs (mw5jfsgg)",
+          "machine_id": "urn:ngsi-ld:Machine:laser-cutter-01",
+          "resolution": "Inspect the moving components named in the evidence and replace worn parts.",
+          "root_cause": "Wear of a moving component",
+          "incident_id": "23",
+          "resolved_at": "2026-11-06T22:20:28.865413+00:00"
+        },
+        {
+          "issue": "Cut edges show burrs since this morning",
+          "machine_id": "urn:ngsi-ld:Machine:laser-cutter-01",
+          "resolution": "Check coolant level, flow and filters; clean or replace clogged filters.",
+          "root_cause": "Cooling or supply problem",
+          "incident_id": "19",
+          "resolved_at": "2026-11-06T22:19:56.348370+00:00"
+        },
+        {
           "issue": "Cut edges show burrs since this morning",
           "machine_id": "urn:ngsi-ld:Machine:laser-cutter-01",
           "resolution": "Check coolant level, flow and filters; clean or replace clogged filters.",
           "root_cause": "Cooling or supply problem",
           "incident_id": "15",
           "resolved_at": "2026-11-06T22:19:18.824147+00:00"
-        },
-        {
-          "issue": "Cut edges show burrs (mw5j1snj)",
-          "machine_id": "urn:ngsi-ld:Machine:laser-cutter-01",
-          "resolution": "Inspect the moving components named in the evidence and replace worn parts.",
-          "root_cause": "Wear of a moving component",
-          "incident_id": "12",
-          "resolved_at": "2026-11-06T22:09:35.386044+00:00"
-        },
-        {
-          "issue": "Cut edges show burrs since this morning",
-          "machine_id": "urn:ngsi-ld:Machine:laser-cutter-01",
-          "resolution": "Check coolant level, flow and filters; clean or replace clogged filters.",
-          "root_cause": "Cooling or supply problem",
-          "incident_id": "8",
-          "resolved_at": "2026-11-06T22:08:12.754918+00:00"
         }
       ],
       "recommended_action": "Check coolant level, flow and filters; clean or replace clogged filters."
@@ -69,6 +69,24 @@
           "machine_id": "urn:ngsi-ld:Machine:laser-cutter-01"
         },
         "output": {
+          "alerts": [
+            {
+              "id": "6a29ec4d-da28-46d0-8816-2511283b376e",
+              "text": "Model validation for attribute temperature failed for urn:ngsi-ld:Machine:laser-cutter-01.",
+              "event": "Property value out of range",
+              "value": null,
+              "status": "open",
+              "weight": 0.5,
+              "service": [
+                "SHACL Validator"
+              ],
+              "resource": "urn:ngsi-ld:Machine:laser-cutter-01",
+              "severity": "warning",
+              "age_hours": 0,
+              "environment": "Development",
+              "last_received": "2026-11-06T22:27:29.685Z"
+            }
+          ],
           "changes": [
             {
               "at": "2026-11-06T13:50:25Z",
@@ -141,9 +159,14 @@
               "detail": "24 h of history read for 2 signals.",
               "source": "Time-series database",
               "status": "ok"
+            },
+            {
+              "detail": "1 active alert on 6 entities.",
+              "source": "Alerta",
+              "status": "ok"
             }
           ],
-          "summary": "Read Laser cutter 01 and 6 related entities; 2 signals with up to 24 h of history.",
+          "summary": "Read Laser cutter 01 and 6 related entities; 2 signals with up to 24 h of history. 1 active alert.",
           "entities": [
             "urn:ngsi-ld:Machine:laser-cutter-01",
             "urn:ngsi-ld:ProductionLine:line-a",
@@ -158,7 +181,7 @@
           "partial_data": false,
           "machine_found": true
         },
-        "at": "2026-11-06T22:19:55.158901+00:00",
+        "at": "2026-11-06T22:27:35.188750+00:00",
         "round": 1
       },
       {
@@ -197,7 +220,7 @@
             }
           ]
         },
-        "at": "2026-11-06T22:19:55.171421+00:00",
+        "at": "2026-11-06T22:27:35.201592+00:00",
         "round": 1
       },
       {
@@ -269,7 +292,7 @@
             }
           ]
         },
-        "at": "2026-11-06T22:19:55.286698+00:00",
+        "at": "2026-11-06T22:27:35.326675+00:00",
         "round": 1
       },
       {
@@ -291,33 +314,33 @@
           "root_cause": null,
           "past_incidents": [
             {
+              "issue": "Cut edges show burrs (mw5jfsgg)",
+              "machine_id": "urn:ngsi-ld:Machine:laser-cutter-01",
+              "resolution": "Inspect the moving components named in the evidence and replace worn parts.",
+              "root_cause": "Wear of a moving component",
+              "incident_id": "23",
+              "resolved_at": "2026-11-06T22:20:28.865413+00:00"
+            },
+            {
+              "issue": "Cut edges show burrs since this morning",
+              "machine_id": "urn:ngsi-ld:Machine:laser-cutter-01",
+              "resolution": "Check coolant level, flow and filters; clean or replace clogged filters.",
+              "root_cause": "Cooling or supply problem",
+              "incident_id": "19",
+              "resolved_at": "2026-11-06T22:19:56.348370+00:00"
+            },
+            {
               "issue": "Cut edges show burrs since this morning",
               "machine_id": "urn:ngsi-ld:Machine:laser-cutter-01",
               "resolution": "Check coolant level, flow and filters; clean or replace clogged filters.",
               "root_cause": "Cooling or supply problem",
               "incident_id": "15",
               "resolved_at": "2026-11-06T22:19:18.824147+00:00"
-            },
-            {
-              "issue": "Cut edges show burrs (mw5j1snj)",
-              "machine_id": "urn:ngsi-ld:Machine:laser-cutter-01",
-              "resolution": "Inspect the moving components named in the evidence and replace worn parts.",
-              "root_cause": "Wear of a moving component",
-              "incident_id": "12",
-              "resolved_at": "2026-11-06T22:09:35.386044+00:00"
-            },
-            {
-              "issue": "Cut edges show burrs since this morning",
-              "machine_id": "urn:ngsi-ld:Machine:laser-cutter-01",
-              "resolution": "Check coolant level, flow and filters; clean or replace clogged filters.",
-              "root_cause": "Cooling or supply problem",
-              "incident_id": "8",
-              "resolved_at": "2026-11-06T22:08:12.754918+00:00"
             }
           ],
           "recommended_action": null
         },
-        "at": "2026-11-06T22:19:55.298506+00:00",
+        "at": "2026-11-06T22:27:35.335919+00:00",
         "round": 1
       },
       {
@@ -335,7 +358,7 @@
             }
           ]
         },
-        "at": "2026-11-06T22:19:55.373899+00:00",
+        "at": "2026-11-06T22:27:35.549972+00:00",
         "round": 1
       },
       {
@@ -345,6 +368,24 @@
           "machine_id": "urn:ngsi-ld:Machine:laser-cutter-01"
         },
         "output": {
+          "alerts": [
+            {
+              "id": "6a29ec4d-da28-46d0-8816-2511283b376e",
+              "text": "Model validation for attribute temperature failed for urn:ngsi-ld:Machine:laser-cutter-01.",
+              "event": "Property value out of range",
+              "value": null,
+              "status": "open",
+              "weight": 0.5,
+              "service": [
+                "SHACL Validator"
+              ],
+              "resource": "urn:ngsi-ld:Machine:laser-cutter-01",
+              "severity": "warning",
+              "age_hours": 0,
+              "environment": "Development",
+              "last_received": "2026-11-06T22:27:29.685Z"
+            }
+          ],
           "changes": [
             {
               "at": "2026-11-06T13:50:25Z",
@@ -417,9 +458,14 @@
               "detail": "24 h of history read for 2 signals.",
               "source": "Time-series database",
               "status": "ok"
+            },
+            {
+              "detail": "1 active alert on 6 entities.",
+              "source": "Alerta",
+              "status": "ok"
             }
           ],
-          "summary": "Read Laser cutter 01 and 6 related entities; 2 signals with up to 24 h of history.",
+          "summary": "Read Laser cutter 01 and 6 related entities; 2 signals with up to 24 h of history. 1 active alert.",
           "entities": [
             "urn:ngsi-ld:Machine:laser-cutter-01",
             "urn:ngsi-ld:ProductionLine:line-a",
@@ -434,7 +480,7 @@
           "partial_data": false,
           "machine_found": true
         },
-        "at": "2026-11-06T22:19:55.652678+00:00",
+        "at": "2026-11-06T22:27:36.109889+00:00",
         "round": 2
       },
       {
@@ -477,7 +523,7 @@
             }
           ]
         },
-        "at": "2026-11-06T22:19:55.663810+00:00",
+        "at": "2026-11-06T22:27:36.121572+00:00",
         "round": 2
       },
       {
@@ -549,7 +595,7 @@
             }
           ]
         },
-        "at": "2026-11-06T22:19:55.799428+00:00",
+        "at": "2026-11-06T22:27:36.253453+00:00",
         "round": 2
       },
       {
@@ -574,33 +620,33 @@
           "hypothesis_id": "h2-1",
           "past_incidents": [
             {
+              "issue": "Cut edges show burrs (mw5jfsgg)",
+              "machine_id": "urn:ngsi-ld:Machine:laser-cutter-01",
+              "resolution": "Inspect the moving components named in the evidence and replace worn parts.",
+              "root_cause": "Wear of a moving component",
+              "incident_id": "23",
+              "resolved_at": "2026-11-06T22:20:28.865413+00:00"
+            },
+            {
+              "issue": "Cut edges show burrs since this morning",
+              "machine_id": "urn:ngsi-ld:Machine:laser-cutter-01",
+              "resolution": "Check coolant level, flow and filters; clean or replace clogged filters.",
+              "root_cause": "Cooling or supply problem",
+              "incident_id": "19",
+              "resolved_at": "2026-11-06T22:19:56.348370+00:00"
+            },
+            {
               "issue": "Cut edges show burrs since this morning",
               "machine_id": "urn:ngsi-ld:Machine:laser-cutter-01",
               "resolution": "Check coolant level, flow and filters; clean or replace clogged filters.",
               "root_cause": "Cooling or supply problem",
               "incident_id": "15",
               "resolved_at": "2026-11-06T22:19:18.824147+00:00"
-            },
-            {
-              "issue": "Cut edges show burrs (mw5j1snj)",
-              "machine_id": "urn:ngsi-ld:Machine:laser-cutter-01",
-              "resolution": "Inspect the moving components named in the evidence and replace worn parts.",
-              "root_cause": "Wear of a moving component",
-              "incident_id": "12",
-              "resolved_at": "2026-11-06T22:09:35.386044+00:00"
-            },
-            {
-              "issue": "Cut edges show burrs since this morning",
-              "machine_id": "urn:ngsi-ld:Machine:laser-cutter-01",
-              "resolution": "Check coolant level, flow and filters; clean or replace clogged filters.",
-              "root_cause": "Cooling or supply problem",
-              "incident_id": "8",
-              "resolved_at": "2026-11-06T22:08:12.754918+00:00"
             }
           ],
           "recommended_action": "Inspect the moving components named in the evidence and replace worn parts."
         },
-        "at": "2026-11-06T22:19:55.810810+00:00",
+        "at": "2026-11-06T22:27:36.263985+00:00",
         "round": 2
       },
       {
@@ -616,7 +662,7 @@
           "confirmed": false,
           "root_cause": "Wear of a moving component"
         },
-        "at": "2026-11-06T22:19:55.852700+00:00",
+        "at": "2026-11-06T22:27:36.465249+00:00",
         "round": 2
       },
       {
@@ -626,6 +672,24 @@
           "machine_id": "urn:ngsi-ld:Machine:laser-cutter-01"
         },
         "output": {
+          "alerts": [
+            {
+              "id": "6a29ec4d-da28-46d0-8816-2511283b376e",
+              "text": "Model validation for attribute temperature failed for urn:ngsi-ld:Machine:laser-cutter-01.",
+              "event": "Property value out of range",
+              "value": null,
+              "status": "open",
+              "weight": 0.5,
+              "service": [
+                "SHACL Validator"
+              ],
+              "resource": "urn:ngsi-ld:Machine:laser-cutter-01",
+              "severity": "warning",
+              "age_hours": 0,
+              "environment": "Development",
+              "last_received": "2026-11-06T22:27:29.685Z"
+            }
+          ],
           "changes": [
             {
               "at": "2026-11-06T13:50:25Z",
@@ -698,9 +762,14 @@
               "detail": "24 h of history read for 2 signals.",
               "source": "Time-series database",
               "status": "ok"
+            },
+            {
+              "detail": "1 active alert on 6 entities.",
+              "source": "Alerta",
+              "status": "ok"
             }
           ],
-          "summary": "Read Laser cutter 01 and 6 related entities; 2 signals with up to 24 h of history.",
+          "summary": "Read Laser cutter 01 and 6 related entities; 2 signals with up to 24 h of history. 1 active alert.",
           "entities": [
             "urn:ngsi-ld:Machine:laser-cutter-01",
             "urn:ngsi-ld:ProductionLine:line-a",
@@ -715,7 +784,7 @@
           "partial_data": false,
           "machine_found": true
         },
-        "at": "2026-11-06T22:19:56.154459+00:00",
+        "at": "2026-11-06T22:27:37.030995+00:00",
         "round": 3
       },
       {
@@ -768,7 +837,7 @@
             }
           ]
         },
-        "at": "2026-11-06T22:19:56.175510+00:00",
+        "at": "2026-11-06T22:27:37.044031+00:00",
         "round": 3
       },
       {
@@ -840,7 +909,7 @@
             }
           ]
         },
-        "at": "2026-11-06T22:19:56.291147+00:00",
+        "at": "2026-11-06T22:27:37.175521+00:00",
         "round": 3
       },
       {
@@ -865,33 +934,33 @@
           "hypothesis_id": "h3-1",
           "past_incidents": [
             {
+              "issue": "Cut edges show burrs (mw5jfsgg)",
+              "machine_id": "urn:ngsi-ld:Machine:laser-cutter-01",
+              "resolution": "Inspect the moving components named in the evidence and replace worn parts.",
+              "root_cause": "Wear of a moving component",
+              "incident_id": "23",
+              "resolved_at": "2026-11-06T22:20:28.865413+00:00"
+            },
+            {
+              "issue": "Cut edges show burrs since this morning",
+              "machine_id": "urn:ngsi-ld:Machine:laser-cutter-01",
+              "resolution": "Check coolant level, flow and filters; clean or replace clogged filters.",
+              "root_cause": "Cooling or supply problem",
+              "incident_id": "19",
+              "resolved_at": "2026-11-06T22:19:56.348370+00:00"
+            },
+            {
               "issue": "Cut edges show burrs since this morning",
               "machine_id": "urn:ngsi-ld:Machine:laser-cutter-01",
               "resolution": "Check coolant level, flow and filters; clean or replace clogged filters.",
               "root_cause": "Cooling or supply problem",
               "incident_id": "15",
               "resolved_at": "2026-11-06T22:19:18.824147+00:00"
-            },
-            {
-              "issue": "Cut edges show burrs (mw5j1snj)",
-              "machine_id": "urn:ngsi-ld:Machine:laser-cutter-01",
-              "resolution": "Inspect the moving components named in the evidence and replace worn parts.",
-              "root_cause": "Wear of a moving component",
-              "incident_id": "12",
-              "resolved_at": "2026-11-06T22:09:35.386044+00:00"
-            },
-            {
-              "issue": "Cut edges show burrs since this morning",
-              "machine_id": "urn:ngsi-ld:Machine:laser-cutter-01",
-              "resolution": "Check coolant level, flow and filters; clean or replace clogged filters.",
-              "root_cause": "Cooling or supply problem",
-              "incident_id": "8",
-              "resolved_at": "2026-11-06T22:08:12.754918+00:00"
             }
           ],
           "recommended_action": "Check coolant level, flow and filters; clean or replace clogged filters."
         },
-        "at": "2026-11-06T22:19:56.301250+00:00",
+        "at": "2026-11-06T22:27:37.186810+00:00",
         "round": 3
       },
       {
@@ -908,7 +977,7 @@
           "root_cause": "Cooling or supply problem",
           "recommended_action": "Check coolant level, flow and filters; clean or replace clogged filters."
         },
-        "at": "2026-11-06T22:19:56.326268+00:00",
+        "at": "2026-11-06T22:27:37.389961+00:00",
         "round": 3
       },
       {
@@ -918,14 +987,14 @@
         },
         "output": {
           "action": "Incident logged with the confirmed resolution",
-          "incident_id": "19",
+          "incident_id": "26",
           "incident_logged": true,
           "recommended_action": "Check coolant level, flow and filters; clean or replace clogged filters."
         },
-        "at": "2026-11-06T22:19:56.357508+00:00",
+        "at": "2026-11-06T22:27:37.425060+00:00",
         "round": 3
       }
     ],
-    "run_id": "d5fcc47d-fd30-49ae-93af-9736267e2c06"
+    "run_id": "183c23b7-fcd5-488c-8bf7-b21330dc0cb1"
   }
 }

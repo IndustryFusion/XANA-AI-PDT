@@ -1,16 +1,8 @@
 {
   "method": "GET",
-  "path": "/api/ngsi/history?entity_id=urn%3Angsi-ld%3ASensor%3Alaser-cutter-01-temperature&attribute=value&from=2026-11-06T21%3A19%3A59.238Z",
+  "path": "/api/ngsi/history?entity_id=urn%3Angsi-ld%3ASensor%3Alaser-cutter-01-temperature&attribute=value&from=2026-11-06T21%3A27%3A41.206Z",
   "status": 200,
   "body": [
-    {
-      "at": "2026-11-06T21:20:25+00:00",
-      "value": 29.5
-    },
-    {
-      "at": "2026-11-06T21:25:25+00:00",
-      "value": 29.8
-    },
     {
       "at": "2026-11-06T21:30:25+00:00",
       "value": 30.3

@@ -34,7 +34,7 @@ from langchain_core.language_models import BaseChatModel
 from langgraph.graph import END, START, StateGraph
 
 from xana_agent.schemas import Outcome, RoundInput, StepEvent
-from xana_agent.sources.base import ContextSource, HistorySource, IncidentMemory
+from xana_agent.sources.base import AlertSource, ContextSource, HistorySource, IncidentMemory
 from xana_agent.state import AgentState
 from xana_agent.steps import Deps, StepFailed
 from xana_agent.steps.act import act
@@ -90,12 +90,13 @@ class Workflow:
         llm_timeout_s: float = 120,
         history_window: timedelta = timedelta(hours=24),
         callbacks: Sequence[Any] = (),
+        alerts: AlertSource | None = None,
     ) -> None:
         if not 0 <= threshold <= 1:
             raise ValueError("threshold must be between 0 and 1")
         self.threshold = threshold
         self._callbacks = list(callbacks)
-        deps = Deps(llm, context, history, memory, llm_timeout_s, history_window)
+        deps = Deps(llm, context, history, memory, llm_timeout_s, history_window, alerts)
         nodes = {"observe": observe, "hypothesize": hypothesize, "validate": validate, "decide": decide}
         self._analysis = _graph(nodes, deps)
         self._act = _graph({"act": act}, deps)

@@ -44,6 +44,8 @@ config:
   NGSI_CONTEXT_URL: {{ . | quote }}
   {{- end }}
   PGREST_URL: {{ .Values.pgrestUrl | quote }}
+  ALERTA_URL: {{ .Values.alertaUrl | quote }}
+  ALERTS_REFRESH_INTERVAL_S: {{ .Values.alertsRefreshIntervalS | quote }}
   FUSEKI_URL: {{ .Values.fusekiUrl | quote }}
   FUSEKI_DATASET: {{ .Values.fusekiDataset | quote }}
   {{- with .Values.fusekiGraphBase }}
@@ -72,6 +74,9 @@ secrets:
     {{- end }}
     {{- with env "XANA_OPENAI_API_KEY" }}
     OPENAI_API_KEY: {{ . | quote }}
+    {{- end }}
+    {{- with env "XANA_ALERTA_API_KEY" }}
+    ALERTA_API_KEY: {{ . | quote }}
     {{- end }}
     {{- with env "XANA_LANGFUSE_PUBLIC_KEY" }}
     LANGFUSE_PUBLIC_KEY: {{ . | quote }}

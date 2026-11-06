@@ -154,6 +154,7 @@ export function createAlertsArea(store) {
       return updated
     }),
 
+    getAlertSettings: withControls(() => ({ refreshIntervalS: 30 })),
     listEnvironments: withControls(() => [...new Set([...ALERT_ENVIRONMENTS, ...store.get().alerts.map((a) => a.environment)])].sort()),
     listServices: withControls(() => [...new Set(store.get().alerts.flatMap((a) => a.service))].sort()),
   }

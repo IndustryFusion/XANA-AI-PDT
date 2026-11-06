@@ -68,6 +68,9 @@ class Settings(BaseSettings):
     ngsi_tenant: str | None = None
     ngsi_context_url: str | None = None
     pgrest_url: str = "http://pgrest:3000"
+    alerta_url: str = "http://alerta:8080/api"
+    alerta_api_key: SecretStr | None = None
+    alerts_refresh_interval_s: int = Field(30, gt=0)
     fuseki_url: str = "http://fuseki:3030"
     fuseki_dataset: str = "iff"
     fuseki_graph_base: str | None = None
@@ -88,6 +91,16 @@ class Settings(BaseSettings):
     backend_port: int = Field(8000, ge=1, le=65535)
     backend_reload: bool = False
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
+
+    @field_validator("alerta_url")
+    @classmethod
+    def _alerta_address(cls, value: str) -> str:
+        address = with_scheme(value, "http").rstrip("/")
+        if not address.endswith("/api"):
+            raise ValueError(
+                "must end in /api, for example http://alerta:8080/api; without it, Alerta answers with its web page"
+            )
+        return address
 
     @field_validator("fuseki_dataset")
     @classmethod
@@ -120,7 +133,7 @@ class Settings(BaseSettings):
             raise ValueError("must be a table name (letters, digits, underscores, optional schema)")
         return value
 
-    @field_validator("anthropic_api_key", "openai_api_key")
+    @field_validator("anthropic_api_key", "openai_api_key", "alerta_api_key")
     @classmethod
     def _key_without_spaces(cls, value: SecretStr | None) -> SecretStr | None:
         if value is not None and any(c.isspace() for c in value.get_secret_value()):
@@ -160,6 +173,7 @@ class Settings(BaseSettings):
                 self.anthropic_api_key and self.anthropic_api_key.get_secret_value(),
                 self.openai_api_key and self.openai_api_key.get_secret_value(),
                 self.langfuse_secret_key and self.langfuse_secret_key.get_secret_value(),
+                self.alerta_api_key and self.alerta_api_key.get_secret_value(),
                 url_password(self.timescale_db_url.get_secret_value()),
                 url_password(self.postgres_memory_url.get_secret_value()),
             ]

@@ -1,0 +1,8 @@
+{
+  "method": "GET",
+  "path": "/api/alerta/config",
+  "status": 200,
+  "body": {
+    "refresh_interval_s": 30
+  }
+}

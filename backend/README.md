@@ -56,7 +56,9 @@ Data and models are kept in Docker volumes between runs. `docker compose -f back
 
 **With value hints:** add `--profile ontology`, which starts Fuseki and loads sample shapes and knowledge from `sample_data/ontology/`.
 
-**Ports in use:** if a host port is taken, set `XANA_DB_PORT`, `XANA_BROKER_PORT`, `XANA_OLLAMA_PORT`, `XANA_KEYCLOAK_PORT`, `XANA_PGREST_PORT`, `XANA_MQTT_PORT`, `XANA_MQTT_MGMT_PORT`, `XANA_FUSEKI_PORT` or `XANA_BACKEND_PORT`.
+**With alerts:** add `--profile alerts`, which starts Alerta (9.0.4, as on the platform, with its severities) and sends sample alerts in the form the platform's rules give them. The key is `local-development-only-key` unless `ALERTA_API_KEY` is set. Without the profile, the Alerts screen says that Alerta is unavailable, and runs show that source as unavailable.
+
+**Ports in use:** if a host port is taken, set `XANA_DB_PORT`, `XANA_BROKER_PORT`, `XANA_OLLAMA_PORT`, `XANA_KEYCLOAK_PORT`, `XANA_PGREST_PORT`, `XANA_MQTT_PORT`, `XANA_MQTT_MGMT_PORT`, `XANA_FUSEKI_PORT`, `XANA_ALERTA_PORT` or `XANA_BACKEND_PORT`.
 
 The local environment is for development only. The database trusts local connections, and every port is bound to `127.0.0.1`.
 
@@ -105,6 +107,12 @@ Fields are snake_case. A refused request answers `{"error": {"kind", "message"}}
 | `/api/ngsi/timeshift/entities` | GET `?at&type&id&id_pattern&q&limit` | Entities as they were at a past moment |
 | `/api/ngsi/ws` | WebSocket `?type&ids=a,b` | Changes as they happen: `{type: "update", entity_id, entity_type, attributes}`, and `keepalive` every 20 s while quiet. A client that falls behind is closed with code 1013 |
 | `/api/shacl/hints` | GET `?entity_type&attribute` | `{hint_type, values, minimum, maximum, minimum_exclusive, maximum_exclusive, datatype, detail}`. Always answers: `none` with a reason when Fuseki can't |
+| `/api/alerta/alerts` | GET `?status=a,b&severity&environment&service&text&sort&page&page_size` | `{alerts, total, bySeverity, page, pageSize}`. Default: open and acknowledged, most severe and newest first |
+| `/api/alerta/alerts/count` | GET `?status=a,b` | `{total, bySeverity}` |
+| `/api/alerta/alert/{id}` | GET | An alert with its `history` |
+| `/api/alerta/alert/{id}/action` | PUT `{action, text}` | `ack`, `unack`, `shelve`, `unshelve`, `close` or `open`; answers the updated alert |
+| `/api/alerta/environments`, `services` | GET | Names |
+| `/api/alerta/config` | GET | `{refresh_interval_s}` |
 | `/api/ngsi/subscription-health` | GET | `{status, state, detail, expires_at}` of live updates |
 | `/ws/run/{run_id}` | WebSocket | `snapshot` first, then `step` and `status` events; `keepalive` every 20 s while quiet; `error` and close code 4404 for an unknown or archived run |
 
@@ -150,6 +158,14 @@ Routes under `/api/ngsi` reach only `NGSI_URL` and `PGREST_URL`, with the sessio
   - **On the platform,** each operator needs `Factory-Admin` or `Factory-Reader` on client `scorpio`, or EMQX refuses the token and the state says so.
   - **The token is in the subscription's address,** as the broker has no other way to take MQTT credentials. It isn't logged or returned here, but anyone who may read subscriptions from the broker can read it until it expires.
 - **While the session is shared:** anyone who can reach the backend can edit, delete and import, using the signed-in operator's token. See [Sign-in](#sign-in).
+
+## Alerts
+
+Routes under `/api/alerta` reach only `ALERTA_URL`, with `ALERTA_API_KEY`. A URL that doesn't end in `/api` stops the backend with a message that says so. A stopped Alerta, or one that refuses the key, gives 502.
+
+- **Search:** the text is matched by the backend, over up to 1000 alerts of the other filters, as Alerta's own query language fails on text like an entity ID. `searchLimited` says when there were more.
+- **In a run:** the observe step reads open and acknowledged alerts of the machine and up to 5 related entities, by their full IDs, which is what the platform's rules set as `resource`. They are weighted by severity and age, with the weight halving every 24 hours, and at most 20 go to the hypothesize step. If a read fails, the run continues with the others, and shows the source as unavailable.
+- **Actions are for operators.** The workflow's source sends only GET requests. All actions use the configured key, so Alerta can't tell operators apart.
 
 ## Ontology
 

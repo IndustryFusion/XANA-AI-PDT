@@ -48,7 +48,7 @@ export const OPERATIONS = {
     'deleteByTypes', 'getAttributeHistory', 'getAttributeStatus', 'listTypesAt', 'queryEntitiesAt', 'subscribeEntities',
     'getLiveUpdateHealth', 'getValueHints',
   ],
-  alerts: ['listAlerts', 'countAlerts', 'getAlert', 'applyAlertAction', 'listEnvironments', 'listServices'],
+  alerts: ['listAlerts', 'countAlerts', 'getAlert', 'applyAlertAction', 'listEnvironments', 'listServices', 'getAlertSettings'],
   dataspace: [
     'getConnection', 'connect', 'disconnect', 'listPeers', 'getPeerCapabilities',
     'listCapabilityRequests', 'decideCapabilityRequest', 'setCapabilityPolicy', 'resolveNames', 'resolveBuilders',
@@ -355,6 +355,7 @@ export const SHAPES = {
     applyAlertAction: alertDetail,
     listEnvironments: ['string'],
     listServices: ['string'],
+    getAlertSettings: { refreshIntervalS: 'number' },
   },
   entities: {
     getStats: { entityCount: 'number', typeCount: 'number', byType: [{ type: 'string', count: 'number' }] },

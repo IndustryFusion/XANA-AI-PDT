@@ -26,9 +26,10 @@
 #   --profile history   PostgREST, for the explorer's history and time-shift
 #   --profile live      EMQX, for live updates in the explorer
 #   --profile ontology  Fuseki with sample shapes and knowledge, for value hints
+#   --profile alerts    Alerta with sample alerts
 #
 # Host ports can be changed with XANA_DB_PORT, XANA_BROKER_PORT, XANA_OLLAMA_PORT,
-# XANA_KEYCLOAK_PORT, XANA_PGREST_PORT, XANA_MQTT_PORT, XANA_MQTT_MGMT_PORT, XANA_FUSEKI_PORT and XANA_BACKEND_PORT.
+# XANA_KEYCLOAK_PORT, XANA_PGREST_PORT, XANA_MQTT_PORT, XANA_MQTT_MGMT_PORT, XANA_FUSEKI_PORT, XANA_ALERTA_PORT and XANA_BACKEND_PORT.
 
 name: xana-ai-pdt
 
@@ -56,6 +57,9 @@ x-backend-env: &backend-env
   FUSEKI_URL: http://fuseki:3030
   FUSEKI_DATASET: ${FUSEKI_DATASET:-iff}
   FUSEKI_GRAPH_BASE: ${FUSEKI_GRAPH_BASE:-}
+  ALERTA_URL: http://alerta:8080/api
+  ALERTA_API_KEY: ${ALERTA_API_KEY:-local-development-only-key}
+  ALERTS_REFRESH_INTERVAL_S: ${ALERTS_REFRESH_INTERVAL_S:-30}
   MQTT_BROKER_URL: mqtt://emqx:1883
   MQTT_MGMT_URL: http://emqx:18083
   TIMESCALE_DB_URL: postgresql://xana@db:5432/tsdb
@@ -163,6 +167,48 @@ services:
       FUSEKI_ADMIN_PASSWORD: admin
     depends_on:
       - fuseki
+    restart: on-failure
+
+  alerta-db:
+    image: postgres:16-alpine
+    profiles: [alerts]
+    environment:
+      POSTGRES_USER: alerta
+      POSTGRES_DB: monitoring
+      POSTGRES_HOST_AUTH_METHOD: trust
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "alerta", "-d", "monitoring"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  # On the platform's version, with its severities. Development only: a key known to everyone.
+  alerta:
+    image: alerta/alerta-web:9.0.4
+    profiles: [alerts]
+    environment:
+      DATABASE_URL: postgres://alerta@alerta-db:5432/monitoring
+      ADMIN_USERS: admin@example.org
+      ADMIN_PASSWORD: admin
+      ADMIN_KEY: ${ALERTA_API_KEY:-local-development-only-key}
+      ALERTA_API_KEY: ${ALERTA_API_KEY:-local-development-only-key}
+      ALERTA_SVR_CONF_FILE: /app/alertad.conf
+    volumes:
+      - ./alerta/alertad.conf:/app/alertad.conf:ro
+    depends_on:
+      alerta-db:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${XANA_ALERTA_PORT:-8082}:8080"
+
+  sample-alerts:
+    build: .
+    image: xana-ai-pdt-backend:local
+    profiles: [alerts]
+    command: ["python", "-m", "sample_data", "alerts"]
+    environment: *backend-env
+    depends_on:
+      - alerta
     restart: on-failure
 
   broker:

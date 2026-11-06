@@ -8,7 +8,7 @@ Issue reported by the operator:
 {issue}
 </issue>
 
-Observations (current values, signals with their recent trend, recent relationship and text changes, entities created or deleted, and the status of each data source):
+Observations (current values, signals with their recent trend, active alerts with a weight (higher is more severe and more recent), recent relationship and text changes, entities created or deleted, and the status of each data source):
 <observations>
 {observations}
 </observations>

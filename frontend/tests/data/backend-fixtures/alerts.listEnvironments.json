@@ -1,0 +1,9 @@
+{
+  "method": "GET",
+  "path": "/api/alerta/environments",
+  "status": 200,
+  "body": [
+    "Development",
+    "Production"
+  ]
+}

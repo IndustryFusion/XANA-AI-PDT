@@ -13,14 +13,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-"""Loads the sample data: `python -m sample_data`, or `python -m sample_data ontology` for Fuseki's."""
+"""Loads the sample data: `python -m sample_data`, or with `ontology` for Fuseki's, or `alerts` for Alerta's."""
 
 import logging
 import sys
 
 from app.config import ConfigError, load_settings
 from app.main import configure_logging
-from sample_data.loader import load, load_ontology
+from sample_data.loader import load, load_alerts, load_ontology
 
 
 def main() -> int:
@@ -33,6 +33,8 @@ def main() -> int:
     try:
         if sys.argv[1:] == ["ontology"]:
             load_ontology(settings)
+        elif sys.argv[1:] == ["alerts"]:
+            load_alerts(settings)
         else:
             load(settings)
     except Exception as error:  # noqa: BLE001 - reported, then a non-zero exit

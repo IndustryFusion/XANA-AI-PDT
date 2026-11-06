@@ -30,7 +30,7 @@ from pydantic import BaseModel, ValidationError
 
 from xana_agent import prompts
 from xana_agent.schemas import StepEvent
-from xana_agent.sources.base import ContextSource, HistorySource, IncidentMemory, SourceUnavailable
+from xana_agent.sources.base import AlertSource, ContextSource, HistorySource, IncidentMemory, SourceUnavailable
 from xana_agent.structured import structured_model
 
 MODEL_ATTEMPTS = 4  # the first answer and up to three retries
@@ -45,6 +45,7 @@ class Deps:
     memory: IncidentMemory
     llm_timeout_s: float = 120
     history_window: timedelta = timedelta(hours=24)
+    alerts: AlertSource | None = None
 
 
 class StepFailed(Exception):

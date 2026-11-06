@@ -33,9 +33,10 @@ Served by the backend (phase 1):
 | incidents | `listIncidents`, `getIncident`, `reopenIncident` | `/api/incidents` |
 | session | `getAuthConfig`, `getSession`, `signIn`, `signOut` | `/api/auth/config`, `status`, `connect`, `logout` |
 | entities | `getStats`, `listTypes`, `listAttributes`, `queryEntities`, `getEntity`, `updateAttributes`, `appendAttributes`, `deleteAttribute`, `deleteEntity`, `importEntities`, `fetchImportDocument`, `deleteByTypes`, `getAttributeHistory`, `getAttributeStatus`, `listTypesAt`, `queryEntitiesAt`, `subscribeEntities`, `getLiveUpdateHealth`, `getValueHints` | `/api/ngsi/…`, `/api/ngsi/ws`, `/api/shacl/hints` |
+| alerts | `listAlerts`, `countAlerts`, `getAlert`, `applyAlertAction`, `listEnvironments`, `listServices`, `getAlertSettings` | `/api/alerta/…` |
 | system | `getHealth` | `/api/diagnostics` |
 
-Every other operation (the factory details in `session.getFactory`, alerts, dataspace, the optional knowledge base, service settings, and the escalation and conversation operations of runs) comes from the mock, so the whole UI stays usable. `src/data/sources/backend/index.js` builds each area as `{ ...mock[area], ...backend[area] }` and lists the served operations in `SERVED`; the mock's development controls still apply to the delegated operations.
+Every other operation (the factory details in `session.getFactory`, dataspace, the optional knowledge base, service settings, and the escalation and conversation operations of runs) comes from the mock, so the whole UI stays usable. `src/data/sources/backend/index.js` builds each area as `{ ...mock[area], ...backend[area] }` and lists the served operations in `SERVED`; the mock's development controls still apply to the delegated operations.
 
 - **Stopped backend:** until the backend has answered, `getAuthConfig` reports `backendUnreachable: true` and sign-in as off, so the app opens and each area shows its own state. The session gate checks again every 10 seconds, and applies the real configuration when the backend answers. Once the backend has answered, a failed `getAuthConfig` or `getSession` stays `unavailable`.
 - **Transport:** relative paths (`/api/…`, `/ws/…`), so the development server's proxy reaches the backend (`XANA_BACKEND_URL`). `VITE_BACKEND_BASE` sets another prefix or origin. Requests time out after 15 s.
@@ -44,6 +45,7 @@ Every other operation (the factory details in `session.getFactory`, alerts, data
 - **Run stream:** the WebSocket's first message is the snapshot. A lost connection emits `{ type: 'connection', state: 'reconnecting' }` and reconnects after 0.5, 1, 2, 4 and then every 8 s; the new snapshot replaces the screen's state. An unknown or archived run (an `error` event, or close code 4404) ends the stream with `not_found`; a stream that never opened ends with `unavailable`, and the screen offers a retry. `keepalive` messages are not forwarded.
 - **Explorer:** on the backend source, names are what the broker gives: full IRIs on platform data, unless the backend's `NGSI_CONTEXT_URL` maps them. `getAttributeHistory` gives an empty list for an unknown entity, as the history store can't tell it from one without rows, so its `not_found` doesn't occur. Points of an attribute with several datasets also have `datasetId`. A service behind the backend that is stopped or failing gives `unavailable`, and the message names it.
 - **Live updates:** `subscribeEntities` opens `/api/ngsi/ws`. Its stream ends with one `error` event of kind `unavailable`, for example when the backend closes a client that fell behind (code 1013); screens resubscribe when `getLiveUpdateHealth` is `ok` again. `getLiveUpdateHealth` also has `state` and `expiresAt`. Changes during an outage aren't replayed, and deleted entities aren't notified.
+- **Alerts:** answers aren't key-mapped, as an alert's `attributes` are data. A search covers up to 1000 alerts of the other filters, and `searchLimited` says when there were more. Severities are Alerta's, which on the platform include `up` and `down`. Alerta failing or refusing its key gives `unavailable`, with a message naming it.
 - **Phase 1 limits:** `escalationPreflight` answers that escalation is not possible, with the backend's reason; `reopenRun` rejects with `conflict`.
 - **Shapes:** `tests/data/backendShapes.test.js` checks every served operation against `SHAPES` with answers recorded from a real backend (`tests/data/backend-fixtures/`, recorded with `scripts/record-backend-fixtures.mjs`).
 
@@ -89,6 +91,8 @@ Operations on a run in a state that does not allow them reject with `conflict`.
 - `escalation`: `{ ref, recipient: { id, name }, tier, data: [{ label, category }], sentAt }` once escalated, else `null`;
 - `outbox`: `[{ messageId, status }]` as returned by `getOutboxStatus`;
 - `reopenable`: whether `reopenRun` is possible.
+
+On the backend source, the output of an `observe` step holds `alerts`: `[{ id, resource, event, severity, status, text, value, service, environment, lastReceived, ageHours, weight }]`, highest weight first.
 
 **Run events** (`subscribeRun`): the first event is the run's current state; then, in order:
 
@@ -178,6 +182,7 @@ Entities are NGSI-LD entities in compacted form: `id`, `type` and one member per
 | `applyAlertAction(id, { action, text })` | `ack`, `unack`, `close`, `open` (reopen), `shelve`, `unshelve`; optional note | updated alert with `history` | `not_found`, `conflict` (action does not fit the status, e.g. acknowledging an acknowledged alert), `invalid` |
 | `listEnvironments()` | — | environment names | `unavailable` |
 | `listServices()` | — | service names | `unavailable` |
+| `getAlertSettings()` | — | `{ refreshIntervalS }`: the automatic refresh interval until the operator chooses another | `unavailable` |
 
 **Alert:** `{ id, resource (entity ID), event, text, severity, status, environment, service[], group, value, origin, type, createTime, lastReceiveTime, duplicateCount, attributes }`; `getAlert` and `applyAlertAction` add `history: [{ at, type: new \| status \| note, status, severity, text, user }]`, oldest first. Statuses: `open`, `ack` (acknowledged), `shelved`, `closed` (also `expired`, `blackout`, `unknown` from an alert manager). Actions: `ack` open → ack, `unack` ack → open, `shelve` open/ack → shelved, `unshelve` shelved → open, `close` open/ack/shelved → closed, `open` closed → open. There is no bulk operation; screens apply an action to each selected alert.
 
