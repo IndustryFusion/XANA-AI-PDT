@@ -398,6 +398,7 @@ If the memory database is not reachable, runs cannot be stored: starting a run i
 | **TimescaleDB** | Attribute history (signals and telemetry) | SQL via psycopg 3; `time_bucket` for aggregation |
 | **PostgreSQL** | AI memory: incidents + agent traces | SQL via psycopg 3 |
 | **PostgREST** | The Data Explorer's attribute history and time-shift, on TimescaleDB | HTTP with the operator's token; the agent uses SQL |
+| **Fuseki** | Machine ontology and SHACL shapes in named graphs; value hints, and read functions for the conversation agent | SPARQL over HTTP, read-only |
 | **Alerta** | Active alerts and alarm history | HTTP via Alerta REST API (`Authorization: Key`) |
 
 The backend reads attribute history in the layout the IFF Digital Twin platform writes: one row per observed attribute value, in a table named by `TIMESCALE_TABLE` (default `attributes`):
@@ -446,6 +447,9 @@ POSTGRES_MEMORY_URL=postgresql://...
 TIMESCALE_TABLE=attributes           # attribute history table
 TIMESCALE_ENTITY_TABLE=entities      # entity lifecycle table
 PGREST_URL=http://pgrest:3000        # the Data Explorer's history
+FUSEKI_URL=http://fuseki:3030        # machine ontology and shapes
+FUSEKI_DATASET=iff
+FUSEKI_GRAPH_BASE=                   # http://<external host>/<realm> on the platform
 MQTT_BROKER_URL=mqtt://emqx-listeners:1883       # live updates
 MQTT_MGMT_URL=http://emqx-dashboard:18083
 MQTT_BROKER_NOTIFY_URL=              # the MQTT broker as Scorpio reaches it, if different

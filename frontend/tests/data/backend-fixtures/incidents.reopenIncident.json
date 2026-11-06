@@ -1,8 +1,8 @@
 {
   "method": "POST",
-  "path": "/api/incidents/8/reopen",
+  "path": "/api/incidents/19/reopen",
   "status": 202,
   "body": {
-    "run_id": "883e664d-de4c-4e96-8ad2-75c0a42649e8"
+    "run_id": "6568f46b-4bc6-4d81-be37-b25cbafdd36e"
   }
 }

@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -38,6 +39,7 @@ log = logging.getLogger(__name__)
 
 DATA_FILE = Path(__file__).with_name("sample-data.json")
 DDL_FILE = Path(__file__).with_name("attributes.sql")
+ONTOLOGY_DIR = Path(__file__).with_name("ontology")
 DEFAULT_VOCAB = "https://uri.etsi.org/ngsi-ld/default-context/"
 XSD = "http://www.w3.org/2001/XMLSchema#"
 MARKER = "attribute-history"
@@ -232,6 +234,33 @@ def _load_snapshot(conn: psycopg.Connection, settings: Settings, entities: list[
         cur.executemany(insert_entity, [(e["id"], at, _term(e["type"])) for e in entities])
     conn.execute("INSERT INTO xana_sample_data (name) VALUES (%s)", (SNAPSHOT_MARKER,))
     return len(rows) + len(entities)
+
+
+def load_ontology(settings: Settings, wait_s: float = 120, transport: httpx.BaseTransport | None = None) -> None:
+    """Puts the sample shapes and knowledge in Fuseki's named graphs. Replaces what is in those two."""
+    base = (settings.fuseki_graph_base or f"{settings.fuseki_url.rstrip('/')}/{settings.fuseki_dataset}").rstrip("/")
+    store = f"{settings.fuseki_url.rstrip('/')}/{settings.fuseki_dataset}/data"
+    # The local image asks for its admin password to write; the password is only for this loader.
+    password = os.environ.get("FUSEKI_ADMIN_PASSWORD")
+    auth = httpx.BasicAuth("admin", password) if password else None
+    with httpx.Client(timeout=30, transport=transport, auth=auth) as client:
+        deadline = time.monotonic() + wait_s
+        while True:
+            try:
+                if client.get(store, params={"default": ""}).status_code < 500:
+                    break
+            except httpx.TransportError:
+                pass
+            if time.monotonic() > deadline:
+                raise TimeoutError(f"Fuseki did not answer within {wait_s:g} s")
+            time.sleep(2)
+        for name in ("shacl.ttl", "knowledge.ttl"):
+            content = ONTOLOGY_DIR.joinpath(name).read_bytes()
+            response = client.put(
+                store, params={"graph": f"{base}/{name}"}, content=content, headers={"Content-Type": "text/turtle"}
+            )
+            response.raise_for_status()
+            log.info("Ontology: %s loaded", name)
 
 
 def load(settings: Settings, broker_wait_s: float = 300) -> None:

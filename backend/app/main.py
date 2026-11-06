@@ -27,7 +27,7 @@ from datetime import timedelta
 from fastapi import FastAPI
 from langchain_core.language_models import BaseChatModel
 
-from app.api import auth, diagnostics, errors, incidents, ngsi, runs, stream
+from app.api import auth, diagnostics, errors, incidents, ngsi, runs, shacl, stream
 from app.auth import KeycloakSession
 from app.config import Settings, get_llm, load_settings
 from app.health import HealthService
@@ -41,6 +41,7 @@ from app.runs.machines import MachineResolver
 from app.runs.manager import RunManager
 from app.tracing import tracing_callbacks
 from xana_agent import NgsiContextSource, TimescaleHistorySource, Workflow
+from xana_agent.sources import FusekiOntologySource
 from xana_agent.sources.base import ContextSource, HistorySource, IncidentMemory
 
 log = logging.getLogger(__name__)
@@ -152,6 +153,13 @@ def create_app(
 
     session.on_sign_in.append(start_live_updates)
     app.state.attribute_history = AttributeHistory(settings, session.token)
+    app.state.ontology = FusekiOntologySource(
+        settings.fuseki_url,
+        settings.fuseki_dataset,
+        settings.fuseki_graph_base,
+        token=session.token,
+        timeout_s=settings.health_timeout_s,
+    )
     errors.install(app)
 
     @app.get("/healthz", include_in_schema=False)
@@ -164,5 +172,6 @@ def create_app(
     app.include_router(runs.router)
     app.include_router(incidents.router)
     app.include_router(ngsi.router)
+    app.include_router(shacl.router)
     app.include_router(stream.router)
     return app

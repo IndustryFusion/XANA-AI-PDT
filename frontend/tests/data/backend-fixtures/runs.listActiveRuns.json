@@ -4,13 +4,33 @@
   "status": 200,
   "body": [
     {
-      "run_id": "59fcaea7-07fe-413f-991f-288b805f9906",
-      "incident_id": 8,
+      "run_id": "d5fcc47d-fd30-49ae-93af-9736267e2c06",
+      "incident_id": 18,
       "machine_id": "urn:ngsi-ld:Machine:laser-cutter-01",
       "issue": "Cut edges show burrs since this morning",
       "status": "awaiting_input",
-      "started_at": "2026-11-06T22:08:11.059440+00:00",
-      "updated_at": "2026-11-06T22:08:11.596169+00:00",
+      "started_at": "2026-11-06T22:19:54.865802+00:00",
+      "updated_at": "2026-11-06T22:19:55.303039+00:00",
+      "escalation_ref": null
+    },
+    {
+      "run_id": "6908d1fe-3ba7-4a71-9c3c-edf8166fbd13",
+      "incident_id": 13,
+      "machine_id": "urn:ngsi-ld:Machine:laser-cutter-01",
+      "issue": "Gas pressure warning (mw5j1z4c)",
+      "status": "awaiting_input",
+      "started_at": "2026-11-06T22:09:41.344893+00:00",
+      "updated_at": "2026-11-06T22:09:41.792408+00:00",
+      "escalation_ref": null
+    },
+    {
+      "run_id": "d9b23ebb-bdc1-4a10-a1d0-92d82136a0a3",
+      "incident_id": 12,
+      "machine_id": "urn:ngsi-ld:Machine:laser-cutter-01",
+      "issue": "Cut quality dropped (mw5j1vxo)",
+      "status": "awaiting_confirmation",
+      "started_at": "2026-11-06T22:09:37.244436+00:00",
+      "updated_at": "2026-11-06T22:09:39.876685+00:00",
       "escalation_ref": null
     },
     {

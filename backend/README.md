@@ -54,7 +54,9 @@ Data and models are kept in Docker volumes between runs. `docker compose -f back
 
 **With live updates:** add `--profile live`, which starts EMQX (5.8, as on the platform). Here it takes any client; the platform checks a token and a role. See [Data Explorer](#data-explorer).
 
-**Ports in use:** if a host port is taken, set `XANA_DB_PORT`, `XANA_BROKER_PORT`, `XANA_OLLAMA_PORT`, `XANA_KEYCLOAK_PORT`, `XANA_PGREST_PORT`, `XANA_MQTT_PORT`, `XANA_MQTT_MGMT_PORT` or `XANA_BACKEND_PORT`.
+**With value hints:** add `--profile ontology`, which starts Fuseki and loads sample shapes and knowledge from `sample_data/ontology/`.
+
+**Ports in use:** if a host port is taken, set `XANA_DB_PORT`, `XANA_BROKER_PORT`, `XANA_OLLAMA_PORT`, `XANA_KEYCLOAK_PORT`, `XANA_PGREST_PORT`, `XANA_MQTT_PORT`, `XANA_MQTT_MGMT_PORT`, `XANA_FUSEKI_PORT` or `XANA_BACKEND_PORT`.
 
 The local environment is for development only. The database trusts local connections, and every port is bound to `127.0.0.1`.
 
@@ -102,6 +104,7 @@ Fields are snake_case. A refused request answers `{"error": {"kind", "message"}}
 | `/api/ngsi/timeshift/types` | GET `?at` | Types at a past moment |
 | `/api/ngsi/timeshift/entities` | GET `?at&type&id&id_pattern&q&limit` | Entities as they were at a past moment |
 | `/api/ngsi/ws` | WebSocket `?type&ids=a,b` | Changes as they happen: `{type: "update", entity_id, entity_type, attributes}`, and `keepalive` every 20 s while quiet. A client that falls behind is closed with code 1013 |
+| `/api/shacl/hints` | GET `?entity_type&attribute` | `{hint_type, values, minimum, maximum, minimum_exclusive, maximum_exclusive, datatype, detail}`. Always answers: `none` with a reason when Fuseki can't |
 | `/api/ngsi/subscription-health` | GET | `{status, state, detail, expires_at}` of live updates |
 | `/ws/run/{run_id}` | WebSocket | `snapshot` first, then `step` and `status` events; `keepalive` every 20 s while quiet; `error` and close code 4404 for an unknown or archived run |
 
@@ -148,6 +151,15 @@ Routes under `/api/ngsi` reach only `NGSI_URL` and `PGREST_URL`, with the sessio
   - **The token is in the subscription's address,** as the broker has no other way to take MQTT credentials. It isn't logged or returned here, but anyone who may read subscriptions from the broker can read it until it expires.
 - **While the session is shared:** anyone who can reach the backend can edit, delete and import, using the signed-in operator's token. See [Sign-in](#sign-in).
 
+## Ontology
+
+The machine ontology and SHACL shapes are read from Fuseki (`FUSEKI_URL`, `FUSEKI_DATASET`). This is a formal model, not document retrieval, and is not part of the RAG exclusion.
+
+- **Graph names** start with `FUSEKI_GRAPH_BASE`: `<base>/shacl.ttl` and `<base>/knowledge.ttl`. On the platform that is `http://<Fuseki's external host>/<realm>`, which differs from the service's address, so it must be set.
+- **Tokens:** the operator's token is sent. Through the platform's ingress, operators need `Factory-Admin` or `Factory-Reader` on client `fuseki`; the service `fuseki:3030` itself doesn't check.
+- **For the agent (#29):** `xana_agent.sources.FusekiOntologySource` has `query`, `shapes` and `knowledge`, which only read and give errors as data. `query` refuses updates and `SERVICE`, because Fuseki would call any address in a query.
+- **Query input:** entity types and attributes go into queries only escaped. Tests parse the resulting queries, and try hostile input against a real Fuseki (`TEST_FUSEKI_URL`).
+
 ## Language model
 
 - **Ollama:** the prompt size is limited by `LLM_NUM_CTX` (default 32768). Lower it if the server runs out of memory.
@@ -171,6 +183,7 @@ cd backend
 
 - **Database tests:** tests marked `db` need PostgreSQL with TimescaleDB. Point `TEST_DATABASE_URL` at a server where the user may create databases, for example `TEST_DATABASE_URL=postgresql://xana@localhost:5432/postgres .venv/bin/pytest`. Without it they are skipped.
 - **Real services:** `tests/test_explorer_real.py` runs against a real broker and PostgREST, with `TEST_BROKER_URL`, `TEST_PGREST_URL` and `TEST_TSDB_URL`. Without them it is skipped. It writes rows in the platform's table layout.
+- **Real Fuseki:** `tests/test_ontology_real.py` needs `TEST_FUSEKI_URL`; `tests/test_live_updates_real.py` needs `TEST_MQTT_URL` too.
 - **CI:** the `Backend` workflow runs linting, the formatting check, all tests including the database tests, and a check of `compose.yaml` on every pull request that touches `backend/`. Its `integration` job starts the local environment with `LLM_PROVIDER=scripted` and runs the UI's end-to-end tests on the backend data source (`frontend/e2e/backend/`); it also runs when the UI's data layer changes.
 
 ## Sample data

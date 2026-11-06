@@ -222,12 +222,11 @@ describe('delegation to the mock', () => {
       entities: [
         'getStats', 'listTypes', 'listAttributes', 'queryEntities', 'getEntity', 'updateAttributes', 'appendAttributes',
         'deleteAttribute', 'deleteEntity', 'importEntities', 'fetchImportDocument', 'deleteByTypes',
-        'getAttributeHistory', 'getAttributeStatus', 'listTypesAt', 'queryEntitiesAt', 'subscribeEntities', 'getLiveUpdateHealth',
+        'getAttributeHistory', 'getAttributeStatus', 'listTypesAt', 'queryEntitiesAt', 'subscribeEntities', 'getLiveUpdateHealth', 'getValueHints',
       ],
       system: ['getHealth'],
     })
     for (const name of ['alerts', 'dataspace']) expect(backend[name]).toEqual(mock[name])
-    expect(backend.entities.getValueHints).toBe(mock.entities.getValueHints)
     expect(backend.session.getFactory).toBe(mock.session.getFactory)
     expect(backend.session.signIn).not.toBe(mock.session.signIn)
     expect(backend.info.signInHint).toBeUndefined()
@@ -327,6 +326,12 @@ describe('live updates', () => {
     stop()
     expect(Socket.last.closed).toBe(true)
     expect(events).toEqual([])
+  })
+
+  test('hints come from the backend, in interface terms', async () => {
+    const fn = fakeFetch({ 'GET /api/shacl/hints': { body: { hint_type: 'range', values: [], minimum: 1, maximum: 2, minimum_exclusive: false, maximum_exclusive: true, datatype: null, detail: null } } })
+    expect(await entities.getValueHints({ entityType: 'https://x/T', attribute: 'a' })).toMatchObject({ hintType: 'range', maximumExclusive: true })
+    expect(new URLSearchParams(fn.calls[0].search).get('entity_type')).toBe('https://x/T')
   })
 
   test('health keeps the status and detail', async () => {

@@ -48,6 +48,7 @@ const ARGS = {
   'session.signIn': () => [{ username: 'operator', password: 'operator' }],
   'session.signOut': () => [],
   'entities.getLiveUpdateHealth': () => [],
+  'entities.getValueHints': () => [{ entityType: 'Machine', attribute: 'status' }],
   'entities.getStats': () => [],
   'entities.listTypes': () => [],
   'entities.listAttributes': () => [],
