@@ -89,6 +89,12 @@ export function createSystemArea(store, { connectionState }) {
         overall: errors === 0 ? 'ok' : errors === checks.length ? 'error' : 'degraded',
         checkedAt: new Date().toISOString(),
         checks,
+        models: [{
+          name: 'llama3.1',
+          role: 'agent',
+          provider: 'Ollama',
+          available: checks.find((c) => c.id === 'llm')?.status === 'ok',
+        }],
       }
     }),
 

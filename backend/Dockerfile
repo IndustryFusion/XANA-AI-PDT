@@ -24,7 +24,7 @@ COPY pyproject.toml ./
 COPY app app
 COPY migrations migrations
 COPY sample_data sample_data
-RUN pip install --no-cache-dir -e "./agent[anthropic,openai]" -e . \
+RUN pip install --no-cache-dir -e "./agent[anthropic,openai]" -e ".[tracing]" \
     && useradd --system --uid 10001 xana
 USER xana
 

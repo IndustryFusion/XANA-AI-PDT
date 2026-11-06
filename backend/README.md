@@ -44,6 +44,8 @@ Data and models are kept in Docker volumes between runs. `docker compose -f back
 
 **With a cloud model:** set `LLM_PROVIDER=anthropic` (or `openai`), `LLM_MODEL` and the API key in your shell.
 
+**With OpenVINO Model Server or another OpenAI-compatible server:** set `LLM_PROVIDER=openai`, `OPENAI_BASE_URL` (for OpenVINO Model Server, its `/v3` address), `LLM_MODEL`, and optionally `LLM_PROVIDER_NAME=OpenVINO`. An API key is needed only if the server asks for one.
+
 **Ports in use:** if a host port is taken, set `XANA_DB_PORT`, `XANA_BROKER_PORT`, `XANA_OLLAMA_PORT` or `XANA_BACKEND_PORT`.
 
 The local environment is for development only. The database trusts local connections, and every port is bound to `127.0.0.1`.
@@ -96,6 +98,13 @@ python3.12 -m venv .venv
 .venv/bin/pip install -e "./agent[anthropic,openai]" -e ".[dev]"
 .venv/bin/python -m app            # needs the dependencies, e.g. the local environment's db, broker and ollama
 ```
+
+## Language model
+
+- **Ollama:** the prompt size is limited by `LLM_NUM_CTX` (default 32768). Lower it if the server runs out of memory.
+- **Failures:** a malformed answer is retried up to three times. If the model is unavailable, starting a run, clarifying, rejecting a resolution and reopening an incident answer `unavailable` (503) within `HEALTH_TIMEOUT_S`.
+- **Health:** `/api/diagnostics` also lists `models`: `[{name, role, provider, available}]`.
+- **Tracing (optional):** install with `pip install -e ".[tracing]"` and set `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY`. Model calls are traced with the run ID as session, plus the machine and round. Without the keys or the package, nothing is traced and nothing changes.
 
 ## Tests and checks
 

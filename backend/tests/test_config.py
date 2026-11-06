@@ -146,3 +146,55 @@ async def test_scripted_provider_asks_first_then_proposes(block_network):
     first = await outcome(RoundInput(machine_id=machine, issue="Noise"))
     second = await outcome(RoundInput(machine_id=machine, issue="Noise", round=2, clarifications=["Since Monday"]))
     assert (first.kind, second.kind) == ("awaiting_input", "awaiting_confirmation")
+
+
+def test_openai_compatible_server_needs_no_key():
+    s = load_settings(_env_file=None, llm_provider="openai", openai_base_url="http://ovms:8000/v3", llm_model="m")
+    assert s.openai_api_key is None
+    assert get_llm(s).openai_api_base == "http://ovms:8000/v3"
+
+
+def test_openai_without_base_url_needs_a_key():
+    with pytest.raises(ConfigError, match="OPENAI_API_KEY is required"):
+        load_settings(_env_file=None, llm_provider="openai")
+
+
+def test_ollama_gets_context_size_and_no_reasoning():
+    llm = get_llm(load_settings(_env_file=None, llm_num_ctx=4096))
+    assert llm.num_ctx == 4096
+    assert llm.reasoning is False
+
+
+def test_default_context_size():
+    assert get_llm(load_settings(_env_file=None)).num_ctx == 32768
+
+
+def test_invalid_context_size_is_named():
+    with pytest.raises(ConfigError, match="LLM_NUM_CTX"):
+        load_settings(_env_file=None, llm_num_ctx=0)
+
+
+def test_display_name_defaults_to_the_provider():
+    assert load_settings(_env_file=None).llm_label == "ollama"
+    assert load_settings(_env_file=None, llm_provider_name="OpenVINO").llm_label == "OpenVINO"
+
+
+def test_tracing_keys_come_together():
+    with pytest.raises(ConfigError, match="LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY"):
+        load_settings(_env_file=None, langfuse_public_key="pk")
+
+
+def test_tracing_secret_is_redacted():
+    s = load_settings(_env_file=None, langfuse_public_key="pk", langfuse_secret_key="sk-lf-secret")
+    assert "sk-lf-secret" not in s.redactor()("key sk-lf-secret")
+
+
+def test_the_configured_openai_key_is_used():
+    llm = get_llm(Settings(_env_file=None, llm_provider="openai", llm_model="m", openai_api_key="sk-configured"))
+    assert llm.openai_api_key.get_secret_value() == "sk-configured"
+
+
+def test_a_server_without_a_key_gets_a_placeholder():
+    llm = get_llm(Settings(_env_file=None, llm_provider="openai", llm_model="m", openai_base_url="http://ovms/v3"))
+    assert llm.openai_api_key.get_secret_value() == "not-needed"
+    assert llm.openai_api_base == "http://ovms/v3"

@@ -118,6 +118,7 @@ def make_app(
     **settings: Any,
 ) -> FastAPI:
     script = script or Script()
+    settings.setdefault("llm_provider", "scripted")
     agent = AgentDeps(
         llm=script.model(),
         context=context or GatedContext(sample_entities()),

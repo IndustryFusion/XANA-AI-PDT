@@ -47,6 +47,15 @@ describe('dependency health', () => {
     expect(within(health).getByText(/Checked at/).querySelector('time')).toHaveAttribute('dateTime')
   })
 
+  test('models: the agent\'s model is shown with its provider and availability', async () => {
+    open()
+    const health = await healthTable()
+    const models = within(health).getByTestId('health-models')
+    expect(within(models).getByText('llama3.1')).toBeVisible()
+    expect(within(models).getByText(/Agent · Ollama/)).toBeVisible()
+    expect(within(models).getByText('Available')).toBeVisible()
+  })
+
   test('one dependency down: error with the detail, overall degraded, the others still shown', async () => {
     open({ gatewayReachable: false })
     const health = await healthTable()

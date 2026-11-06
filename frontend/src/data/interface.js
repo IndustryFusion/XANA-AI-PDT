@@ -403,6 +403,7 @@ export const SHAPES = {
       overall: { $enum: HEALTH_STATES },
       checkedAt: 'date',
       checks: [{ id: 'string', label: 'string', status: { $enum: HEALTH_STATES }, latencyMs: '?number', detail: '?string' }],
+      models: [{ name: 'string', role: 'string', provider: 'string', available: 'boolean' }],
     },
     getServiceSettings: [serviceSetting],
     saveServiceSettings: [serviceSetting],

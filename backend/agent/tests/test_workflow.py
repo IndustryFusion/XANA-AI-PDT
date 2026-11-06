@@ -302,13 +302,29 @@ async def test_malformed_answer_then_valid_continues():
     assert len(steps) == 4 and outcome.kind == "awaiting_confirmation"
 
 
-async def test_malformed_answer_twice_fails_with_the_step():
+async def test_malformed_answers_fail_with_the_step_after_three_retries():
     model = StepScript().model()
     model.answers[ValidatedHypothesisList] = {"hypotheses": [{"id": "h1-1", "verdict": "maybe"}]}
     _, steps, outcome = await run(workflow(llm=model))
     assert [s.node for s in steps] == ["observe", "hypothesize"]
     assert (outcome.kind, outcome.node) == ("failed", "validate")
-    assert "twice in a row" in outcome.error
+    assert "in 4 attempts" in outcome.error
+
+
+async def test_answer_on_the_last_retry_continues():
+    model = StepScript().model()
+    good = model.answers[ValidatedHypothesisList]
+    calls = []
+
+    def flaky(prompt):
+        calls.append(prompt)
+        return {"hypotheses": [{"id": "h1-1", "verdict": "maybe"}]} if len(calls) < 4 else good(prompt)
+
+    model.answers[ValidatedHypothesisList] = flaky
+    _, steps, outcome = await run(workflow(llm=model))
+    assert "validate" in [s.node for s in steps]
+    assert len(calls) == 4
+    assert outcome.kind != "failed"
 
 
 async def test_unreachable_model_fails_readably():

@@ -19,6 +19,26 @@ import { Button, Card, DataView, StatusBadge } from '../../ui/components'
 import { formatClock } from '../../ui/format'
 import { describeStatus } from '../../ui/status'
 
+/** The models the agent uses, whether each is available, and which provider serves it. */
+function Models({ models = [] }) {
+  if (!models.length) return null
+  return (
+    <div className="health__models" data-testid="health-models">
+      <h3 className="health__models-title">Models</h3>
+      <ul className="health__model-list">
+        {models.map((m) => (
+          <li key={`${m.role}-${m.name}`} className="row">
+            <StatusBadge kind="health" value={m.available ? 'ok' : 'error'} label={m.available ? 'Available' : 'Not available'} />
+            <span><strong>{m.name}</strong> <span className="muted">{ROLES[m.role] ?? m.role} · {m.provider}</span></span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+const ROLES = { agent: 'Agent' }
+
 /** Every dependency with status, latency, detail and time of the check, plus overall health. */
 export default function HealthSection({ round, onCheckAgain }) {
   const result = useData('system', 'getHealth', [{ fresh: round > 0 }], { refreshKey: round })
@@ -60,6 +80,7 @@ export default function HealthSection({ round, onCheckAgain }) {
                 </tbody>
               </table>
             </div>
+            <Models models={h.models} />
           </div>
         )}
       </DataView>

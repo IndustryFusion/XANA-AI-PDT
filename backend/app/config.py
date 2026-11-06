@@ -42,11 +42,17 @@ class Settings(BaseSettings):
 
     llm_provider: Provider = "ollama"
     llm_model: str = Field("llama3.1", min_length=1)
+    llm_provider_name: str | None = None
+    llm_num_ctx: int = Field(32768, gt=0)
     ollama_url: str = "http://localhost:11434"
     anthropic_api_key: SecretStr | None = None
     openai_api_key: SecretStr | None = None
     openai_base_url: str | None = None
     llm_timeout_s: float = Field(120, gt=0)
+
+    langfuse_public_key: str | None = None
+    langfuse_secret_key: SecretStr | None = None
+    langfuse_host: str | None = None
 
     decision_confidence_threshold: float = Field(0.9, ge=0, le=1)
     max_concurrent_rounds: int = Field(2, ge=1)
@@ -83,9 +89,20 @@ class Settings(BaseSettings):
     def _cloud_provider_has_key(self) -> Settings:
         if self.llm_provider == "anthropic" and not self.anthropic_api_key:
             raise ValueError("ANTHROPIC_API_KEY is required when LLM_PROVIDER is anthropic")
-        if self.llm_provider == "openai" and not self.openai_api_key:
-            raise ValueError("OPENAI_API_KEY is required when LLM_PROVIDER is openai")
+        if self.llm_provider == "openai" and not self.openai_api_key and not self.openai_base_url:
+            raise ValueError("OPENAI_API_KEY is required when LLM_PROVIDER is openai without OPENAI_BASE_URL")
         return self
+
+    @model_validator(mode="after")
+    def _tracing_keys_come_together(self) -> Settings:
+        if bool(self.langfuse_public_key) != bool(self.langfuse_secret_key):
+            raise ValueError("LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY must be set together")
+        return self
+
+    @property
+    def llm_label(self) -> str:
+        """The provider as operators know it, for example `OpenVINO`."""
+        return self.llm_provider_name or self.llm_provider
 
     def redactor(self) -> Redactor:
         """Masks every secret this configuration holds."""
@@ -93,6 +110,7 @@ class Settings(BaseSettings):
             [
                 self.anthropic_api_key and self.anthropic_api_key.get_secret_value(),
                 self.openai_api_key and self.openai_api_key.get_secret_value(),
+                self.langfuse_secret_key and self.langfuse_secret_key.get_secret_value(),
                 url_password(self.timescale_db_url.get_secret_value()),
                 url_password(self.postgres_memory_url.get_secret_value()),
             ]
@@ -123,7 +141,13 @@ def get_llm(settings: Settings | None = None) -> BaseChatModel:
         case "ollama":
             from langchain_ollama import ChatOllama
 
-            return ChatOllama(model=s.llm_model, base_url=s.ollama_url, client_kwargs={"timeout": s.llm_timeout_s})
+            return ChatOllama(
+                model=s.llm_model,
+                base_url=s.ollama_url,
+                num_ctx=s.llm_num_ctx,
+                reasoning=False,
+                client_kwargs={"timeout": s.llm_timeout_s},
+            )
         case "anthropic":
             from langchain_anthropic import ChatAnthropic
 
@@ -131,9 +155,9 @@ def get_llm(settings: Settings | None = None) -> BaseChatModel:
         case "openai":
             from langchain_openai import ChatOpenAI
 
-            return ChatOpenAI(
-                model=s.llm_model, api_key=s.openai_api_key, base_url=s.openai_base_url, timeout=s.llm_timeout_s
-            )
+            # An OpenAI-compatible server may have no key; the client still needs a value to send.
+            api_key = s.openai_api_key or SecretStr("not-needed")
+            return ChatOpenAI(model=s.llm_model, api_key=api_key, base_url=s.openai_base_url, timeout=s.llm_timeout_s)
         case "scripted":
             from xana_agent.testing import StepScript
 

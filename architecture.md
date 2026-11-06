@@ -215,7 +215,7 @@ Step content uses the field names of the UI's data interface, in snake_case; the
 
 **Rounds.** A clarification (`POST /api/agent/clarify/{run_id}`) or a rejected resolution starts a new round from `observe`. The round's input carries all clarifications and all rejected root causes with their reasons; `hypothesize` sees them, and `decide` never proposes a rejected root cause again.
 
-**Model calls.** Every call uses `with_structured_output`, a timeout of `LLM_TIMEOUT_S` and one retry when the answer does not match the structure. A timeout or a second mismatch fails the round with the step and a readable reason. Prompts (`agent/xana_agent/prompts/`) pass every value as JSON in a named section; operator text is marked as data, never as instructions.
+**Model calls.** Every call asks for a structured answer: through the schema as `format` on Ollama, accepting content or a tool call; in the prompt on OpenAI-compatible servers set through `OPENAI_BASE_URL`; and through `with_structured_output` on cloud providers. Calls have a timeout of `LLM_TIMEOUT_S` and up to three retries when the answer does not match the structure. A timeout or a fourth mismatch fails the round with the step and a readable reason. Prompts (`agent/xana_agent/prompts/`) pass every value as JSON in a named section; operator text is marked as data, never as instructions.
 
 **Read-only.** Sources only read: the context source sends GET requests, the history source runs read-only transactions. The validation plan is limited to the entities observed in the round, so text in the issue cannot widen what is read. Memory is written only by `act`.
 
@@ -421,7 +421,12 @@ LLM_PROVIDER=ollama                  # ollama | anthropic | openai | scripted (f
 LLM_MODEL=llama3.1
 OLLAMA_URL=http://...
 LLM_TIMEOUT_S=120
+LLM_NUM_CTX=32768                    # context size given to Ollama
+LLM_PROVIDER_NAME=                   # name operators see, for example OpenVINO
 ANTHROPIC_API_KEY=... / OPENAI_API_KEY=...   # secret; required for that provider
+OPENAI_BASE_URL=                     # OpenAI-compatible server: OpenVINO Model Server, IONOS; no key needed if set
+LANGFUSE_PUBLIC_KEY=... / LANGFUSE_SECRET_KEY=...  # optional tracing; secret
+LANGFUSE_HOST=
 
 # Agent behaviour
 DECISION_CONFIDENCE_THRESHOLD=0.9   # runs below this ask for clarification

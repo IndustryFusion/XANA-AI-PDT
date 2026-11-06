@@ -445,3 +445,62 @@ async def test_error_shape_per_kind(url, fresh_database):
         assert set(body) == {"error"} and set(body["error"]) == {"kind", "message"}
         assert body["error"]["kind"] == kinds[status]
         assert body["error"]["message"]
+
+
+class _Health:
+    """Reports the language model as down until told otherwise."""
+
+    def __init__(self):
+        self.problem = "The language model is not available: Not reachable"
+
+    async def model_problem(self):
+        return self.problem
+
+
+def model_down(app):
+    health = _Health()
+    app.state.runs._model_problem = health.model_problem
+    return health
+
+
+async def test_start_is_refused_while_the_model_is_down(url):
+    app = make_app(url)
+    async with running(app) as client:
+        model_down(app)
+        response = await client.post("/api/agent/run", json={"machine_id": MACHINE, "issue": "noise"})
+        assert response.status_code == 503
+        assert response.json()["error"]["kind"] == "unavailable"
+        assert "language model" in response.json()["error"]["message"]
+        assert (await client.get("/api/agent/runs")).json() == []
+
+
+async def test_clarify_and_rejection_are_refused_while_the_model_is_down(url):
+    app = make_app(url)
+    async with running(app) as client:
+        run_id = await start(client)
+        await until(client, run_id, "awaiting_input")
+        health = model_down(app)
+        response = await client.post(f"/api/agent/clarify/{run_id}", json={"text": "since 8:00"})
+        assert response.status_code == 503
+        assert (await client.get(f"/api/agent/status/{run_id}")).json()["status"] == "awaiting_input"
+        health.problem = None
+        assert (await client.post(f"/api/agent/clarify/{run_id}", json={"text": "since 8:00"})).status_code == 200
+        await until(client, run_id, "awaiting_confirmation")
+        health.problem = "The language model is not available: gone"
+        rejected = await client.post(f"/api/agent/confirm-resolution/{run_id}", json={"confirmed": False, "text": "no"})
+        assert rejected.status_code == 503
+        assert (await client.get(f"/api/agent/status/{run_id}")).json()["status"] == "awaiting_confirmation"
+        # Confirming does not call the model.
+        assert (
+            await client.post(f"/api/agent/confirm-resolution/{run_id}", json={"confirmed": True})
+        ).status_code == 200
+        await until(client, run_id, "completed")
+
+
+async def test_ollama_down_refuses_within_the_health_timeout(url):
+    app = make_app(url, llm_provider="ollama", health_timeout_s=1)
+    async with running(app) as client:
+        started = asyncio.get_running_loop().time()
+        response = await client.post("/api/agent/run", json={"machine_id": MACHINE, "issue": "noise"})
+        assert response.status_code == 503
+        assert asyncio.get_running_loop().time() - started < 2

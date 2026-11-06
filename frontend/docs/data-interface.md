@@ -219,7 +219,7 @@ Documents belong to an ingestion pipeline: `base` (page text, faster) or `struct
 
 | Operation | Input | Result | Errors |
 |---|---|---|---|
-| `getHealth({ fresh })` | `fresh`: check anew instead of returning a cached result | `{ overall, checkedAt, checks: [{ id, label, status, latencyMs, detail }] }`; statuses `ok`, `degraded`, `error`, `unknown`; overall is `degraded` when some and `error` when all checks fail | `unavailable` |
+| `getHealth({ fresh })` | `fresh`: check anew instead of returning a cached result | `{ overall, checkedAt, checks: [{ id, label, status, latencyMs, detail }], models: [{ name, role, provider, available }] }`; `models` lists the models in use (`role` is `agent`); statuses `ok`, `degraded`, `error`, `unknown`; overall is `degraded` when some and `error` when all checks fail | `unavailable` |
 | `getServiceSettings()` | — | `[{ key, label, value, deploymentValue, changed }]` for the context broker, time-series store, message broker and alert manager: the address in use, the deployment's address, and whether an operator override is in use | `unavailable` |
 | `saveServiceSettings(changes)` | `{ [key]: address \| null }`; `null` (or the deployment value) resets to the deployment value. Addresses are URLs with scheme `http`, `https`, `ws`, `wss` or `mqtt` | settings (as `getServiceSettings`) | `invalid` (with the reason; nothing is saved) |
 
