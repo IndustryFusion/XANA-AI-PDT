@@ -20,14 +20,15 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from datetime import timedelta
 
 from fastapi import FastAPI
 from langchain_core.language_models import BaseChatModel
 
-from app.api import diagnostics, errors, incidents, runs, stream
+from app.api import auth, diagnostics, errors, incidents, runs, stream
+from app.auth import KeycloakSession
 from app.config import Settings, get_llm, load_settings
 from app.health import HealthService
 from app.memory.migrate import Migrator
@@ -60,24 +61,28 @@ class AgentDeps:
     machines: MachineResolver
 
     @classmethod
-    def from_settings(cls, s: Settings) -> AgentDeps:
+    def from_settings(cls, s: Settings, token: Callable[[], str | None] | None = None) -> AgentDeps:
         return cls(
             llm=get_llm(s),
-            context=NgsiContextSource(s.ngsi_url, s.ngsi_tenant),
+            context=NgsiContextSource(s.ngsi_url, s.ngsi_tenant, token=token),
             history=TimescaleHistorySource(s.timescale_db_url.get_secret_value(), s.timescale_table),
-            machines=MachineResolver(s.ngsi_url, s.ngsi_tenant, s.health_timeout_s),
+            machines=MachineResolver(s.ngsi_url, s.ngsi_tenant, s.health_timeout_s, token=token),
         )
 
 
 def create_app(
-    settings: Settings | None = None, health: HealthService | None = None, agent: AgentDeps | None = None
+    settings: Settings | None = None,
+    health: HealthService | None = None,
+    agent: AgentDeps | None = None,
+    session: KeycloakSession | None = None,
 ) -> FastAPI:
     settings = settings or load_settings()
     redactor = settings.redactor()
     memory_url = settings.postgres_memory_url.get_secret_value()
     migrator = Migrator(memory_url, redactor=redactor, connect_timeout=settings.health_timeout_s)
-    health = health or HealthService(settings, migrator)
-    agent = agent or AgentDeps.from_settings(settings)
+    session = session or KeycloakSession(settings)
+    health = health or HealthService(settings, migrator, token=session.token)
+    agent = agent or AgentDeps.from_settings(settings, token=session.token)
     db = Database(memory_url, settings.health_timeout_s, redactor)
     incident_store = IncidentStore(db)
     callbacks = tracing_callbacks(settings)
@@ -115,11 +120,15 @@ def create_app(
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await task
-        await manager.shut_down()
-        await db.close()
+        try:
+            await manager.shut_down()
+            await session.close()
+        finally:
+            await db.close()
 
     app = FastAPI(title="XANA AI PDT backend", version="0.1.0", lifespan=lifespan)
     app.state.settings = settings
+    app.state.session = session
     app.state.migrator = migrator
     app.state.health = health
     app.state.runs = manager
@@ -131,6 +140,7 @@ def create_app(
         """Liveness only: the backend works without its dependencies, so it does not check them."""
         return {"status": "ok"}
 
+    app.include_router(auth.router)
     app.include_router(diagnostics.router)
     app.include_router(runs.router)
     app.include_router(incidents.router)

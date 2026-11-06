@@ -309,8 +309,8 @@ const serviceSetting = { key: 'string', label: 'string', value: 'string', deploy
 export const SHAPES = {
   session: {
     getAuthConfig: { enabled: 'boolean', provider: 'string' },
-    getSession: { valid: 'boolean', user: { $optional: user }, factoryId: '?string', companyId: '?string' },
-    signIn: { valid: 'boolean', user: { $optional: user }, factoryId: '?string', companyId: '?string' },
+    getSession: { valid: 'boolean', user: { $optional: user }, factoryId: '?string', companyId: '?string', tokenExpiresInS: '?number' },
+    signIn: { valid: 'boolean', user: { $optional: user }, factoryId: '?string', companyId: '?string', tokenExpiresInS: '?number' },
     signOut: { $optional: {} },
     getFactory: { id: 'string', name: 'string', owner: '?string', location: { $optional: { city: 'string', country: 'string' } } },
   },

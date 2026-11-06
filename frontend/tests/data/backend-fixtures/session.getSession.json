@@ -1,0 +1,16 @@
+{
+  "method": "GET",
+  "path": "/api/auth/status",
+  "status": 200,
+  "body": {
+    "valid": true,
+    "user": {
+      "username": "operator",
+      "name": "Sample Operator",
+      "email": "operator@example.org"
+    },
+    "factory_id": "urn:ifric:factory:sample",
+    "company_id": "urn:ifric:company:sample",
+    "token_expires_in_s": 300
+  }
+}

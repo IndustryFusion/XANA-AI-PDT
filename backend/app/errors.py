@@ -19,9 +19,15 @@ from __future__ import annotations
 
 from typing import Literal
 
-Kind = Literal["not_found", "conflict", "invalid", "unavailable"]
+Kind = Literal["not_found", "conflict", "invalid", "unavailable", "unauthorized"]
 
-HTTP_STATUS: dict[Kind, int] = {"not_found": 404, "conflict": 409, "invalid": 422, "unavailable": 503}
+HTTP_STATUS: dict[Kind, int] = {
+    "not_found": 404,
+    "conflict": 409,
+    "invalid": 422,
+    "unavailable": 503,
+    "unauthorized": 401,
+}
 
 
 class Refused(Exception):
@@ -48,6 +54,10 @@ def conflict(message: str) -> Refused:
 
 def invalid(message: str) -> Refused:
     return Refused("invalid", message)
+
+
+def unauthorized(message: str) -> Refused:
+    return Refused("unauthorized", message)
 
 
 def unavailable(message: str) -> Refused:

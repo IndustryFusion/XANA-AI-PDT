@@ -5,28 +5,28 @@
   "body": [
     {
       "id": "3",
-      "number": 2,
+      "number": 3,
       "machine_id": "urn:ngsi-ld:Machine:laser-cutter-01",
       "issue": "Gas pressure warning",
       "outcome": "stopped",
       "root_cause": null,
       "escalated": false,
       "escalation_ref": null,
-      "started_at": "2026-11-05T11:19:23.983937+00:00",
-      "closed_at": "2026-11-05T11:19:24.460145+00:00",
+      "started_at": "2026-11-06T19:33:29.004905+00:00",
+      "closed_at": "2026-11-06T19:33:29.464329+00:00",
       "reopened_run_id": null
     },
     {
       "id": "1",
-      "number": 1,
+      "number": 2,
       "machine_id": "urn:ngsi-ld:Machine:laser-cutter-01",
       "issue": "Cut edges show burrs since this morning",
       "outcome": "completed",
       "root_cause": "Cooling or supply problem",
       "escalated": false,
       "escalation_ref": null,
-      "started_at": "2026-11-05T11:19:22.204788+00:00",
-      "closed_at": "2026-11-05T11:19:23.888768+00:00",
+      "started_at": "2026-11-06T19:33:27.261609+00:00",
+      "closed_at": "2026-11-06T19:33:28.915957+00:00",
       "reopened_run_id": null
     }
   ]

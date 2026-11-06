@@ -221,6 +221,12 @@ def test_invalid_tls_mode_is_named():
         load_settings(_env_file=None, postgres_sslmode="maybe")
 
 
+def test_sign_in_settings_have_defaults():
+    s = load_settings(_env_file=None)
+    assert s.keycloak_url is None
+    assert (s.keycloak_realm, s.keycloak_client_id) == ("iff", "scorpio")
+
+
 def test_the_configured_openai_key_is_used():
     llm = get_llm(Settings(_env_file=None, llm_provider="openai", llm_model="m", openai_api_key="sk-configured"))
     assert llm.openai_api_key.get_secret_value() == "sk-configured"

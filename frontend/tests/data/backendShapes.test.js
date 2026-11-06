@@ -43,6 +43,10 @@ const ARGS = {
   'incidents.getIncident': (f) => [f.body.id],
   'incidents.reopenIncident': () => ['1'],
   'system.getHealth': () => [{ fresh: true }],
+  'session.getAuthConfig': () => [],
+  'session.getSession': () => [],
+  'session.signIn': () => [{ username: 'operator', password: 'operator' }],
+  'session.signOut': () => [],
 }
 
 /** Answers every request with the recorded response; records the request method. */

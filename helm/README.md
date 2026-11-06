@@ -51,6 +51,19 @@ Default addresses, in the release's namespace:
 
 Database connections use TLS (`POSTGRES_SSLMODE: require`), which encrypts the connection but doesn't check the server. To check it, set `postgresSslMode` to `verify-ca` or `verify-full`, and `databaseCaSecret` to a Secret holding the CA certificate under key `ca.crt`. The chart mounts it and sets `POSTGRES_SSLROOTCERT`.
 
+### Sign-in
+
+Set `XANA_KEYCLOAK_URL` to Keycloak's external address, for example `https://keycloak.example.org/auth`. Tokens must match the issuer that Scorpio checks, so don't use the in-cluster address. The platform's `scorpio` client in realm `iff` is used by default.
+
+> **Warning: use TLS, and restrict who can reach the UI and the backend.** With no TLS Secret (`ingressTlsSecret`, empty by default outside `production`), the operator's password crosses the Ingress in plain HTTP. The backend also doesn't know who is calling. So while anyone is signed in, anyone who can reach it can:
+>
+> - pass the sign-in screen without credentials;
+> - start runs that use the operator's token;
+> - read the operator's name and e-mail;
+> - sign the operator out, or replace the session with their own.
+>
+> See [Sign-in](../backend/README.md#sign-in).
+
 ### Language model
 
 Set `llmProvider`, `llmModel` and `llmProviderName`, then one of these:

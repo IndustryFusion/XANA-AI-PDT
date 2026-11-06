@@ -18,7 +18,7 @@
 // source (tests/data/backend-fixtures/). Run it against a backend with the
 // scripted language model and the sample data, for example the local environment:
 //
-//   LLM_PROVIDER=scripted docker compose -f backend/compose.yaml up --build
+//   LLM_PROVIDER=scripted KEYCLOAK_URL=http://keycloak:8080 docker compose -f backend/compose.yaml --profile auth up --build
 //   node scripts/record-backend-fixtures.mjs            # BACKEND_URL, default http://localhost:8000
 //
 // It starts runs on the sample machine laser-cutter-01 and archives them, so
@@ -85,4 +85,10 @@ const { run_id: reopened } = record('incidents.reopenIncident', await call('POST
 await until(reopened, 'awaiting_input')
 await call('POST', `/api/agent/stop/${reopened}`, { reason: 'Recorded for the fixtures.' })
 await call('POST', `/api/agent/archive/${reopened}`)
+// The session, against the local environment's test user.
+const USER = { username: process.env.RECORD_USERNAME || 'operator', password: process.env.RECORD_PASSWORD || 'operator' }
+record('session.getAuthConfig', await call('GET', '/api/auth/config'))
+record('session.signIn', await call('POST', '/api/auth/connect', USER))
+record('session.getSession', await call('GET', '/api/auth/status'))
+record('session.signOut', await call('POST', '/api/auth/logout'))
 console.log(`Fixtures written to ${OUT}`)

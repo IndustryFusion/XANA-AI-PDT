@@ -1,6 +1,6 @@
 {
   "method": "POST",
-  "path": "/api/agent/confirm-resolution/587a7994-d81e-4cb0-859a-7cf682818303",
+  "path": "/api/agent/confirm-resolution/8c0e9ae0-26e2-480e-b6a3-8f1cb45f35eb",
   "status": 200,
   "body": {
     "status": "running"

@@ -20,6 +20,8 @@ import { ErrorState, LoadingState } from '../ui/components'
 import SignInScreen from './SignInScreen'
 
 export const SESSION_CHECK_MS = 60_000
+/** How often to look for a backend that could not be reached when the UI loaded. */
+export const BACKEND_CHECK_MS = 10_000
 
 const SessionContext = createContext(null)
 
@@ -32,6 +34,7 @@ const SessionContext = createContext(null)
 export function SessionGate({ children, checkIntervalMs = SESSION_CHECK_MS }) {
   const [state, setState] = useState({ phase: 'loading', authConfig: null, session: null, error: null })
   const [attempt, setAttempt] = useState(0)
+  const [signOutError, setSignOutError] = useState(null)
 
   useEffect(() => {
     let cancelled = false
@@ -51,13 +54,27 @@ export function SessionGate({ children, checkIntervalMs = SESSION_CHECK_MS }) {
   }, [attempt])
 
   const authEnabled = state.authConfig?.enabled ?? false
+  const backendUnreachable = state.authConfig?.backendUnreachable ?? false
+
+  useEffect(() => {
+    if (state.phase !== 'ready' || !backendUnreachable || !checkIntervalMs) return undefined
+    const id = setInterval(async () => {
+      try {
+        const authConfig = await sessionApi.getAuthConfig()
+        if (!authConfig.backendUnreachable) setAttempt((a) => a + 1)
+      } catch {
+        // Still out of reach; check again later.
+      }
+    }, Math.min(checkIntervalMs, BACKEND_CHECK_MS))
+    return () => clearInterval(id)
+  }, [state.phase, backendUnreachable, checkIntervalMs])
 
   useEffect(() => {
     if (state.phase !== 'ready' || !authEnabled || !checkIntervalMs) return undefined
     const id = setInterval(async () => {
       try {
         const current = await sessionApi.getSession()
-        if (!current.valid) setState((s) => ({ ...s, phase: 'signin', session: current }))
+        setState((s) => ({ ...s, phase: current.valid ? s.phase : 'signin', session: current }))
       } catch {
         // A failed check is not proof of expiry; keep working and check again later.
       }
@@ -71,8 +88,12 @@ export function SessionGate({ children, checkIntervalMs = SESSION_CHECK_MS }) {
   }, [])
 
   const signOut = useCallback(async () => {
-    try { await sessionApi.signOut() } finally {
+    setSignOutError(null)
+    try {
+      await sessionApi.signOut()
       setState((s) => ({ ...s, phase: 'signin', session: null }))
+    } catch (error) {
+      setSignOutError(error) // the session may still be active, so the sign-in screen would mislead
     }
   }, [])
 
@@ -91,7 +112,7 @@ export function SessionGate({ children, checkIntervalMs = SESSION_CHECK_MS }) {
   }
 
   return (
-    <SessionContext.Provider value={{ session: state.session, authEnabled, signOut }}>
+    <SessionContext.Provider value={{ session: state.session, authEnabled, backendUnreachable, signOut, signOutError, checkIntervalMs }}>
       {children}
     </SessionContext.Provider>
   )

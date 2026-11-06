@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Callable
 
 import httpx
 
@@ -37,7 +38,9 @@ class MachineResolver:
         tenant: str | None = None,
         timeout_s: float = 3,
         transport: httpx.AsyncBaseTransport | None = None,
+        token: Callable[[], str | None] | None = None,
     ) -> None:
+        self._token = token
         self._url = url.rstrip("/")
         self._tenant = tenant
         self._timeout = timeout_s
@@ -59,6 +62,8 @@ class MachineResolver:
         headers = {"Accept": "application/json"}
         if self._tenant:
             headers["NGSILD-Tenant"] = self._tenant
+        if self._token and (token := self._token()):
+            headers["Authorization"] = f"Bearer {token}"
         try:
             async with httpx.AsyncClient(timeout=self._timeout, transport=self._transport) as client:
                 response = await client.get(f"{self._url}/ngsi-ld/v1/types", headers=headers)

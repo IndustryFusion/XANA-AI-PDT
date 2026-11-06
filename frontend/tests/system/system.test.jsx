@@ -14,8 +14,10 @@
 // limitations under the License.
 //
 
+import { vi } from 'vitest'
 import { act, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { areas } from '../../src/data'
 import { store } from '../../src/data/sources/mock'
 import { writeControls } from '../../src/data/sources/mock/controls'
 import { renderApp, renderAppWith, signInMock } from '../helpers'
@@ -143,12 +145,40 @@ describe('service settings', () => {
 })
 
 describe('session', () => {
+  test('shows the time left on the token', async () => {
+    renderApp({ path: '/system', controls: { authEnabled: true } })
+    await signInMock()
+    const session = await region('Session')
+    expect(await within(session).findByTestId('token-countdown')).toHaveTextContent(/[0-5]:\d\d left/)
+  })
+
   test('shows the identity provider, the user and an active session', async () => {
     renderAppWith(signInMock, { path: '/system' })
     const session = await region('Session')
     expect(await within(session).findByText('Mock identity provider')).toBeVisible()
     expect(within(session).getByText('Alex Operator')).toBeVisible()
     expect(await within(session).findByText('Active')).toBeVisible()
+  })
+
+  test('the time left follows the backend renewing the token', async () => {
+    renderApp({ path: '/system', controls: { authEnabled: true }, sessionCheckMs: 40 })
+    await signInMock()
+    const session = await region('Session')
+    await within(session).findByTestId('token-countdown')
+    const read = vi.spyOn(areas.session, 'getSession').mockResolvedValue({
+      valid: true, user: { username: 'alex', name: 'Alex Operator', email: '' }, factoryId: null, companyId: null, tokenExpiresInS: 3599,
+    })
+    await waitFor(() => expect(within(session).getByTestId('token-countdown')).toHaveTextContent(/59:\d\d left/))
+    expect(within(session).getByText('Active')).toBeVisible()
+    read.mockRestore()
+  })
+
+  test('says the session is unknown while the backend cannot be reached', async () => {
+    const config = vi.spyOn(areas.session, 'getAuthConfig').mockResolvedValue({ enabled: false, provider: 'Keycloak', backendUnreachable: true })
+    renderApp({ path: '/system' })
+    expect(await within(await region('Session')).findByText(/Unknown/)).toBeVisible()
+    expect(screen.queryByText('Sign-in not required')).not.toBeInTheDocument()
+    config.mockRestore()
   })
 
   test('shows when sign-in is not required', async () => {

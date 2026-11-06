@@ -2,6 +2,7 @@
 
 Python 3.12 / FastAPI backend of XANA AI PDT. It is built in phases (issue #12). Today it provides:
 - the service runtime: configuration, language model selection, and a health report of every dependency;
+- sign-in through Keycloak, and the operator's token for the context broker ([Sign-in](#sign-in));
 - the incident memory database and its migrations;
 - runs that operators start, clarify, confirm or reject, stop and archive, with a live stream and the incident history ([API](#api));
 - a local environment with sample machine data;
@@ -46,7 +47,9 @@ Data and models are kept in Docker volumes between runs. `docker compose -f back
 
 **With OpenVINO Model Server or another OpenAI-compatible server:** set `LLM_PROVIDER=openai`, `OPENAI_BASE_URL` (for OpenVINO Model Server, its `/v3` address), `LLM_MODEL`, and optionally `LLM_PROVIDER_NAME=OpenVINO`. An API key is needed only if the server asks for one.
 
-**Ports in use:** if a host port is taken, set `XANA_DB_PORT`, `XANA_BROKER_PORT`, `XANA_OLLAMA_PORT` or `XANA_BACKEND_PORT`.
+**With sign-in:** `KEYCLOAK_URL=http://keycloak:8080 docker compose -f backend/compose.yaml --profile auth up --build`. Sign in as `operator` with password `operator`. The realm in `keycloak/` is for development only.
+
+**Ports in use:** if a host port is taken, set `XANA_DB_PORT`, `XANA_BROKER_PORT`, `XANA_OLLAMA_PORT`, `XANA_KEYCLOAK_PORT` or `XANA_BACKEND_PORT`.
 
 The local environment is for development only. The database trusts local connections, and every port is bound to `127.0.0.1`.
 
@@ -66,6 +69,10 @@ Fields are snake_case. A refused request answers `{"error": {"kind", "message"}}
 
 | Endpoint | Method | Purpose |
 |---|---|---|
+| `/api/auth/config` | GET | `{enabled, provider}`: whether sign-in is on |
+| `/api/auth/connect` | POST `{username, password}` | Sign in; answers the session. `unauthorized` (401) for wrong credentials, `unavailable` if the provider can't be reached, `conflict` if sign-in is off |
+| `/api/auth/status` | GET | `{valid, user, factory_id, company_id, token_expires_in_s}` |
+| `/api/auth/logout` | POST | Sign out; 204 |
 | `/api/agent/run` | POST `{machine_id, issue}` | Start a run; answers 202 `{run_id}` before the first step. `machine_id` may be a short name such as `laser-cutter-01` |
 | `/api/agent/runs` | GET | Runs that are not archived, newest first |
 | `/api/agent/status/{run_id}` | GET | The run with `data`, `steps`, `escalation`, `outbox` and `reopenable` |
@@ -98,6 +105,18 @@ python3.12 -m venv .venv
 .venv/bin/pip install -e "./agent[anthropic,openai]" -e ".[dev]"
 .venv/bin/python -m app            # needs the dependencies, e.g. the local environment's db, broker and ollama
 ```
+
+## Sign-in
+
+Sign-in is on when `KEYCLOAK_URL` is set. The backend signs in on the operator's behalf, and keeps the token fresh in memory: it refreshes 60 seconds before expiry, retries every 12 seconds, and ends the session after 5 failed refreshes. Requests to the context broker carry the token when one exists.
+
+To check sign-in in a browser, run `XANA_E2E_SIGNIN=1 XANA_E2E_BACKEND=1 npx playwright test signin` in `frontend/`, with the local environment started with the `auth` profile.
+
+**Current limits, decided in `gh-21-keycloak-sign-in`:**
+
+- One session per backend process: whoever signs in supplies the token for all platform calls, and signing out ends it for everyone.
+- **The backend doesn't know who is calling, and its own API is not protected.** While anyone is signed in, anyone who can reach it can pass the sign-in screen, start runs that read platform data with the operator's token, read the operator's name and e-mail, and sign the operator out or replace the session. Limit network access to it, and use TLS, or the password crosses the network in plain HTTP.
+- After a restart, or with nobody signed in, broker requests carry no token. A broker that requires one refuses them, and runs show the source as unavailable.
 
 ## Language model
 

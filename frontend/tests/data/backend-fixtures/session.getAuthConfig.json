@@ -1,0 +1,9 @@
+{
+  "method": "GET",
+  "path": "/api/auth/config",
+  "status": 200,
+  "body": {
+    "enabled": true,
+    "provider": "Keycloak"
+  }
+}

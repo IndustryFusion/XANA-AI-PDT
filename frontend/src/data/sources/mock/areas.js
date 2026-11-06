@@ -30,6 +30,8 @@ import { createSystemArea } from './systemArea'
 export const MOCK_CREDENTIALS = { username: 'operator', password: 'operator' }
 
 /** Builds the mock implementations of the interface areas on top of a store. */
+const MOCK_TOKEN_LIFETIME_S = 300
+
 export function createAreas(store) {
   const withControls = (area, fn) => async (...args) => {
     await applyControls(area)
@@ -45,6 +47,7 @@ export function createAreas(store) {
       user: valid ? { ...state.user } : null,
       factoryId: valid ? state.factory.id : null,
       companyId: valid ? state.companyId : null,
+      tokenExpiresInS: valid && authEnabled ? MOCK_TOKEN_LIFETIME_S : null,
     }
   }
 

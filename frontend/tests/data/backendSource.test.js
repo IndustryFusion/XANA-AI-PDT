@@ -185,6 +185,24 @@ describe('operations served by the backend', () => {
     expect(await incidents.reopenIncident('3')).toEqual({ runId: 'r9' })
   })
 
+  test('session: an unreachable backend at load leaves the app open, and a later failure stays a failure', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('connection refused') }))
+    expect(await backend.session.getAuthConfig()).toEqual({ enabled: false, provider: 'Keycloak', backendUnreachable: true })
+    expect((await backend.session.getSession()).valid).toBe(false)
+
+    fakeFetch({ 'GET /api/auth/config': { body: { enabled: true, provider: 'Keycloak' } } })
+    expect((await backend.session.getAuthConfig()).enabled).toBe(true)
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('connection refused') }))
+    await expect(backend.session.getSession()).rejects.toMatchObject({ kind: 'unavailable' })
+    await expect(backend.session.getAuthConfig()).rejects.toMatchObject({ kind: 'unavailable' })
+    await expect(backend.session.getSession()).rejects.toMatchObject({ kind: 'unavailable' })
+  })
+
+  test('session: wrong credentials stay unauthorized', async () => {
+    fakeFetch({ 'POST /api/auth/connect': { status: 401, body: { error: { kind: 'unauthorized', message: 'No.' } } } })
+    await expect(backend.session.signIn({ username: 'a', password: 'b' })).rejects.toMatchObject({ kind: 'unauthorized' })
+  })
+
   test('system.getHealth, fresh or cached', async () => {
     const fetch = fakeFetch({
       'GET /api/diagnostics': { body: { overall: 'ok', checked_at: '2026-11-05T10:00:00+00:00', checks: [{ id: 'memory', latency_ms: 3 }] } },
@@ -198,11 +216,15 @@ describe('operations served by the backend', () => {
 describe('delegation to the mock', () => {
   test('the backend serves runs, incidents and health; the mock serves everything else', () => {
     expect(backend.SERVED).toEqual({
+      session: ['getAuthConfig', 'getSession', 'signIn', 'signOut'],
       runs: ['listActiveRuns', 'startRun', 'getRun', 'subscribeRun', 'clarify', 'confirmResolution', 'escalationPreflight', 'reopenRun', 'stopRun', 'archiveRun'],
       incidents: ['listIncidents', 'getIncident', 'reopenIncident'],
       system: ['getHealth'],
     })
-    for (const name of ['session', 'entities', 'alerts', 'dataspace']) expect(backend[name]).toEqual(mock[name])
+    for (const name of ['entities', 'alerts', 'dataspace']) expect(backend[name]).toEqual(mock[name])
+    expect(backend.session.getFactory).toBe(mock.session.getFactory)
+    expect(backend.session.signIn).not.toBe(mock.session.signIn)
+    expect(backend.info.signInHint).toBeUndefined()
     expect(backend.runs.escalate).toBe(mock.runs.escalate)
     expect(backend.runs.sendConversationAct).toBe(mock.runs.sendConversationAct)
     expect(backend.system.getServiceSettings).toBe(mock.system.getServiceSettings)

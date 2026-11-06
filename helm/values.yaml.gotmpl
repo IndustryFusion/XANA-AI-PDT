@@ -31,6 +31,14 @@ config:
   {{- with .Values.openaiBaseUrl }}
   OPENAI_BASE_URL: {{ . | quote }}
   {{- end }}
+  {{- with (env "XANA_KEYCLOAK_URL" | default .Values.keycloakUrl) }}
+  KEYCLOAK_URL: {{ . | quote }}
+  {{- end }}
+  KEYCLOAK_REALM: {{ .Values.keycloakRealm | quote }}
+  KEYCLOAK_CLIENT_ID: {{ .Values.keycloakClientId | quote }}
+  {{- with .Values.factoryId }}
+  FACTORY_ID: {{ . | quote }}
+  {{- end }}
   NGSI_URL: {{ .Values.ngsiUrl | quote }}
   POSTGRES_SSLMODE: {{ .Values.postgresSslMode | quote }}
   {{- range $name, $value := .Values.extraConfig }}

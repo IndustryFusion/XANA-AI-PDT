@@ -31,10 +31,12 @@ Served by the backend (phase 1):
 |---|---|---|
 | runs | `listActiveRuns`, `startRun`, `getRun`, `subscribeRun`, `clarify`, `confirmResolution`, `escalationPreflight`, `reopenRun`, `stopRun`, `archiveRun` | `/api/agent/…`, `/ws/run/{runId}` |
 | incidents | `listIncidents`, `getIncident`, `reopenIncident` | `/api/incidents` |
+| session | `getAuthConfig`, `getSession`, `signIn`, `signOut` | `/api/auth/config`, `status`, `connect`, `logout` |
 | system | `getHealth` | `/api/diagnostics` |
 
-Every other operation (session, entities, alerts, dataspace, the optional knowledge base, service settings, and the escalation and conversation operations of runs) comes from the mock, so the whole UI stays usable. `src/data/sources/backend/index.js` builds each area as `{ ...mock[area], ...backend[area] }` and lists the served operations in `SERVED`; the mock's development controls still apply to the delegated operations.
+Every other operation (the factory details in `session.getFactory`, entities, alerts, dataspace, the optional knowledge base, service settings, and the escalation and conversation operations of runs) comes from the mock, so the whole UI stays usable. `src/data/sources/backend/index.js` builds each area as `{ ...mock[area], ...backend[area] }` and lists the served operations in `SERVED`; the mock's development controls still apply to the delegated operations.
 
+- **Stopped backend:** until the backend has answered, `getAuthConfig` reports `backendUnreachable: true` and sign-in as off, so the app opens and each area shows its own state. The session gate checks again every 10 seconds, and applies the real configuration when the backend answers. Once the backend has answered, a failed `getAuthConfig` or `getSession` stays `unavailable`.
 - **Transport:** relative paths (`/api/…`, `/ws/…`), so the development server's proxy reaches the backend (`XANA_BACKEND_URL`). `VITE_BACKEND_BASE` sets another prefix or origin. Requests time out after 15 s.
 - **Keys:** the backend uses snake_case; keys are converted both ways, recursively, including step input and output and state data. Values are never changed. Attached files are sent as `{ name, type, size, data_url }`.
 - **Errors:** a backend refusal keeps its kind and message. Without one, HTTP 401/403 map to `unauthorized`, 404 to `not_found`, 409 to `conflict`, 422 to `invalid`, anything else to `unavailable`. A backend that cannot be reached or does not answer is `unavailable`, in the calling area only.
@@ -46,8 +48,8 @@ Every other operation (session, entities, alerts, dataspace, the optional knowle
 
 | Operation | Input | Result | Errors |
 |---|---|---|---|
-| `getAuthConfig()` | — | `{ enabled, provider }`: whether sign-in is required and the identity provider's name | `unavailable` |
-| `getSession()` | — | `{ valid, user: { username, name, email } \| null, factoryId, companyId }` | `unavailable` |
+| `getAuthConfig()` | — | `{ enabled, provider, backendUnreachable? }`: whether sign-in is required, the identity provider's name, and, on the backend source, that the backend has not answered yet | `unavailable` |
+| `getSession()` | — | `{ valid, user: { username, name, email } \| null, factoryId, companyId, tokenExpiresInS }`; `tokenExpiresInS` is the time left on the current token, or `null` | `unavailable` |
 | `signIn({ username, password })` | credentials | the new session (as `getSession`) | `unauthorized` (wrong credentials), `unavailable` (provider unreachable) |
 | `signOut()` | — | nothing | `unavailable` |
 | `getFactory()` | — | `{ id, name, owner \| null, location: { city, country } \| null }` | `not_found`, `unavailable` |

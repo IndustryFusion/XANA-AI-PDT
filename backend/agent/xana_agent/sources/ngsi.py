@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from typing import Any
 from urllib.parse import quote
 
@@ -34,7 +35,7 @@ class NgsiContextSource:
 
     `inverse_relationships` names the relationships through which other entities
     point to a machine (for example a component's `partOf`); NGSI-LD has no query
-    for "any relationship pointing here".
+    for "any relationship pointing here". `token` gives the current bearer token, if any.
     """
 
     def __init__(
@@ -44,6 +45,7 @@ class NgsiContextSource:
         timeout_s: float = 10,
         inverse_relationships: tuple[str, ...] = DEFAULT_INVERSE_RELATIONSHIPS,
         transport: httpx.AsyncBaseTransport | None = None,
+        token: Callable[[], str | None] | None = None,
     ) -> None:
         headers = {"Accept": "application/json"}
         if tenant:
@@ -55,11 +57,14 @@ class NgsiContextSource:
             "transport": transport,
         }
         self.inverse_relationships = inverse_relationships
+        self._token = token
 
     async def _get(self, path: str, params: dict[str, Any] | None = None) -> httpx.Response | None:
         try:
             async with httpx.AsyncClient(**self._client_args) as client:
-                response = await client.get(path, params=params)
+                token = self._token() if self._token else None
+                headers = {"Authorization": f"Bearer {token}"} if token else None
+                response = await client.get(path, params=params, headers=headers)
         except httpx.HTTPError as exc:
             raise SourceUnavailable(f"Context broker not reachable ({type(exc).__name__}).") from None
         if response.status_code == 404:
