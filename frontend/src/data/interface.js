@@ -45,7 +45,7 @@ export const OPERATIONS = {
   entities: [
     'getStats', 'listTypes', 'listAttributes', 'queryEntities', 'getEntity', 'updateAttributes',
     'appendAttributes', 'deleteAttribute', 'deleteEntity', 'importEntities', 'fetchImportDocument',
-    'deleteByTypes', 'getAttributeHistory', 'listTypesAt', 'queryEntitiesAt', 'subscribeEntities',
+    'deleteByTypes', 'getAttributeHistory', 'getAttributeStatus', 'listTypesAt', 'queryEntitiesAt', 'subscribeEntities',
     'getLiveUpdateHealth', 'getValueHints',
   ],
   alerts: ['listAlerts', 'countAlerts', 'getAlert', 'applyAlertAction', 'listEnvironments', 'listServices'],
@@ -370,10 +370,14 @@ export const SHAPES = {
     fetchImportDocument: { url: 'string' },
     deleteByTypes: [{ type: 'string', count: 'number' }],
     getAttributeHistory: [{ at: 'date' }],
+    getAttributeStatus: { $record: { deleted: 'boolean', observedAt: '?date' } },
     listTypesAt: ['string'],
     queryEntitiesAt: [entity],
     getLiveUpdateHealth: { status: { $enum: LIVE_UPDATE_STATES }, detail: '?string' },
-    getValueHints: ['string'],
+    getValueHints: {
+      hintType: { $enum: ['enum', 'range', 'datatype', 'none'] }, values: ['string'], minimum: '?number', maximum: '?number',
+      minimumExclusive: 'boolean', maximumExclusive: 'boolean', datatype: '?string', detail: '?string',
+    },
   },
   dataspace: {
     getConnection: connection,

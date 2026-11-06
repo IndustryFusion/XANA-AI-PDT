@@ -21,7 +21,6 @@ import { test, expect } from '@playwright/test'
 import { expectStatus, presetControls } from '../helpers'
 
 const MACHINE = 'laser-cutter-01'
-const MACHINE_ID = `urn:ngsi-ld:Machine:${MACHINE}`
 
 test.beforeEach(async ({ page }) => {
   await presetControls(page, { authEnabled: false })
@@ -123,7 +122,7 @@ test('a run archived elsewhere shows that it is no longer active', async ({ page
   await expect(page.getByRole('heading', { name: 'This run is not active' })).toBeVisible()
 })
 
-test('a stopped backend affects only its areas: active incidents shows an error, the explorer still works', async ({ page }) => {
+test('a stopped backend affects only its areas: active incidents and the explorer show errors, alerts still work', async ({ page }) => {
   await page.route('**/api/**', (route) => route.abort('connectionrefused'))
   await page.goto('/incidents')
   const error = page.getByRole('alert').filter({ hasText: 'Could not load open runs' })
@@ -131,9 +130,10 @@ test('a stopped backend affects only its areas: active incidents shows an error,
   await expect(error.getByRole('button', { name: 'Retry' })).toBeVisible()
 
   await page.goto('/explorer')
-  await page.getByLabel('Entity type').selectOption('Machine')
-  await page.getByRole('button', { name: 'Apply query' }).click()
-  await expect(page.getByRole('region', { name: 'Entities' }).locator(`[data-entity="${MACHINE_ID}"]`).first()).toBeVisible()
+  await expect(page.getByRole('alert').filter({ hasText: 'Could not load entity types' })).toContainText('The backend cannot be reached.')
+
+  await page.goto('/alerts')
+  await expect(page.getByRole('table')).toBeVisible()
 
   await page.unroute('**/api/**')
   await page.goto('/incidents')

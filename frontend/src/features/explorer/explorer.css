@@ -316,3 +316,8 @@
   .attr-line .kind-tag { min-width: 0; }
   .attr-line__nested, .attr-subs, .add-attr { margin-left: var(--space-2); }
 }
+
+.value-editor__range {
+  margin: 0;
+  font-size: var(--text-sm, 0.85em);
+}

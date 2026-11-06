@@ -1,0 +1,460 @@
+#
+# Copyright (c) 2026 IndustryFusion Foundation
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+"""The explorer's calls to the context broker: `NGSI_URL`, with the session's token.
+
+Every address comes from the configuration. Identifiers from a caller go into a path only
+percent-encoded, and into a query only as parameters.
+
+Several checks here make up for what the broker does not say. See `gh-22-data-explorer-backend`'s
+design for what was measured: updating a missing attribute, and deleting one, answer 204, and
+adding one that exists with `noOverwrite` answers 204 as well.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import re
+from collections.abc import Callable
+from datetime import UTC, datetime
+from typing import Any
+from urllib.parse import quote
+
+import httpx
+
+from app.config import Settings
+from app.errors import Refused, bad_gateway, conflict, invalid, not_found
+from app.ngsi.failures import refusal, unreachable
+from app.ngsi.query import compile_pattern, has_dotted_iri, matches, parse
+from xana_agent.sources.ngsi import context_link
+
+SERVICE = "The context broker"
+BASE = "/ngsi-ld/v1"
+TIMEOUT_S = 15
+MAX_LIMIT = 1000
+BATCH = 100
+MAX_SCANNED = 5000
+CONCURRENT_COUNTS = 8
+RESERVED = {"id", "type", "@context", "scope", "createdAt", "modifiedAt", "deletedAt"}
+VALUE_MEMBERS = ("value", "object", "objectList", "json", "languageMap", "valueList", "vocab")
+_URI = re.compile(r"[A-Za-z][A-Za-z0-9+.\-]*:\S+")
+JSON_TYPE = "application/json"
+LD_TYPE = "application/ld+json"
+
+
+def _segment(identifier: str) -> str:
+    return quote(identifier, safe=":")
+
+
+def _attribute_segment(name: str) -> str:
+    return quote(name, safe="")
+
+
+def _now() -> str:
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _is_number(value: Any) -> bool:
+    return isinstance(value, int | float) and not isinstance(value, bool)
+
+
+def _checked_limit(limit: int) -> int:
+    if not 1 <= limit <= MAX_LIMIT:
+        raise invalid(f"The limit must be a whole number from 1 to {MAX_LIMIT}.")
+    return limit
+
+
+def _problem(item: Any) -> str:
+    error = item.get("error") if isinstance(item, dict) else None
+    if isinstance(error, dict):
+        return str(error.get("detail") or error.get("title") or "The broker rejected this entity.")
+    return "The broker rejected this entity."
+
+
+class ContextBroker:
+    def __init__(
+        self,
+        settings: Settings,
+        token: Callable[[], str | None],
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
+        self._url = settings.ngsi_url.rstrip("/")
+        self._tenant = settings.ngsi_tenant
+        self._context = settings.ngsi_context_url
+        self._token = token
+        self._transport = transport
+
+    def headers(self, content_type: str | None = None) -> dict[str, str]:
+        headers = {"Accept": "application/json"}
+        if self._tenant:
+            headers["NGSILD-Tenant"] = self._tenant
+        if token := self._token():
+            headers["Authorization"] = f"Bearer {token}"
+        # A body with its own context must not be sent with another one.
+        if self._context and content_type != LD_TYPE:
+            headers["Link"] = context_link(self._context)
+        if content_type:
+            headers["Content-Type"] = content_type
+        return headers
+
+    async def send(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        body: Any = None,
+        content_type: str = JSON_TYPE,
+    ) -> httpx.Response:
+        """One request. A failed answer raises the matching refusal."""
+        headers = self.headers(content_type if body is not None else None)
+        try:
+            async with httpx.AsyncClient(timeout=TIMEOUT_S, transport=self._transport) as client:
+                response = await client.request(
+                    method, f"{self._url}{BASE}{path}", params=params, json=body, headers=headers
+                )
+        except httpx.HTTPError as error:
+            raise unreachable(SERVICE, error) from None
+        if response.status_code >= 400:
+            raise refusal(SERVICE, response)
+        return response
+
+    async def _json(self, method: str, path: str, **kwargs: Any) -> Any:
+        response = await self.send(method, path, **kwargs)
+        try:
+            return response.json()
+        except ValueError:
+            raise bad_gateway(f"{SERVICE} sent an answer that isn't JSON.") from None
+
+    # Query and browse --------------------------------------------------------
+
+    async def types(self) -> list[str]:
+        answer = await self._json("GET", "/types")
+        listed = answer.get("typeList") if isinstance(answer, dict) else None
+        return sorted(_listed(listed))
+
+    async def attributes(self) -> list[str]:
+        answer = await self._json("GET", "/attributes")
+        listed = answer.get("attributeList") if isinstance(answer, dict) else None
+        return sorted(_listed(listed))
+
+    async def _count(self, entity_type: str) -> int:
+        # `limit=0` reports 0, whatever the count is.
+        response = await self.send("GET", "/entities", params={"type": entity_type, "count": "true", "limit": 1})
+        try:
+            return int(response.headers.get("NGSILD-Results-Count", "0"))
+        except ValueError:
+            return 0
+
+    async def stats(self) -> dict[str, Any]:
+        names = await self.types()
+        slots = asyncio.Semaphore(CONCURRENT_COUNTS)
+
+        async def counted(name: str) -> dict[str, Any]:
+            async with slots:
+                return {"type": name, "count": await self._count(name)}
+
+        by_type = await asyncio.gather(*(counted(name) for name in names))
+        by_type = sorted(by_type, key=lambda item: (-item["count"], item["type"]))
+        return {"entity_count": sum(item["count"] for item in by_type), "type_count": len(names), "by_type": by_type}
+
+    async def query(
+        self,
+        *,
+        entity_type: str | None = None,
+        entity_id: str | None = None,
+        id_pattern: str | None = None,
+        q: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        _checked_limit(limit)
+        tree = parse(q)
+        if id_pattern:
+            compile_pattern(id_pattern, "The ID pattern")
+        if not any((entity_type, entity_id, id_pattern, q and q.strip())):
+            raise invalid("Name a type, an ID, an ID pattern or a query expression.")
+        params: dict[str, Any] = {}
+        if entity_type:
+            params["type"] = entity_type
+        if entity_id:
+            params["id"] = entity_id
+        if id_pattern:
+            params["idPattern"] = id_pattern
+        if not entity_type and not entity_id:
+            params["type"] = "*"  # the broker refuses an ID pattern or expression alone
+        if has_dotted_iri(tree):
+            return await self._filtered(params, tree, limit)
+        if tree is not None:
+            params["q"] = q
+        found = await self._json("GET", "/entities", params={**params, "limit": limit})
+        return found if isinstance(found, list) else []
+
+    async def _filtered(self, params: dict[str, Any], tree: Any, limit: int) -> list[dict[str, Any]]:
+        """Evaluates the expression here, for names the broker silently fails to match."""
+        matched: list[dict[str, Any]] = []
+        for offset in range(0, MAX_SCANNED, MAX_LIMIT):
+            page = await self._json("GET", "/entities", params={**params, "limit": MAX_LIMIT, "offset": offset})
+            page = page if isinstance(page, list) else []
+            matched.extend(entity for entity in page if matches(entity, tree))
+            if len(matched) >= limit or len(page) < MAX_LIMIT:
+                break
+        return matched[:limit]
+
+    async def entity(self, entity_id: str) -> dict[str, Any]:
+        found = await self._json("GET", f"/entities/{_segment(entity_id)}")
+        if not isinstance(found, dict):
+            raise bad_gateway(f"{SERVICE} sent an unexpected answer.")
+        return found
+
+    async def _existing(self, entity_id: str) -> dict[str, Any]:
+        try:
+            return await self.entity(entity_id)
+        except Refused as refused:
+            if refused.kind == "not_found":
+                raise not_found(f"There is no entity {entity_id}.") from None
+            raise
+
+    # Editing -----------------------------------------------------------------
+
+    async def update_attributes(self, entity_id: str, attributes: dict[str, Any]) -> None:
+        current = await self._existing(entity_id)
+        merge: dict[str, Any] = {}
+        overwrite: dict[str, Any] = {}
+        for name, fragment in attributes.items():
+            if name in RESERVED or name not in current:
+                raise not_found(f"{entity_id} has no attribute {name}.")
+            if not isinstance(fragment, dict):
+                raise invalid(f"Attribute {name} needs a value.")
+            existing = current[name]
+            if isinstance(existing, list):
+                overwrite[name] = _merged_instance(name, existing, fragment)
+            else:
+                merge[name] = _merge_fragment(name, existing, fragment)
+        if merge:
+            await self.send("PATCH", f"/entities/{_segment(entity_id)}", body=merge)
+        if overwrite:
+            await self.send("POST", f"/entities/{_segment(entity_id)}/attrs", body=overwrite)
+
+    async def append_attributes(self, entity_id: str, attributes: dict[str, Any]) -> None:
+        current = await self._existing(entity_id)
+        for name, attribute in attributes.items():
+            if name in current:
+                raise conflict(f"{entity_id} already has an attribute {name}.")
+            if name in RESERVED or not isinstance(attribute, dict) or not isinstance(attribute.get("type"), str):
+                raise invalid(f"Attribute {name} needs a type and a value.")
+        await self.send(
+            "POST", f"/entities/{_segment(entity_id)}/attrs", params={"options": "noOverwrite"}, body=attributes
+        )
+
+    async def delete_attribute(self, entity_id: str, name: str, sub_attribute: str | None = None) -> None:
+        current = await self._existing(entity_id)
+        if name in RESERVED or name not in current:
+            raise not_found(f"{entity_id} has no attribute {name}.")
+        path = f"/entities/{_segment(entity_id)}/attrs"
+        if not sub_attribute:
+            # Without `deleteAll`, the broker can't find an attribute with several datasets.
+            await self.send("DELETE", f"{path}/{_attribute_segment(name)}", params={"deleteAll": "true"})
+            return
+        # The broker has no route for this, so the attribute is written again without it.
+        existing = current[name]
+        instances = existing if isinstance(existing, list) else [existing]
+        holders = [item for item in instances if isinstance(item, dict) and sub_attribute in item]
+        if not holders or sub_attribute in ("type", *VALUE_MEMBERS):
+            raise not_found(f"{name} has no sub-attribute {sub_attribute}.")
+        changed = [{k: v for k, v in item.items() if k != sub_attribute} for item in holders]
+        await self.send("POST", path, body={name: changed[0] if len(changed) == 1 else changed})
+
+    async def delete_entity(self, entity_id: str) -> None:
+        try:
+            await self.send("DELETE", f"/entities/{_segment(entity_id)}")
+        except Refused as refused:
+            if refused.kind == "not_found":
+                raise not_found(f"There is no entity {entity_id}.") from None
+            raise
+
+    # Import and bulk delete --------------------------------------------------
+
+    async def _types_of(self, ids: list[str]) -> dict[str, Any]:
+        """The types of those IDs that exist."""
+        known: dict[str, Any] = {}
+        for start in range(0, len(ids), BATCH):
+            chunk = ids[start : start + BATCH]
+            found = await self._json("GET", "/entities", params={"id": ",".join(chunk), "limit": MAX_LIMIT})
+            for entity in found if isinstance(found, list) else []:
+                known[entity.get("id")] = entity.get("type")
+        return known
+
+    async def import_entities(self, entities: list[Any]) -> list[dict[str, Any]]:
+        """Creates or merges entities. The result has one line per entry, in order."""
+        results: list[dict[str, Any]] = [{"id": None, "result": "failed", "reason": None} for _ in entities]
+        ready: list[int] = []
+        for index, entity in enumerate(entities):
+            problem = _import_problem(index, entity)
+            if isinstance(entity, dict) and isinstance(entity.get("id"), str):
+                results[index]["id"] = entity["id"]
+            if problem:
+                results[index]["reason"] = problem
+            else:
+                ready.append(index)
+        if not ready:
+            return results
+        # The broker's 207 doesn't tell created from updated, so that is read first.
+        known = await self._types_of(list(dict.fromkeys(entities[i]["id"] for i in ready)))
+        sendable = []
+        for index in ready:
+            entity = entities[index]
+            if entity["id"] in known and not _same_type(known[entity["id"]], entity["type"]):
+                results[index]["reason"] = f"An entity with this ID exists with the type {known[entity['id']]}."
+            else:
+                sendable.append(index)
+        # The content type has to fit all of a request: a context in the body, or none.
+        for with_context in (False, True):
+            group = [i for i in sendable if ("@context" in entities[i]) == with_context]
+            for start in range(0, len(group), BATCH):
+                await self._upsert(entities, group[start : start + BATCH], with_context, known, results)
+        return results
+
+    async def _upsert(
+        self,
+        entities: list[Any],
+        indexes: list[int],
+        with_context: bool,
+        known: dict[str, Any],
+        results: list[dict[str, Any]],
+    ) -> None:
+        content_type = LD_TYPE if with_context else JSON_TYPE
+        rejected: dict[str, str] = {}
+        try:
+            response = await self.send(
+                "POST",
+                "/entityOperations/upsert",
+                params={"options": "update"},
+                body=[entities[i] for i in indexes],
+                content_type=content_type,
+            )
+        except Refused as refused:
+            # A later batch failing must not hide what earlier batches did.
+            for i in indexes:
+                results[i]["reason"] = refused.message
+            return
+        if response.status_code == 207:
+            try:
+                answer = response.json()
+            except ValueError:
+                answer = {}
+            for item in answer.get("errors", []) if isinstance(answer, dict) else []:
+                if isinstance(item, dict):
+                    rejected[str(item.get("entityId"))] = _problem(item)
+        for i in indexes:
+            entity_id = entities[i]["id"]
+            if entity_id in rejected:
+                results[i]["reason"] = rejected[entity_id]
+            else:
+                results[i].update(result="updated" if entity_id in known else "created", reason=None)
+
+    async def delete_by_types(self, types: list[str]) -> list[dict[str, Any]]:
+        # The broker reads `*`, `,`, `;` and `|` in a type as a query. Only a listed type may be
+        # used, so that a request for "*" can't delete everything.
+        listed = set(await self.types())
+        counts: list[dict[str, Any]] = []
+        for name in dict.fromkeys(types):
+            count = await self._delete_type(name, sum(c["count"] for c in counts)) if name in listed else 0
+            counts.append({"type": name, "count": count})
+        return counts
+
+    async def _delete_type(self, name: str, before: int) -> int:
+        deleted = 0
+        while True:
+            try:
+                page = await self._json("GET", "/entities", params={"type": name, "limit": MAX_LIMIT})
+                ids = [e["id"] for e in page if isinstance(e, dict) and _same_type(e.get("type"), name) and e.get("id")]
+                if not ids:
+                    return deleted
+                gone = await self._delete_batch(ids)
+            except Refused as refused:
+                total = before + deleted
+                raise Refused(
+                    refused.kind,
+                    f"{refused.message} {total} {'entity was' if total == 1 else 'entities were'} deleted before this.",
+                    status=refused.http_status,
+                ) from None
+            deleted += gone
+            if not gone:
+                raise bad_gateway(f"{SERVICE} deleted none of the {len(ids)} entities of type {name}.")
+
+    async def _delete_batch(self, ids: list[str]) -> int:
+        response = await self.send("POST", "/entityOperations/delete", body=ids)
+        if response.status_code != 207:
+            return len(ids)
+        try:
+            return len(response.json().get("success", []))
+        except (ValueError, AttributeError):
+            return 0
+
+
+def _listed(value: Any) -> list[str]:
+    """A list from the broker, which answers a single item without the list around it."""
+    if value is None:
+        return []
+    return [item for item in (value if isinstance(value, list) else [value]) if isinstance(item, str)]
+
+
+def _same_type(a: Any, b: Any) -> bool:
+    return (b in a) if isinstance(a, list) else a == b
+
+
+def _import_problem(index: int, entity: Any) -> str | None:
+    if not isinstance(entity, dict):
+        return f"Entry {index + 1} is not an entity."
+    entity_id = entity.get("id")
+    if not isinstance(entity_id, str) or not _URI.fullmatch(entity_id):
+        return "The entity has no valid ID (URI)."
+    if not isinstance(entity.get("type"), str) or not entity["type"]:
+        return "The entity has no type."
+    return None
+
+
+def _check_value(name: str, existing: dict[str, Any], fragment: dict[str, Any]) -> None:
+    if "value" not in fragment:
+        return
+    if fragment["value"] in ("", None):
+        raise invalid(f"{name} cannot be empty.")
+    if _is_number(existing.get("value")) and not _is_number(fragment["value"]):
+        raise invalid(f"{name} must be a number.")
+
+
+def _stamped(existing: dict[str, Any], fragment: dict[str, Any]) -> dict[str, Any]:
+    """The fragment with the observation time, when it changes a value and doesn't state a time."""
+    if "observedAt" not in fragment and any(member in fragment for member in VALUE_MEMBERS):
+        return {**fragment, "observedAt": _now()}
+    return fragment
+
+
+def _merge_fragment(name: str, existing: Any, fragment: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(existing, dict):
+        raise invalid(f"{name} cannot be changed this way.")
+    _check_value(name, existing, fragment)
+    # The broker's merge needs the type, and keeps the value only if it is there.
+    kept = {m: existing[m] for m in VALUE_MEMBERS if m in existing and m not in fragment}
+    return {"type": existing.get("type"), **kept, **_stamped(existing, fragment)}
+
+
+def _merged_instance(name: str, instances: list[Any], fragment: dict[str, Any]) -> dict[str, Any]:
+    wanted = fragment.get("datasetId")
+    for instance in instances:
+        if isinstance(instance, dict) and instance.get("datasetId") == wanted:
+            _check_value(name, instance, fragment)
+            return {**instance, **_stamped(instance, fragment)}
+    raise not_found(f"{name} has no instance with that dataset.")

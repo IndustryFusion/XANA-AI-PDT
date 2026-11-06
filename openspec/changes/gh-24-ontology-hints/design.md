@@ -19,7 +19,7 @@ From the platform's chart, Makefile, tests and API notes, and a real Fuseki.
 
 ### 1. Values in queries
 
-An IRI is checked against the characters SPARQL allows in `<...>`; anything else is not placed in a query, and the answer is `none` or an error as data. A short name goes in as a string literal, with `\`, quotes and control characters escaped, and is compared with the local part of IRIs in the graph, so short names work on the sample data. Tests parse the resulting queries with a SPARQL parser, and check that hostile input yields the same query structure as a harmless name. They also run hostile input against a real Fuseki.
+An IRI is checked against the characters SPARQL allows in `<...>`; anything else is not placed in a query, and the answer is `none` or an error as data. A short name goes in as a string literal, with `\` and quotes escaped. A value with a control character or a `\u` code point escape is not placed at all, because SPARQL decodes those escapes before its grammar applies. A short name is compared with the local part of IRIs in the graph, so short names work on the sample data. Tests parse the resulting queries with a SPARQL parser, and check that hostile input yields the same query structure as a harmless name. They also run hostile input against a real Fuseki.
 
 **Alternative:** parameterised queries: SPARQL over HTTP has none. `rdflib` is added as a development dependency only, for the parser.
 
@@ -39,5 +39,5 @@ From `FUSEKI_GRAPH_BASE`, checked at startup to be an IRI that is safe to place 
 
 ## Risks and limits
 
-- **Fuseki version.** The platform builds its own image on Fuseki 6.1.0, which isn't published where it could be pulled. The local environment uses the public `stain/jena-fuseki` image. The PR states which versions were tested.
+- **Fuseki version.** The platform builds its own image on Fuseki 6.1.0, which isn't published where it could be pulled. The local environment uses the public `stain/jena-fuseki:5.1.0` image, which asks for its admin password to write, so the sample loader takes it from `FUSEKI_ADMIN_PASSWORD`. Tests pass on both.
 - **Hints are advice.** The explorer doesn't refuse a value outside them. The platform's rules report those as alerts.

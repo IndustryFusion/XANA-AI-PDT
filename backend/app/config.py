@@ -30,6 +30,7 @@ from pydantic import Field, SecretStr, ValidationError, field_validator, model_v
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.redact import Redactor, url_password
+from xana_agent.sources.ontology import is_iri
 
 Provider = Literal["ollama", "anthropic", "openai", "scripted"]
 
@@ -65,8 +66,17 @@ class Settings(BaseSettings):
 
     ngsi_url: str = "http://localhost:9090"
     ngsi_tenant: str | None = None
+    ngsi_context_url: str | None = None
+    pgrest_url: str = "http://pgrest:3000"
+    fuseki_url: str = "http://fuseki:3030"
+    fuseki_dataset: str = "iff"
+    fuseki_graph_base: str | None = None
+    mqtt_broker_url: str = "mqtt://emqx-listeners:1883"
+    mqtt_mgmt_url: str = "http://emqx-dashboard:18083"
+    mqtt_broker_notify_url: str | None = None
     timescale_db_url: SecretStr = SecretStr("postgresql://xana@localhost:5432/tsdb")
     timescale_table: str = "attributes"
+    timescale_entity_table: str = "entities"
     postgres_memory_url: SecretStr = SecretStr("postgresql://xana@localhost:5432/memory")
     postgres_sslmode: Literal["disable", "allow", "prefer", "require", "verify-ca", "verify-full"] | None = None
     postgres_sslrootcert: str | None = None
@@ -79,7 +89,31 @@ class Settings(BaseSettings):
     backend_reload: bool = False
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
 
-    @field_validator("timescale_table")
+    @field_validator("fuseki_dataset")
+    @classmethod
+    def _plain_dataset_name(cls, value: str) -> str:
+        if not re.fullmatch(r"[A-Za-z0-9_\-]+", value):
+            raise ValueError("must be a dataset name (letters, digits, dashes, underscores)")
+        return value
+
+    @field_validator("fuseki_graph_base")
+    @classmethod
+    def _safe_graph_base(cls, value: str | None) -> str | None:
+        if value is not None and not is_iri(value):
+            raise ValueError("must be an IRI without spaces, quotes or brackets; it goes into SPARQL queries")
+        return value
+
+    @field_validator("pgrest_url", "fuseki_url", "mqtt_mgmt_url")
+    @classmethod
+    def _http_address(cls, value: str) -> str:
+        return with_scheme(value, "http")
+
+    @field_validator("mqtt_broker_url", "mqtt_broker_notify_url")
+    @classmethod
+    def _mqtt_address(cls, value: str | None) -> str | None:
+        return value and with_scheme(value, "mqtt")
+
+    @field_validator("timescale_table", "timescale_entity_table")
     @classmethod
     def _plain_table_name(cls, value: str) -> str:
         if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?", value):
@@ -130,6 +164,11 @@ class Settings(BaseSettings):
                 url_password(self.postgres_memory_url.get_secret_value()),
             ]
         )
+
+
+def with_scheme(address: str, scheme: str) -> str:
+    """The address with a scheme, for values written as `host:port`."""
+    return address if "://" in address else f"{scheme}://{address}"
 
 
 def _with_query(url: str, values: dict[str, str | None]) -> str:

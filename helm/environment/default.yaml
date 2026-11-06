@@ -33,6 +33,18 @@ keycloakClientId: scorpio
 factoryId: ""
 
 ngsiUrl: http://scorpio-all-in-one-runner:9090
+# JSON-LD context for short names. Without it, names are the platform's full IRIs.
+ngsiContextUrl: ""
+pgrestUrl: http://pgrest:3000
+# Machine ontology and shapes. The graph base is http://<Fuseki's external host>/<realm> on the platform.
+fusekiUrl: http://fuseki:3030
+fusekiDataset: iff
+fusekiGraphBase: http://fuseki.local/iff
+# Live updates in the Data Explorer. Operators need Factory-Admin or Factory-Reader on client scorpio.
+mqttBrokerUrl: mqtt://emqx-listeners:1883
+mqttMgmtUrl: http://emqx-dashboard:18083
+# The MQTT broker as Scorpio reaches it, if different.
+mqttBrokerNotifyUrl: ""
 databaseHost: acid-cluster
 databasePort: 5432
 databaseCredentialsSecret: ngb.acid-cluster.credentials

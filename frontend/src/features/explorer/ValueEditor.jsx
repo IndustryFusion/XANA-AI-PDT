@@ -17,9 +17,18 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import { useData } from '../../data/useData'
 
+/** The allowed range in words, saying whether each limit is included; null without one. */
+export function rangeText(hint) {
+  if (!hint || (hint.minimum == null && hint.maximum == null)) return null
+  const low = hint.minimum == null ? null : `${hint.minimumExclusive ? 'above' : 'from'} ${hint.minimum}`
+  const high = hint.maximum == null ? null : `${hint.maximumExclusive ? 'below' : 'up to'} ${hint.maximum}`
+  return `Allowed: ${[low, high].filter(Boolean).join(', ')}`
+}
+
 /**
  * In-place editor of one value: an input that offers the data model's
- * suggested values as a list (arrow keys move through it, Enter picks one).
+ * suggested values as a list (arrow keys move through it, Enter picks one),
+ * and says what range is allowed. Without hints it works just the same.
  * Enter or ✓ saves, Escape or ✗ cancels. A rejected change keeps the
  * editor open with the entered value and shows the reason.
  */
@@ -31,7 +40,8 @@ export default function ValueEditor({ label, initial, entityType, attribute, onS
   const inputRef = useRef(null)
   const ids = { input: useId(), list: useId(), error: useId() }
   const hints = useData('entities', 'getValueHints', [{ entityType, attribute }])
-  const options = (hints.data ?? []).filter((h) => h !== text)
+  const options = (hints.data?.values ?? []).filter((h) => h !== text)
+  const range = rangeText(hints.data)
 
   useEffect(() => { inputRef.current?.focus() }, [])
   useEffect(() => { setActive(-1) }, [text])
@@ -101,6 +111,7 @@ export default function ValueEditor({ label, initial, entityType, attribute, onS
           ))}
         </ul>
       )}
+      {range && <p className="muted value-editor__range">{range}</p>}
       {error && <p id={ids.error} className="form-error value-editor__error" role="alert">Not saved: {error.message}</p>}
     </div>
   )

@@ -1,0 +1,12 @@
+{
+  "method": "GET",
+  "path": "/api/ngsi/timeshift/types?at=2026-11-06T21%3A19%3A59.238Z",
+  "status": 200,
+  "body": [
+    "Component",
+    "Factory",
+    "Machine",
+    "ProductionLine",
+    "Sensor"
+  ]
+}

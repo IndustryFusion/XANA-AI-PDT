@@ -43,5 +43,7 @@ async def connect(body: Credentials, request: Request) -> dict:
 
 @router.post("/logout", status_code=204)
 async def logout(request: Request) -> Response:
+    # First, while the token can still delete the subscription that holds it.
+    await request.app.state.live.stop()
     await request.app.state.session.logout()
     return Response(status_code=204)

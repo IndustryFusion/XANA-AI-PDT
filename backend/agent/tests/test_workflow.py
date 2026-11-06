@@ -22,6 +22,7 @@ import pytest
 from xana_agent import InMemoryIncidentMemory, NgsiContextSource, Outcome, PastIncident, RoundInput, StepEvent, Workflow
 from xana_agent.schemas import Decision, HypothesisList, ValidatedHypothesisList, ValidationPlan
 from xana_agent.scripted import ScriptedChatModel
+from xana_agent.sources.base import AttributeChange, LifecycleEvent, SourceUnavailable
 from xana_agent.testing import (
     MACHINE_ID,
     FailingMemory,
@@ -473,3 +474,78 @@ async def test_full_run_sends_no_writes_to_the_broker():
     async for _ in wf.act(RoundInput(machine_id=MACHINE_ID, issue=ISSUE), outcome.decision, []):
         pass
     assert requests and {r.method for r in requests} == {"GET"}
+
+
+async def _observe(history, context=None):
+    by_node, _steps, _outcome = await run(workflow(history=history, context=context))
+    return by_node["observe"].output
+
+
+async def test_observe_lists_relationship_and_text_changes_and_lifecycle():
+    at = datetime.now(UTC)
+    history = FakeHistorySource(sample_history())
+    history.attribute_changes = [
+        AttributeChange(entity_id=MACHINE_ID, attribute="hasFilter", at=at, value="urn:f:2", kind="relationship")
+    ]
+    history.lifecycle_events = [LifecycleEvent(entity_id="urn:c:1", at=at, event="deleted")]
+    output = await _observe(history)
+    assert output["changes"][0]["value"] == "urn:f:2"
+    assert output["lifecycle"][0]["event"] == "deleted"
+    assert [s["status"] for s in output["sources"]] == ["ok", "ok"]
+
+
+async def test_observe_goes_on_when_only_the_changes_fail():
+    class NoChanges(FakeHistorySource):
+        async def changes(self, entity_ids, window, limit=50):
+            raise SourceUnavailable("Attribute history table not found.")
+
+    output = await _observe(NoChanges(sample_history()))
+    assert output["changes"] == []
+    assert output["signals"]
+    assert output["partial_data"] is False
+    change_source = next(s for s in output["sources"] if s["source"] == "Change history")
+    assert change_source["status"] == "unavailable"
+    assert "not found" in change_source["detail"]
+
+
+async def test_history_source_without_changes_is_taken_to_have_none():
+    class OnlyNumbers:
+        async def recent(self, entity_ids, window):
+            return []
+
+        async def metrics(self, entity_id, attribute, window, bucket):
+            return []
+
+    output = await _observe(OnlyNumbers())
+    assert output["changes"] == [] and output["lifecycle"] == []
+    assert [s["source"] for s in output["sources"]] == ["Context broker", "Time-series database"]
+
+
+async def test_attributes_named_by_iris_appear_once_with_their_trend():
+    iri = "https://industry-fusion.com/types/v0.9/temp"
+    at = datetime.now(UTC)
+    entity = {"id": MACHINE_ID, "type": "Machine", iri: {"type": "Property", "value": 42.0}}
+    series = {(MACHINE_ID, "temp"): [(at - timedelta(hours=2), 10.0), (at - timedelta(hours=1), 42.0)]}
+    output = await _observe(FakeHistorySource(series), FakeContextSource([entity]))
+    assert len(output["signals"]) == 1
+    assert output["signals"][0]["attribute"] == "temp"
+    assert output["signals"][0]["assessment"] == "rising"
+
+
+async def test_observed_changes_reach_the_hypothesize_prompt():
+    seen = []
+    script = StepScript()
+    history = FakeHistorySource(sample_history())
+    history.attribute_changes = [
+        AttributeChange(entity_id=MACHINE_ID, attribute="mode", at=datetime.now(UTC), value="manual-xyz", kind="text")
+    ]
+    model = script.model()
+    original = model.answers.get(HypothesisList)
+
+    def recording(prompt):
+        seen.append(str(prompt))
+        return original(prompt) if callable(original) else original
+
+    model.answers[HypothesisList] = recording
+    await run(workflow(llm=model, history=history))
+    assert any("manual-xyz" in text for text in seen)

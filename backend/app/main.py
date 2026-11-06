@@ -27,17 +27,21 @@ from datetime import timedelta
 from fastapi import FastAPI
 from langchain_core.language_models import BaseChatModel
 
-from app.api import auth, diagnostics, errors, incidents, runs, stream
+from app.api import auth, diagnostics, errors, incidents, ngsi, runs, shacl, stream
 from app.auth import KeycloakSession
 from app.config import Settings, get_llm, load_settings
 from app.health import HealthService
 from app.memory.migrate import Migrator
 from app.memory.store import Database, IncidentStore, RunStore
+from app.ngsi.broker import ContextBroker
+from app.ngsi.history import AttributeHistory
+from app.ngsi.live import LiveUpdates
 from app.redact import RedactingFilter, Redactor
 from app.runs.machines import MachineResolver
 from app.runs.manager import RunManager
 from app.tracing import tracing_callbacks
 from xana_agent import NgsiContextSource, TimescaleHistorySource, Workflow
+from xana_agent.sources import FusekiOntologySource
 from xana_agent.sources.base import ContextSource, HistorySource, IncidentMemory
 
 log = logging.getLogger(__name__)
@@ -64,9 +68,13 @@ class AgentDeps:
     def from_settings(cls, s: Settings, token: Callable[[], str | None] | None = None) -> AgentDeps:
         return cls(
             llm=get_llm(s),
-            context=NgsiContextSource(s.ngsi_url, s.ngsi_tenant, token=token),
-            history=TimescaleHistorySource(s.timescale_db_url.get_secret_value(), s.timescale_table),
-            machines=MachineResolver(s.ngsi_url, s.ngsi_tenant, s.health_timeout_s, token=token),
+            context=NgsiContextSource(s.ngsi_url, s.ngsi_tenant, token=token, context_url=s.ngsi_context_url),
+            history=TimescaleHistorySource(
+                s.timescale_db_url.get_secret_value(), s.timescale_table, entity_table=s.timescale_entity_table
+            ),
+            machines=MachineResolver(
+                s.ngsi_url, s.ngsi_tenant, s.health_timeout_s, token=token, context_url=s.ngsi_context_url
+            ),
         )
 
 
@@ -116,7 +124,10 @@ def create_app(
         # that needs them (or from the memory health check).
         await db.open()
         task = asyncio.create_task(manager.start_up())
+        if not session.enabled:
+            live.start()
         yield
+        await live.stop()
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await task
@@ -133,6 +144,22 @@ def create_app(
     app.state.health = health
     app.state.runs = manager
     app.state.incidents = incident_store
+    app.state.broker = ContextBroker(settings, session.token)
+    live = LiveUpdates(settings, session.token, session.enabled, app.state.broker)
+    app.state.live = live
+
+    async def start_live_updates() -> None:
+        live.start()
+
+    session.on_sign_in.append(start_live_updates)
+    app.state.attribute_history = AttributeHistory(settings, session.token)
+    app.state.ontology = FusekiOntologySource(
+        settings.fuseki_url,
+        settings.fuseki_dataset,
+        settings.fuseki_graph_base,
+        token=session.token,
+        timeout_s=settings.health_timeout_s,
+    )
     errors.install(app)
 
     @app.get("/healthz", include_in_schema=False)
@@ -144,5 +171,7 @@ def create_app(
     app.include_router(diagnostics.router)
     app.include_router(runs.router)
     app.include_router(incidents.router)
+    app.include_router(ngsi.router)
+    app.include_router(shacl.router)
     app.include_router(stream.router)
     return app

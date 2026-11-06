@@ -14,6 +14,7 @@
 // limitations under the License.
 //
 
+import { rangeText } from '../../src/features/explorer/ValueEditor'
 import { areas } from '../../src/data'
 import { store } from '../../src/data/sources/mock'
 import { writeControls } from '../../src/data/sources/mock/controls'
@@ -132,8 +133,12 @@ describe('edit', () => {
   })
 
   test('value hints from the data model', async () => {
-    expect(await entities.getValueHints({ entityType: 'Machine', attribute: 'status' })).toContain('maintenance')
-    expect(await entities.getValueHints({ entityType: 'Sensor', attribute: 'value' })).toEqual([])
+    const status = await entities.getValueHints({ entityType: 'Machine', attribute: 'status' })
+    expect(status).toMatchObject({ hintType: 'enum', minimum: null })
+    expect(status.values).toContain('maintenance')
+    const value = await entities.getValueHints({ entityType: 'Sensor', attribute: 'value' })
+    expect(value).toMatchObject({ hintType: 'range', values: [], minimum: -40, maximum: 1000, maximumExclusive: true })
+    expect(await entities.getValueHints({ entityType: 'Sensor', attribute: 'name' })).toMatchObject({ hintType: 'none', values: [] })
   })
 })
 
@@ -246,4 +251,14 @@ describe('live updates', () => {
     await vi.advanceTimersByTimeAsync(10)
     expect(later[0]).toMatchObject({ type: 'error' })
   })
+})
+
+describe('allowed range in words', () => {
+  test.each([
+    [{ minimum: 20, maximum: 50, minimumExclusive: false, maximumExclusive: true }, 'Allowed: from 20, below 50'],
+    [{ minimum: 0, maximum: null, minimumExclusive: true }, 'Allowed: above 0'],
+    [{ minimum: null, maximum: 9, maximumExclusive: false }, 'Allowed: up to 9'],
+    [{ minimum: null, maximum: null }, null],
+    [undefined, null],
+  ])('%j', (hint, text) => expect(rangeText(hint)).toBe(text))
 })

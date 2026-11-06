@@ -39,6 +39,8 @@ const VALUE_HINTS = {
   ProductionLine: { shifts: ['early', 'late', 'night'] },
 }
 
+const RANGE_HINTS = { Sensor: { value: { minimum: -40, maximum: 1000, maximumExclusive: true } } }
+
 /** Sample documents `fetchImportDocument` serves; the mock makes no network requests. */
 export const SAMPLE_DOCUMENTS = {
   'https://samples.example.org/ngsi-ld/line-d.json': [
@@ -316,6 +318,12 @@ export function createEntitiesArea(store) {
       return seriesOf(entity, name, lo, hi) ?? []
     }),
 
+    getAttributeStatus: withControls((id) => {
+      const entity = find(id)
+      if (!entity) return {}
+      return Object.fromEntries(attributeNames(entity).map((name) => [name, { deleted: false, observedAt: entity[name]?.observedAt ?? null }]))
+    }),
+
     listTypesAt: withControls((at) => [...new Set(entitiesAt(parseMoment(at)).map((e) => e.type))].sort()),
     queryEntitiesAt: withControls((at, params = {}) => query(entitiesAt(parseMoment(at)), params)),
 
@@ -339,6 +347,19 @@ export function createEntitiesArea(store) {
       ? { status: 'ok', detail: null }
       : { status: 'unavailable', detail: 'The context broker does not deliver notifications (simulated).' })),
 
-    getValueHints: withControls(({ entityType, attribute } = {}) => [...(VALUE_HINTS[entityType]?.[attribute] ?? [])]),
+    getValueHints: withControls(({ entityType, attribute } = {}) => {
+      const values = [...(VALUE_HINTS[entityType]?.[attribute] ?? [])]
+      const range = RANGE_HINTS[entityType]?.[attribute]
+      return {
+        hintType: values.length ? 'enum' : range ? 'range' : 'none',
+        values,
+        minimum: range?.minimum ?? null,
+        maximum: range?.maximum ?? null,
+        minimumExclusive: false,
+        maximumExclusive: range?.maximumExclusive ?? false,
+        datatype: null,
+        detail: null,
+      }
+    }),
   }
 }

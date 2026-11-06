@@ -53,6 +53,23 @@ class Bucket(BaseModel):
     count: int
 
 
+class AttributeChange(BaseModel):
+    """A relationship target or text value that was set."""
+
+    entity_id: str
+    attribute: str
+    at: datetime
+    value: str
+    kind: Literal["relationship", "text"]
+
+
+class LifecycleEvent(BaseModel):
+    entity_id: str
+    entity_type: str | None = None
+    at: datetime
+    event: Literal["created", "deleted"]
+
+
 @runtime_checkable
 class ContextSource(Protocol):
     """Current state of entities (NGSI-LD context broker)."""
@@ -76,6 +93,19 @@ class HistorySource(Protocol):
 
     async def metrics(self, entity_id: str, attribute: str, window: timedelta, bucket: timedelta) -> list[Bucket]:
         """Minimum, maximum, average and last value per time bucket, oldest first."""
+        ...
+
+
+@runtime_checkable
+class ChangeHistorySource(Protocol):
+    """What a history source may offer besides numbers. A source without it is taken to have none."""
+
+    async def changes(self, entity_ids: list[str], window: timedelta, limit: int = 50) -> list[AttributeChange]:
+        """Relationship and text values set within `window`, newest first."""
+        ...
+
+    async def lifecycle(self, entity_ids: list[str], window: timedelta, limit: int = 50) -> list[LifecycleEvent]:
+        """Entities created or deleted within `window`, newest first."""
         ...
 
 

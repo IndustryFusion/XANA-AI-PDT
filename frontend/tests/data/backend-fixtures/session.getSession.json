@@ -11,6 +11,6 @@
     },
     "factory_id": "urn:ifric:factory:sample",
     "company_id": "urn:ifric:company:sample",
-    "token_expires_in_s": 300
+    "token_expires_in_s": 70
   }
 }

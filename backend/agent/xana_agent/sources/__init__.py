@@ -16,23 +16,31 @@
 """Data sources of the workflow: protocols and implementations."""
 
 from xana_agent.sources.base import (
+    AttributeChange,
     Bucket,
+    ChangeHistorySource,
     ContextSource,
     HistorySource,
     IncidentMemory,
+    LifecycleEvent,
     SignalHistory,
     SourceUnavailable,
 )
 from xana_agent.sources.memory import InMemoryIncidentMemory
 from xana_agent.sources.ngsi import NgsiContextSource
+from xana_agent.sources.ontology import FusekiOntologySource
 from xana_agent.sources.timescale import TimescaleHistorySource
 
 __all__ = [
+    "FusekiOntologySource",
+    "AttributeChange",
     "Bucket",
+    "ChangeHistorySource",
     "ContextSource",
     "HistorySource",
     "InMemoryIncidentMemory",
     "IncidentMemory",
+    "LifecycleEvent",
     "NgsiContextSource",
     "SignalHistory",
     "SourceUnavailable",
