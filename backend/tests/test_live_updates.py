@@ -471,6 +471,8 @@ def test_sign_out_deletes_the_subscription_first():
             order.append("live")
 
     class Session:
+        enabled = True
+
         async def logout(self):
             order.append("session")
 
@@ -480,6 +482,11 @@ def test_sign_out_deletes_the_subscription_first():
     app.include_router(auth.router)
     assert TestClient(app).post("/api/auth/logout").status_code == 204
     assert order == ["live", "session"]
+
+    order.clear()
+    Session.enabled = False
+    assert TestClient(app).post("/api/auth/logout").status_code == 204
+    assert order == ["session"]
 
 
 async def test_sign_in_starts_live_updates():
