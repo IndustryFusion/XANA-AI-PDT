@@ -118,6 +118,7 @@ jobs:
           TEST_PGREST_URL: http://127.0.0.1:3000
           TEST_TSDB_URL: postgresql://xana@127.0.0.1:5432/tsdb
           TEST_FUSEKI_URL: http://127.0.0.1:3030
+          FUSEKI_ADMIN_PASSWORD: admin
         run: |
           pip install -e ./agent -e ".[dev]"
           pytest tests/test_explorer_real.py tests/test_ontology_real.py
