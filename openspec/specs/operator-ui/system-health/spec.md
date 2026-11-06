@@ -20,6 +20,10 @@ The System area SHALL list every dependency with status label, latency, detail a
 - **WHEN** the operator chooses to check again
 - **THEN** all dependencies are checked anew and the time of the check updates
 
+#### Scenario: Model list
+- **WHEN** the operator opens the System area
+- **THEN** each model the agent uses is shown with its name, role and whether it is available
+
 ### Requirement: Service settings
 The System area SHALL show the service addresses in use and let the operator change them, validating addresses before saving and showing which values come from the deployment and which were changed.
 
@@ -36,8 +40,12 @@ The System area SHALL show the service addresses in use and let the operator cha
 - **THEN** the deployment's value is used again
 
 ### Requirement: Session state
-The System area SHALL show the identity provider, the signed-in user and the session state (active, refreshing, expired).
+The System area SHALL show the identity provider, the signed-in user, the session state (active, refreshing, expired) and the time left on the token.
 
 #### Scenario: Session shown
 - **WHEN** the operator opens the System area while signed in
 - **THEN** the identity provider, user and an active session state are shown
+
+#### Scenario: Token countdown
+- **WHEN** the operator opens the System area while signed in
+- **THEN** the time left on the token is shown and counts down
