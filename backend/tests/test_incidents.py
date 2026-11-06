@@ -296,3 +296,32 @@ async def test_reopen_starts_a_new_run_and_refuses_a_second_reopen(url):
         third = await client.post(f"/api/incidents/{incident['id']}/reopen")
         assert third.status_code == 202
         await until(client, third.json()["run_id"])
+
+
+async def test_reopen_is_refused_while_the_model_is_down(url):
+    app = make_app(url)
+
+    async def down():
+        return "The language model is not available: gone"
+
+    async with running(app) as client:
+        run_id = await paused(client, MACHINE, "Hydraulic pressure drops")
+        await client.post(f"/api/agent/stop/{run_id}")
+        incident = await archived(client, run_id)
+        app.state.runs._model_problem = down
+        response = await client.post(f"/api/incidents/{incident['id']}/reopen")
+        assert response.status_code == 503
+        assert "language model" in response.json()["error"]["message"]
+        app.state.runs._model_problem = None
+        assert (await client.post(f"/api/incidents/{incident['id']}/reopen")).status_code == 202
+
+
+async def test_reopening_an_unknown_incident_is_not_found_while_the_model_is_down(url):
+    app = make_app(url)
+
+    async def down():
+        return "The language model is not available: gone"
+
+    async with running(app) as client:
+        app.state.runs._model_problem = down
+        assert (await client.post("/api/incidents/999999/reopen")).status_code == 404

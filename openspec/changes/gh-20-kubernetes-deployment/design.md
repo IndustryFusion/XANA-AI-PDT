@@ -37,6 +37,10 @@ The backend has a Dockerfile used by the local environment. The frontend runs on
 
 **One backend replica.** Runs and their streams live in the process. The chart fixes it at one replica, and the strategy is `Recreate`. Alternative: an option for more replicas, which wouldn't work.
 
+**Install-time secrets come from the shell on every `sync`.** Helmfile reads named `XANA_*` variables into `secrets.values`. Helmfile doesn't keep earlier values, so they are needed each time, or an existing Secret can be used. Alternative: `helm upgrade --reuse-values`, which a later `helmfile sync` undoes.
+
+**The CA certificate comes from a named Secret.** With `database.caCert.secret` set, the chart mounts it and sets `POSTGRES_SSLROOTCERT`. Alternative: a free-form path in `config`, which has no file behind it.
+
 ## Architectural implications
 
 `architecture.md` names namespace `xana-ai-pdt`, and a ConfigMap for nginx. Both change here, and the section is corrected. The chart's name stays `xana-pdt`, and the Helmfile layout follows the description already there, without the retrieval release.

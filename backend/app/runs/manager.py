@@ -297,7 +297,6 @@ class RunManager:
 
     async def reopen_incident(self, incident_id: int) -> str:
         await self.ready()
-        await self._require_model()
         async with self._reopen_lock:
             try:
                 incident = await self._incidents.get(incident_id)
@@ -308,6 +307,7 @@ class RunManager:
             reopened = incident["reopened_run_id"]
             if reopened and reopened in self._runs:
                 raise conflict(f"Incident {incident['number']} is already open again as run {reopened}.")
+            await self._require_model()
             run_id = await self._create(incident["machine_id"], incident["issue"])
             try:
                 await self._incidents.set_reopened(incident_id, run_id)

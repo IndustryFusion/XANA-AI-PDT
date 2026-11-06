@@ -36,3 +36,8 @@ app.kubernetes.io/component: {{ .component }}
 {{- define "xana-pdt.frontend" -}}
 {{- printf "%s-frontend" .Release.Name -}}
 {{- end }}
+
+{{/* Where the database's CA certificate is mounted, when one is named. */}}
+{{- define "xana-pdt.databaseCaPath" -}}
+/etc/xana/database-ca/ca.crt
+{{- end }}

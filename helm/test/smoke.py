@@ -18,7 +18,7 @@
     python helm/test/smoke.py http://127.0.0.1 --host xana.localhost run
     python helm/test/smoke.py http://127.0.0.1 --host xana.localhost after-restart
 
-Needs httpx and websockets. `run` leaves the run's ID in `.smoke-run`, for `after-restart`.
+Needs httpx and websockets. `run` leaves the run and incident IDs in `.smoke-run`, for `after-restart`.
 """
 
 import argparse
@@ -34,6 +34,7 @@ from websockets.asyncio.client import connect
 
 MACHINE = "laser-cutter-01"
 STATE = pathlib.Path(".smoke-run")
+ANALYSIS = ("observe", "hypothesize", "validate", "decide")
 
 
 def fail(message: str) -> None:
@@ -80,26 +81,37 @@ def run(client: httpx.Client, url: str, host: str | None) -> None:
 
     run_id = wait_for_machine(client)
     steps = asyncio.run(stream_until_waiting(url, host, run_id))
-    if "observe" not in steps:
-        fail(f"the stream delivered no observe step: {steps}")
+    if missing := [step for step in ANALYSIS if step not in steps]:
+        fail(f"the stream did not deliver {missing}: {steps}")
     print(f"run {run_id} over the stream: {steps}")
-    STATE.write_text(run_id)
 
-    # Above nginx's default limit of 1 MB. The backend answers, so the proxy did not refuse it.
+    # Above nginx's default limit of 1 MB. The backend refuses it as invalid, so it got that far.
     big = client.post(f"/api/agent/clarify/{run_id}", content=b"x" * (2 * 1024 * 1024))
-    if big.status_code == 413:
-        fail("the proxy refused a 2 MB body")
+    if big.status_code != 422:
+        fail(f"a 2 MB body did not reach the backend: {big.status_code}")
     print(f"2 MB body reached the backend: {big.status_code}")
+
+    incident = incident_of(client, run_id)
+    if incident is None:
+        fail(f"run {run_id} has no incident")
+    STATE.write_text(f"{run_id} {incident}")
+    print(f"incident {incident}: ok")
+
+
+def incident_of(client: httpx.Client, run_id: str) -> int | None:
+    return client.get(f"/api/agent/status/{run_id}").json().get("incident_id")
 
 
 def after_restart(client: httpx.Client) -> None:
-    run_id = STATE.read_text().strip()
+    run_id, incident = STATE.read_text().split()
     deadline = time.monotonic() + 120
     while True:
         try:
             response = client.get(f"/api/agent/status/{run_id}")
             if response.status_code == 200:
-                print(f"run kept after the restart: {response.json()['status']}")
+                if str(response.json().get("incident_id")) != incident:
+                    fail(f"run {run_id} lost incident {incident} in the restart: {response.text}")
+                print(f"run and incident {incident} kept after the restart: {response.json()['status']}")
                 return
         except httpx.HTTPError:
             pass
