@@ -94,6 +94,7 @@ class Dataspace:
         self.status_on_accept: dict[str, str] = {}  # performative → the status its sends get at once
         self.fail_status_on_accept: dict[str, str] = {}  # performative → the error message with that status
         self.escalate_loses = False  # the builder's escalate crosses ours and wins
+        self.slow_accept: dict[str, float] = {}  # performative → seconds before the gateway answers its send
         self.fail_status: dict[str, str] = {}
         self.conversations: dict[str, dict[str, Any]] = {}
         self.refused: list[dict[str, Any]] = []
@@ -140,6 +141,9 @@ class Dataspace:
         self.reached[key] = self.reached.get(key, 0) + 1
         if key in self.holds:
             await self.holds[key].wait()
+        if key == "POST /outbox/messages" and self.slow_accept:
+            performative = json.loads(request.content).get("performative")
+            await asyncio.sleep(self.slow_accept.get(performative, 0))
         forced = self.status_for.get(key)
         if forced:
             return httpx.Response(forced, json={"detail": f"forced {forced}"})

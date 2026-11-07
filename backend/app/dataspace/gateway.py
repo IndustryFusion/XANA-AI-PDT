@@ -18,8 +18,10 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
+from contextvars import ContextVar
 from typing import Any
 from urllib.parse import quote
 
@@ -47,6 +49,34 @@ DECISIONS = ("approve", "deny")
 
 NameLookup = Callable[[list[str]], Awaitable[dict[str, str]]]
 
+# When set, every gateway call in this context ends by then: an operation of several calls stays within one time.
+_deadline: ContextVar[float | None] = ContextVar("gateway_deadline", default=None)
+
+
+@contextlib.contextmanager
+def within(seconds: float):
+    """Gateway calls made inside end within `seconds` from now, all together."""
+    token = _deadline.set(asyncio.get_running_loop().time() + seconds)
+    try:
+        yield
+    finally:
+        _deadline.reset(token)
+
+
+def time_left() -> float | None:
+    """Seconds left of the current `within`, or None outside one."""
+    deadline = _deadline.get()
+    return None if deadline is None else deadline - asyncio.get_running_loop().time()
+
+
+def _bounded(limit_s: float) -> float:
+    left = time_left()
+    if left is None:
+        return limit_s
+    if left <= 0:
+        raise unavailable(f"{SERVICE} took too long for this operation, so it was not finished.")
+    return min(limit_s, left)
+
 
 async def _no_names(ids: list[str]) -> dict[str, str]:
     return {}
@@ -70,12 +100,12 @@ class GatewayClient:
         token = self.connection.token()
         if token is None:
             raise unavailable("Not connected to the dataspace.")
-        response = await self._send(method, path, token, limit_s, kwargs)
+        response = await self._send(method, path, token, _bounded(limit_s), kwargs)
         if response.status_code == 401:
             token = await self.connection.renew_refused(token)
             if token is None:
                 raise unavailable("The dataspace refused the token, and it could not be renewed.")
-            response = await self._send(method, path, token, limit_s, kwargs)
+            response = await self._send(method, path, token, _bounded(limit_s), kwargs)
         if response.status_code >= 400:
             raise refusal(response)
         return response
@@ -85,8 +115,12 @@ class GatewayClient:
         headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
         try:
             async with httpx.AsyncClient(timeout=limit_s, transport=self._transport) as client:
-                return await client.request(method, url, headers=headers, **kwargs)
-        except httpx.TimeoutException:
+                sending = client.request(method, url, headers=headers, **kwargs)
+                if time_left() is None:
+                    return await sending
+                # Within an operation's time, the whole request, not each phase, ends by then.
+                return await asyncio.wait_for(sending, limit_s)
+        except (httpx.TimeoutException, TimeoutError):
             raise unavailable(f"{SERVICE} did not answer in time.") from None
         except httpx.HTTPError:
             raise unavailable(f"{SERVICE} can't be reached.") from None
