@@ -70,4 +70,4 @@ ignore = ["S101"]
 known-first-party = ["app", "sample_data", "tests", "xana_agent"]
 
 [tool.ruff.lint.per-file-ignores]
-"**/tests/**" = ["S105", "S106", "S108"]
+"**/tests/**" = ["S105", "S106", "S108", "ASYNC110", "ASYNC210", "ASYNC221"]

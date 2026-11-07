@@ -121,3 +121,12 @@ export function statusOf(states, name) {
   const key = Object.keys(states).find((k) => k.endsWith(`/${name}`) || k.endsWith(`#${name}`))
   return key ? states[key] : null
 }
+
+/** Whether two attribute values are the same, whatever the order of their members. */
+export function sameValue(a, b) {
+  if (a === b) return true
+  if (!a || !b || typeof a !== 'object' || typeof b !== 'object') return false
+  if (Array.isArray(a) !== Array.isArray(b)) return false
+  const keys = Object.keys(a)
+  return keys.length === Object.keys(b).length && keys.every((key) => sameValue(a[key], b[key]))
+}

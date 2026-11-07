@@ -449,6 +449,7 @@ PGREST_URL=http://pgrest:3000        # the Data Explorer's history
 MQTT_BROKER_URL=mqtt://emqx-listeners:1883       # live updates
 MQTT_MGMT_URL=http://emqx-dashboard:18083
 MQTT_BROKER_NOTIFY_URL=              # the MQTT broker as Scorpio reaches it, if different
+WS_ALLOWED_ORIGINS=                  # other origins that may open the live updates stream
 NGSI_TENANT=                         # optional NGSILD-Tenant
 NGSI_CONTEXT_URL=                    # Link context; short names need it on data with full IRIs
 ALERTA_URL=http://...

@@ -51,15 +51,18 @@ TICK_S = 5.0
 VERIFY_EVERY_S = 60.0
 RECONNECT_S = (1.0, 2.0, 4.0, 8.0, 15.0)
 STOP_TIMEOUT_S = 5.0
+LATE_CREATE_S = 1.0
 QUEUE_SIZE = 256
 # A fixed name: the broker's check goes by the token's roles, and the platform treats `admin` specially.
 MQTT_USER = "xana-explorer"
 NEEDED_ROLE = "Factory-Admin or Factory-Reader on client scorpio"
 NOT_AUTHORISED = {4, 5, 134, 135}
+# The explorer's own changes should come back through the broker within this time.
+DELIVERY_TIMEOUT_S = 15.0
 
 
 class Refusal(Exception):
-    """The MQTT broker refused the credentials."""
+    """The MQTT broker refused the credentials or the topic."""
 
 
 @dataclass(eq=False)
@@ -103,6 +106,11 @@ def parse_notification(payload: bytes) -> list[dict[str, Any]]:
     return changes
 
 
+def _refused_code(code: Any) -> bool:
+    """Whether a SUBACK refuses a topic. A broker that does so still accepts the connection."""
+    return bool(getattr(code, "is_failure", False)) or (isinstance(code, int) and code >= 128)
+
+
 async def mqtt_messages(
     url: str, password: str | None, client_id: str, topic: str, on_ready: Callable[[], None]
 ) -> AsyncIterator[bytes]:
@@ -119,13 +127,15 @@ async def mqtt_messages(
             tls_context=ssl.create_default_context() if secure else None,
             timeout=10,
         ) as client:
-            await client.subscribe(topic, qos=1)
+            granted = await client.subscribe(topic, qos=1)
+            if any(_refused_code(code) for code in granted or ()):
+                raise Refusal("subscribe")
             on_ready()
             async for message in client.messages:
                 yield bytes(message.payload)
     except aiomqtt.MqttCodeError as error:
         if getattr(error.rc, "value", error.rc) in NOT_AUTHORISED:
-            raise Refusal from None
+            raise Refusal("connect") from None
         raise
 
 
@@ -163,10 +173,14 @@ class LiveUpdates:
         self._lock = asyncio.Lock()
         self._subscribed_token: str | None = None
         self._exists = False
+        self._maybe_exists = False  # a create was sent, whatever came of it
         self._expires_at = 0.0
         self._verified_at = 0.0
         self._swept = False
         self._connected = False
+        self._stopping = False
+        self._last_received: float | None = None
+        self._expected_by: float | None = None
         self._state = "waiting_for_sign_in" if sign_in_enabled else "connecting"
         self._detail = "Live updates start after sign-in." if sign_in_enabled else "Connecting."
 
@@ -174,24 +188,40 @@ class LiveUpdates:
 
     def start(self) -> None:
         """Starts, unless running. Waits for nothing: it may be called on every sign-in."""
+        self._stopping = False
         if self._task is None or self._task.done():
             self._task = asyncio.create_task(self._run())
 
     async def stop(self) -> None:
-        """Stops, and deletes the subscription while the token still works. Never raises."""
+        """Stops, and deletes the subscription while the token still works. Never raises.
+
+        A create under way is left to finish, as cancelling it could still let it reach the broker
+        after the delete. If it takes too long it is cancelled, and the delete is repeated once.
+        """
+        self._stopping = True
         task, self._task = self._task, None
+        finished = True
         if task is not None:
-            task.cancel()
-            await asyncio.wait({task})
+            _, pending = await asyncio.wait({task}, timeout=STOP_TIMEOUT_S)
+            finished = not pending
+            if pending:
+                task.cancel()
+                await asyncio.wait({task})
         await self._stop_listening()
         async with self._lock:
             with contextlib.suppress(Exception):
                 await asyncio.wait_for(self._delete(), STOP_TIMEOUT_S)
+                if not finished:
+                    await asyncio.sleep(LATE_CREATE_S)
+                    await asyncio.wait_for(self._delete(), STOP_TIMEOUT_S)
             self._forget()
-        self._set_state("stopped", "Live updates are stopped.")
+        if self._sign_in:
+            self._set_state("waiting_for_sign_in", "Live updates start after sign-in.")
+        else:
+            self._set_state("stopped", "Live updates are stopped.")
 
     async def _run(self) -> None:
-        while True:
+        while not self._stopping:
             try:
                 async with self._lock:
                     await self._tick()
@@ -223,19 +253,41 @@ class LiveUpdates:
                 self._set_state("subscription_failed", "The context broker can't keep the live update subscription.")
             return
         if self._connected and self._exists:
+            self._report_delivery()
+
+    def _report_delivery(self) -> None:
+        """What is known: the broker reports nothing about MQTT failures, whatever happens to them."""
+        if self._expected_by is not None and self._clock() >= self._expected_by:
+            self._set_state(
+                "delivery_failed",
+                "A change made here didn't arrive through the MQTT broker. "
+                "Check that the context broker can reach it (MQTT_BROKER_NOTIFY_URL) and accepts the operator's token.",
+            )
+        elif self._last_received is None:
+            self._set_state(
+                "active", "Connected and subscribed. No change has arrived yet, so delivery isn't confirmed."
+            )
+        else:
             self._set_state("active", "Live updates are working.")
+
+    def expect_delivery(self) -> None:
+        """A change was just written through this backend, so a notification should follow."""
+        if self._exists and self._connected and self._expected_by is None:
+            self._expected_by = self._clock() + DELIVERY_TIMEOUT_S
 
     async def _session_lost(self) -> None:
         """Nobody is signed in any more. Whatever was left expires by itself, and goes at the next start."""
         await self._stop_listening()
-        if self._exists:
-            with contextlib.suppress(Exception):
-                await self._delete()
+        with contextlib.suppress(Exception):
+            await self._delete()
         self._forget()
         self._set_state("waiting_for_sign_in", "Live updates start after sign-in.")
 
     def _forget(self) -> None:
         self._exists = False
+        self._maybe_exists = False
+        self._last_received = None
+        self._expected_by = None
         self._subscribed_token = None
         self._swept = False
 
@@ -276,6 +328,7 @@ class LiveUpdates:
             "entities": [{"type": "*"}],
             "notification": self._notification(token),
         }
+        self._maybe_exists = True
         try:
             await self._broker.send("POST", "/subscriptions", body=body)
         except Refused as refused:
@@ -306,18 +359,23 @@ class LiveUpdates:
             self._verified_at = now
 
     async def _delete(self) -> None:
-        if self._exists:
+        if not self._maybe_exists:
+            return
+        try:
             await self._broker.send("DELETE", f"/subscriptions/{self._id}")
+        except Refused as refused:
+            if refused.kind != "not_found":
+                raise
 
     async def _sweep(self) -> None:
         """Removes what an earlier process left: once per start, so two backends can't keep at it."""
         if self._swept:
             return
-        self._swept = True
         response = await self._broker.send("GET", "/subscriptions", params={"limit": 1000})
         for item in response.json():
             if item.get("subscriptionName") == SUBSCRIPTION_NAME and item.get("id") != self._id:
                 await self._broker.send("DELETE", f"/subscriptions/{item['id']}")
+        self._swept = True
 
     # The MQTT connection -------------------------------------------------------------------
 
@@ -335,7 +393,9 @@ class LiveUpdates:
                 raise
             except Refusal:
                 state = "refused"
-                detail = f"The MQTT broker refused the operator's token. The operator needs {NEEDED_ROLE}."
+                detail = (
+                    f"The MQTT broker refused the operator's token or this topic. The operator needs {NEEDED_ROLE}."
+                )
             except Exception as error:  # noqa: BLE001 - every failure means trying again
                 log.info("Live updates: no MQTT connection (%s).", type(error).__name__)
                 state, detail = "broker_unavailable", await self._unavailable_detail()
@@ -346,6 +406,7 @@ class LiveUpdates:
 
     def _mark_connected(self) -> None:
         self._connected = True
+        self._expected_by = None  # what changed during an outage won't come
 
     async def _stop_listening(self) -> None:
         listener, self._listener = self._listener, None
@@ -368,6 +429,8 @@ class LiveUpdates:
 
     def deliver(self, payload: bytes) -> None:
         """Never waits. A watcher that has fallen behind is marked, and its stream closes."""
+        self._last_received = self._clock()
+        self._expected_by = None
         for change in parse_notification(payload):
             for watcher in list(self._watchers):
                 if watcher.overflowed or not watcher.wants(change["entity_id"], change["entity_type"]):
@@ -387,10 +450,12 @@ class LiveUpdates:
 
     def health(self) -> dict[str, Any]:
         active = self._state == "active"
+        received = self._last_received
         expires = datetime.fromtimestamp(self._expires_at, UTC).isoformat() if active else None
         return {
             "status": "ok" if active else "unavailable",
             "state": self._state,
             "detail": self._detail,
             "expires_at": expires,
+            "delivery": "confirmed" if active and received else "unconfirmed" if active else "none",
         }

@@ -22,7 +22,7 @@ import { store } from '../../src/data/sources/mock'
 import { writeControls } from '../../src/data/sources/mock/controls'
 import { LIVE_UPDATE_MS } from '../../src/data/sources/mock/entitiesArea'
 import { MAX_DEPTH } from '../../src/features/explorer/AttributeLine'
-import { hasHistory, statusOf } from '../../src/features/explorer/attributes'
+import { hasHistory, sameValue, statusOf } from '../../src/features/explorer/attributes'
 import ValueEditor from '../../src/features/explorer/ValueEditor'
 import { HIGHLIGHT_MS } from '../../src/features/explorer/EntityNode'
 import { renderApp } from '../helpers'
@@ -804,5 +804,16 @@ describe('history button', () => {
     expect(hasHistory({ type: 'Relationship', object: 'urn:a' }, true)).toBe(true)
     expect(hasHistory({ type: 'GeoProperty', value: {} }, true)).toBe(false)
     expect(hasHistory([attr], true)).toBe(false)
+  })
+})
+
+describe('comparing attribute values', () => {
+  test('same values in any member order, and differences at any depth', () => {
+    expect(sameValue({ a: 1, b: { c: [1, 2] } }, { b: { c: [1, 2] }, a: 1 })).toBe(true)
+    expect(sameValue({ a: 1 }, { a: 2 })).toBe(false)
+    expect(sameValue({ a: { b: 1 } }, { a: { b: 2 } })).toBe(false)
+    expect(sameValue({ a: 1 }, { a: 1, b: 2 })).toBe(false)
+    expect(sameValue([1], { 0: 1 })).toBe(false)
+    expect(sameValue(undefined, { a: 1 })).toBe(false)
   })
 })

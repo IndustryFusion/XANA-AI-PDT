@@ -22,6 +22,8 @@ import uvicorn
 from app.config import ConfigError, load_settings
 from app.main import configure_logging
 
+GRACEFUL_SHUTDOWN_S = 10
+
 
 def main() -> int:
     try:
@@ -37,6 +39,8 @@ def main() -> int:
         port=settings.backend_port,
         reload=settings.backend_reload,
         log_config=None,
+        # A client that stopped reading must not hold up a shutdown, which deletes the subscription.
+        timeout_graceful_shutdown=GRACEFUL_SHUTDOWN_S,
     )
     return 0
 

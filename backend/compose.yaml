@@ -25,9 +25,10 @@
 #   --profile auth      Keycloak
 #   --profile history   PostgREST, for the explorer's history and time-shift
 #   --profile live      EMQX, for live updates in the explorer
+#   --profile platform-mqtt  A second EMQX that checks a token and a role, for the tests of that
 #
 # Host ports can be changed with XANA_DB_PORT, XANA_BROKER_PORT, XANA_OLLAMA_PORT,
-# XANA_KEYCLOAK_PORT, XANA_PGREST_PORT, XANA_MQTT_PORT, XANA_MQTT_MGMT_PORT and XANA_BACKEND_PORT.
+# XANA_KEYCLOAK_PORT, XANA_PGREST_PORT, XANA_MQTT_PORT, XANA_MQTT_MGMT_PORT, XANA_MQTT_PLATFORM_PORT and XANA_BACKEND_PORT.
 
 name: xana-ai-pdt
 
@@ -55,6 +56,7 @@ x-backend-env: &backend-env
   PGREST_URL: http://pgrest:3000
   MQTT_BROKER_URL: mqtt://emqx:1883
   MQTT_MGMT_URL: http://emqx:18083
+  WS_ALLOWED_ORIGINS: ${WS_ALLOWED_ORIGINS:-}
   TIMESCALE_DB_URL: postgresql://xana@db:5432/tsdb
   POSTGRES_MEMORY_URL: postgresql://xana@db:5432/memory
   LOG_LEVEL: ${LOG_LEVEL:-INFO}
@@ -140,6 +142,33 @@ services:
     ports:
       - "127.0.0.1:${XANA_MQTT_PORT:-1883}:1883"
       - "127.0.0.1:${XANA_MQTT_MGMT_PORT:-18083}:18083"
+
+  # EMQX with the platform's kind of check, for the tests of tokens and roles: every connection
+  # and topic is asked of a small service with the rules of the platform's MQTT bridge. Not for use.
+  mqtt-auth:
+    image: python:3.12-slim
+    profiles: [platform-mqtt]
+    command: ["python", "/srv/mqtt_auth.py", "http://keycloak:8080"]
+    volumes:
+      - ./emqx/mqtt_auth.py:/srv/mqtt_auth.py:ro
+
+  emqx-platform:
+    image: emqx/emqx:5.8.8
+    profiles: [platform-mqtt]
+    environment:
+      EMQX_AUTHENTICATION: >-
+        [{mechanism=password_based,backend=http,enable=true,method=post,url="http://mqtt-auth:3025/auth",
+        body={username="$${username}",password="$${password}",clientid="$${clientid}"},
+        headers={"content-type"="application/json"}}]
+      EMQX_AUTHORIZATION__SOURCES: >-
+        [{type=http,enable=true,method=get,
+        url="http://mqtt-auth:3025/acl?username=$${username}&topic=$${topic}&clientid=$${clientid}&action=$${action}"}]
+      EMQX_AUTHORIZATION__NO_MATCH: allow
+      EMQX_AUTHORIZATION__DENY_ACTION: ignore
+    depends_on:
+      - mqtt-auth
+    ports:
+      - "127.0.0.1:${XANA_MQTT_PLATFORM_PORT:-1884}:1883"
 
   broker:
     image: scorpiobroker/all-in-one-runner:java-latest

@@ -71,6 +71,7 @@ class Settings(BaseSettings):
     mqtt_broker_url: str = "mqtt://emqx-listeners:1883"
     mqtt_mgmt_url: str = "http://emqx-dashboard:18083"
     mqtt_broker_notify_url: str | None = None
+    ws_allowed_origins: str | None = None
     timescale_db_url: SecretStr = SecretStr("postgresql://xana@localhost:5432/tsdb")
     timescale_table: str = "attributes"
     timescale_entity_table: str = "entities"
