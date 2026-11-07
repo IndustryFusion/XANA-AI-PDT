@@ -53,7 +53,7 @@ Stored in `conversation_files` up to 50 MiB a message, and otherwise left at the
 
 ### Evaluation
 
-Cases in `agent/evals/conversation.json`: the conversation, what the model should use, and what must never happen. `python -m xana_agent.conversation.evaluate` runs them with any configured model. Pytest runs them with a scripted model that follows rules, so behaviour outside the model, such as nothing being sent and reads staying limited, is checked in CI.
+Cases in `agent/evals/conversation.json`: the conversation, what the model should use, and what must never happen. `python -m app.evaluate` runs them with the configured model. Pytest runs them with a scripted model that follows rules, so behaviour outside the model, such as nothing being sent and reads staying limited, is checked in CI.
 
 ## Limits
 
