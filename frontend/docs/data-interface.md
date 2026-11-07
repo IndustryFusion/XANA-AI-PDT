@@ -29,7 +29,7 @@ Served by the backend (phase 1):
 
 | Area | Operations | Backend |
 |---|---|---|
-| runs | `listActiveRuns`, `startRun`, `getRun`, `subscribeRun`, `clarify`, `confirmResolution`, `escalationPreflight`, `escalate`, `getOutboxStatus`, `reopenRun`, `stopRun`, `archiveRun` | `/api/agent/…`, `/ws/run/{runId}` |
+| runs | `listActiveRuns`, `startRun`, `getRun`, `subscribeRun`, `clarify`, `confirmResolution`, `escalationPreflight`, `escalate`, `getOutboxStatus`, `sendConversationAct`, `askAgent`, `approveDataRequest`, `replyToRecommendation`, `refreshConversationStatus`, `recordMachineBuilderClose`, `reopenRun`, `stopRun`, `archiveRun` | `/api/agent/…`, `/ws/run/{runId}` |
 | incidents | `listIncidents`, `getIncident`, `reopenIncident` | `/api/incidents` |
 | session | `getAuthConfig`, `getSession`, `signIn`, `signOut`, `getFactory` | `/api/auth/config`, `status`, `connect`, `logout`, `/api/ifric/factory` |
 | entities | `getStats`, `listTypes`, `listAttributes`, `queryEntities`, `getEntity`, `updateAttributes`, `appendAttributes`, `deleteAttribute`, `deleteEntity`, `importEntities`, `fetchImportDocument`, `deleteByTypes`, `getAttributeHistory`, `getAttributeStatus`, `listTypesAt`, `queryEntitiesAt`, `subscribeEntities`, `getLiveUpdateHealth`, `getValueHints` | `/api/ngsi/…`, `/api/ngsi/ws`, `/api/shacl/hints` |
@@ -37,7 +37,7 @@ Served by the backend (phase 1):
 | dataspace | `getConnection`, `connect`, `disconnect`, `listPeers`, `getPeerCapabilities`, `listCapabilityRequests`, `decideCapabilityRequest`, `setCapabilityPolicy`, `resolveNames`, `resolveBuilders` | `/api/gateway/…`, `/api/ifric/…` |
 | system | `getHealth` | `/api/diagnostics` |
 
-Every other operation (the optional knowledge base, service settings, and the conversation operations of runs) comes from the mock, so the whole UI stays usable. `src/data/sources/backend/index.js` builds each area as `{ ...mock[area], ...backend[area] }` and lists the served operations in `SERVED`; the mock's development controls still apply to the delegated operations.
+Every other operation (the optional knowledge base, and service settings) comes from the mock, so the whole UI stays usable. `src/data/sources/backend/index.js` builds each area as `{ ...mock[area], ...backend[area] }` and lists the served operations in `SERVED`; the mock's development controls still apply to the delegated operations.
 
 - **Stopped backend:** until the backend has answered, `getAuthConfig` reports `backendUnreachable: true` and sign-in as off, so the app opens and each area shows its own state. The session gate checks again every 10 seconds, and applies the real configuration when the backend answers. Once the backend has answered, a failed `getAuthConfig` or `getSession` stays `unavailable`.
 - **Transport:** relative paths (`/api/…`, `/ws/…`), so the development server's proxy reaches the backend (`XANA_BACKEND_URL`). `VITE_BACKEND_BASE` sets another prefix or origin. Requests time out after 15 s.
@@ -50,7 +50,7 @@ Every other operation (the optional knowledge base, service settings, and the co
 - **Dataspace:** `getConnection` also has `detail`, a sentence on what is wrong, such as token renewal failing, and `renewalFailures`. `credentialConfigured` is true when the backend has a secret it can read, from its configuration or stored encrypted. A status from the gateway maps to the interface's: `auto` and `approved` to `granted`, `on-request` and `pending` to `default`, `denied` to `denied`. A peer's `name` is its company's from the IFRIC registry, or its participant ID without an answer. `listPeers` also has `capabilitiesUnavailable`, for a peer whose capabilities couldn't be read. A gateway failing or not connected gives `unavailable`, and a role the dataspace refuses gives `conflict`.
 - **IFRIC registry:** `resolveNames` leaves out an unknown ID and gives an empty name for a failed lookup, and screens then show the identifier. `resolveBuilders` leaves out machines without a known builder. `getFactory` holds what the registry returned: `owner` is `null` if it can't be read and `location` is `null` without a city and country. It is `not_found` when the registry doesn't know the factory or no factory is known, and `unavailable` when the registry refuses or fails. Answers keyed by identifier aren't key-mapped.
 - **Escalation:** `escalationPreflight` also has `withheld`: `[{ label, category, reason }]`, what the tier or the builder's access holds back. `escalate` can take minutes, as it sends through the dataspace, so it has a longer limit. It fails with the gateway's reason and leaves the run as it was, and a failed send is an `escalate_failed` step with `{ error, filesSent }`; escalating again doesn't send the files again. An `outbox` entry also has `kind` (`files` or `request`), and `error` when it failed. `delivered` means the receiver accepted the notification.
-- **Limits:** `reopenRun` rejects with `conflict`.
+- **Conversation:** only an operator's call sends. A `request` naming a capability moves the run to `awaiting_operator_approval`, within the tier or not. An `inform` with a `recommendation` in its payload moves it to `awaiting_recommendation_review`. A message also has `freeText` for a request naming no capability, which `grant` and `deny` can't answer, `capability`, `filesUrl` to download what it brought, and `filesUnavailable`. `outcome` holds the protocol's values, and `not_resolved` is sent as `failed`. The operator's `cancel` is sent as `close` with `withdrawn`. `stopped` data can also have `closePending` and `closeProblem`, when the close couldn't be sent yet; it is repeated until it is accepted. A `grant_failed` step means a failure in granting; with `granted`, the grant went out and its files didn't: approving again sends only the files. Sends and `askAgent` have a longer limit.
 - **Shapes:** `tests/data/backendShapes.test.js` checks every served operation against `SHAPES` with answers recorded from a real backend (`tests/data/backend-fixtures/`, recorded with `scripts/record-backend-fixtures.mjs`).
 
 ## session — implemented
@@ -75,8 +75,8 @@ Every other operation (the optional knowledge base, service settings, and the co
 | `confirmResolution(runId, { confirmed, text, files })` | confirm, or reject with reason (required) and files | `{ status }` | `conflict`, `invalid` |
 | `escalationPreflight(runId)` | run ID | `{ possible, reason \| null, recipient: { id, name } \| null, data: [{ label, category }], sharingTier }` | `not_found` |
 | `escalate(runId)` | run ID; possible while the run is `awaiting_input` or `awaiting_confirmation` | `{ status, escalationRef }` | `conflict`, `unavailable` |
-| `approveDataRequest(runId, { approved, note })` | decision on a data request beyond the sharing tier | `{ status }` | `conflict` |
-| `replyToRecommendation(runId, { action, message })` | `resolved` \| `still_failing` \| `escalate` | `{ status }` | `conflict`, `invalid` |
+| `approveDataRequest(runId, { approved, note, requestId })` | decision on the data request shown; `conflict` if another is waiting by now | `{ status }` | `conflict` |
+| `replyToRecommendation(runId, { action, message, recommendationId })` | `resolved` \| `still_failing` \| `escalate`, on the recommendation shown; `conflict` if another is waiting by now | `{ status }` | `conflict`, `invalid` |
 | `sendConversationAct(runId, { act, outcome, text, inReplyTo })` | `inform`, `request`, `grant`, `deny`, `escalate` (ask for direct contact), `deescalate` (end direct contact), `close` (with `outcome`), `cancel` | `{ status, convState }` | `conflict`, `invalid` |
 | `askAgent(runId, message)` | free text to the incident agent | `{ reply }` | `unavailable`, `conflict` |
 | `getOutboxStatus(runId)` | run ID | `[{ messageId, status }]` delivery status (`pending`, `delivered`, `failed`) of sent messages | `not_found` |
@@ -115,11 +115,11 @@ On the backend source, the output of an `observe` step holds `alerts`: `[{ id, r
 | `awaiting_confirmation` | `{ rootCause, recommendedAction, confidence, rejected: [{ rootCause, recommendedAction, reason, at }] }` |
 | `awaiting_machine_builder` | `{ escalationRef, builder }` |
 | `awaiting_operator_approval` | `{ escalationRef, builder, requestId, text, tier, requested[], withinTier[], needsApproval[] }`; items are `{ label, category }` |
-| `awaiting_recommendation_review` | `{ escalationRef, builder, summary, actions[] }` (actions in order) |
+| `awaiting_recommendation_review` | `{ escalationRef, builder, recommendationId, summary, actions[] }` (actions in order) |
 | `mb_closed` | `{ outcome, reason, reopenable, recordedBy: machine_builder \| operator }` |
 | `completed` | `{ rootCause, recommendedAction, confidence, incidentLogged, resolvedBy? }` |
 | `failed` | `{ error, node }` |
-| `stopped` | `{ by, reason, reopenable, outcome? }` |
+| `stopped` | `{ by, reason, reopenable, outcome?, closePending?, closeProblem? }`: with `closePending`, the machine builder hasn't been told yet, and archiving is refused as `conflict` |
 
 **Conversation.** The conversation with the machine builder is part of the step list: every message is a `message` step with output `{ messageId, sender: agent \| operator \| machine_builder, act, text, convState, inReplyTo?, outcome?, dataRequest?, recommendation?, internal? }`. `convState` is the conversation state after the message: `open`, `direct_contact_operator`, `direct_contact_machine_builder` or `closed`. `internal` messages (questions to the incident agent and its answers, notes) are never sent to the machine builder. Which acts are valid in which state is defined once in `src/data/conversationActs.js`, used by screens and data sources alike. `policy_check` steps record what was sent under which data-sharing tier and what was withheld; `suggest` steps carry the agent's suggested next acts `{ suggestions: [{ act, text }] }`.
 

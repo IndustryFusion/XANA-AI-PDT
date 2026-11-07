@@ -93,6 +93,10 @@ class Dataspace:
         self.message_status: dict[str, str] = {}
         self.fail_status: dict[str, str] = {}
         self.conversations: dict[str, dict[str, Any]] = {}
+        self.refused: list[dict[str, Any]] = []
+        self.inbox: list[dict[str, Any]] = []
+        self.acks: list[str] = []
+        self.downloads: dict[str, bytes] = {}
         self.holds: dict[str, asyncio.Event] = {}  # "METHOD path" → waits until set
         self.reached: dict[str, int] = {}
 
@@ -182,6 +186,13 @@ class Dataspace:
                     "source": source,
                 },
             )  # noqa: E501
+        if path == "/inbox/messages":
+            wanted = query.get("status")
+            return httpx.Response(200, json=[m for m in self.inbox if not wanted or m["status"] == wanted])
+        if path.startswith("/inbox/messages/"):
+            return self._inbox_item(request, path)
+        if path.startswith("/conversations/"):
+            return self._conversation(path.rsplit("/", 1)[1])
         if path == "/outbox/files":
             return self._accept_files(request)
         if path == "/outbox/messages":
@@ -215,7 +226,119 @@ class Dataspace:
         return self._accepted(fields)
 
     def _accept_message(self, request: httpx.Request) -> httpx.Response:
-        return self._accepted({**json.loads(request.content), "kind": "message"})
+        body = {**json.loads(request.content), "kind": "message"}
+        conversation = self.conversations.get(body.get("conversation_id"))
+        if conversation and conversation["state"].startswith("CLOSED") and body["performative"] != "close":
+            if body["performative"] != "reopen" or conversation["outcome"] in ("escalated", "superseded"):
+                return self._refuse(body, "conversation_closed")
+        if (
+            conversation
+            and conversation["state"] == "ESCALATING"
+            and conversation.get("escalated_by") == BUILDER
+            and body["performative"] in ("close", "deescalate")
+        ):
+            return self._refuse(body, "not_escalator")
+        answer = self._accepted(body)
+        self._move(body)
+        return answer
+
+    def _refuse(self, body: dict[str, Any], reason: str) -> httpx.Response:
+        """As the contract says: a refused send is kept, and listed with `applied: false`."""
+        message_id = f"refused-{len(self.refused) + 1}"
+        self.refused.append({**body, "message_id": message_id})
+        conversation = self.conversations[body["conversation_id"]]
+        return httpx.Response(
+            409,
+            json={
+                "error": "conversation_state_violation",
+                "reason": reason,
+                "message_id": message_id,
+                "conversation_state": conversation["state"],
+            },
+        )
+
+    def _move(self, body: dict[str, Any]) -> None:
+        conversation = self.conversations.setdefault(body["conversation_id"], {"state": "OPEN", "outcome": None})
+        match body["performative"]:
+            case "close":
+                conversation |= {"state": f"CLOSED_{body['outcome'].upper()}", "outcome": body["outcome"]}
+            case "escalate":
+                conversation |= {"state": "ESCALATING", "escalated_by": body.get("sender", FACTORY)}
+            case "deescalate" | "reopen":
+                conversation |= {"state": "OPEN", "outcome": None, "escalated_by": None}
+
+    def _conversation(self, conversation_id: str) -> httpx.Response:
+        known = self.conversations.get(conversation_id, {"state": "OPEN", "outcome": None})
+        messages = [
+            {
+                "message_id": m["message_id"],
+                "direction": "sent",
+                "performative": m.get("performative"),
+                "payload": m.get("payload"),
+                "in_reply_to": m.get("in_reply_to"),
+                "capability": m.get("capability"),
+                "outcome": m.get("outcome"),
+                "has_files": m.get("kind") == "files",
+                "applied": True,
+                "status": self.message_status.get(m["message_id"], "notified"),
+            }
+            for m in self.sent
+            if m["conversation_id"] == conversation_id
+        ]
+        messages += [
+            {
+                "message_id": m["message_id"],
+                "direction": "sent",
+                "performative": m.get("performative"),
+                "payload": m.get("payload"),
+                "in_reply_to": m.get("in_reply_to"),
+                "capability": m.get("capability"),
+                "applied": False,
+                "status": "rejected",
+            }
+            for m in self.refused
+            if m["conversation_id"] == conversation_id
+        ]
+        messages += [
+            {"message_id": m["message_id"], "direction": "received", "performative": m.get("performative")}
+            for m in self.inbox
+            if m["conversation_id"] == conversation_id
+        ]
+        return httpx.Response(200, json={"conversation_id": conversation_id, **known, "messages": messages})
+
+    def deliver(self, performative: str, conversation_id: str, **fields: Any) -> str:
+        """A message from the machine builder arrives, moving this side's copy as the adapter would."""
+        message_id = fields.pop("message_id", f"in-{len(self.inbox) + 1}")
+        self.inbox.append(
+            {
+                "message_id": message_id,
+                "conversation_id": conversation_id,
+                "performative": performative,
+                "status": "received",
+                "created_at": f"2026-11-07T10:{len(self.inbox):02d}:00+00:00",
+                "received_at": f"2026-11-07T10:{len(self.inbox):02d}:00+00:00",
+                "sender_participant": BUILDER,
+                "has_files": False,
+                "payload": {},
+            }
+            | fields
+        )
+        self._move({"conversation_id": conversation_id, "performative": performative, "sender": BUILDER, **fields})
+        return message_id
+
+    def _inbox_item(self, request: httpx.Request, path: str) -> httpx.Response:
+        parts = path.split("/")
+        found = next((m for m in self.inbox if m["message_id"] == parts[3]), None)
+        if found is None:
+            return httpx.Response(404, json={"detail": "no such message"})
+        if parts[-1] == "ack":
+            found["status"] = "acked"
+            self.acks.append(found["message_id"])
+            return httpx.Response(204)
+        if parts[-1] == "download":
+            content = self.downloads.get(found["message_id"])
+            return httpx.Response(200, content=content) if content else httpx.Response(404, json={"detail": "gone"})
+        return httpx.Response(200, json=found)
 
     def _outbox_read(self, path: str) -> httpx.Response:
         parts = path.split("/")

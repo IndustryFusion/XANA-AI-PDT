@@ -293,6 +293,7 @@ async def test_stops_after_three_failures_and_then_shows_expired():
     await conn.connect(SECRET)
     clock.now += 200
     space.provider_status = 503
+    assert MAX_RENEW_FAILURES == 3  # as the issue says, not only whatever the code says
     for attempt in range(1, MAX_RENEW_FAILURES):
         await conn.check()
         status = await conn.status()

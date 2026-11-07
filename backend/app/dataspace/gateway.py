@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
 from urllib.parse import quote
 
@@ -132,6 +132,57 @@ class GatewayClient:
         if not isinstance(answer, dict) or not isinstance(answer.get("status"), str):
             raise bad_gateway(f"{SERVICE} sent an unexpected answer.")
         return answer
+
+    async def inbox(self, status: str) -> list[dict[str, Any]]:
+        answer = await self._json("GET", "/inbox/messages", params={"status": status})
+        if not isinstance(answer, list):
+            raise bad_gateway(f"{SERVICE} sent an unexpected answer.")
+        return [item for item in answer if isinstance(item, dict) and item.get("message_id")]
+
+    async def ack(self, message_id: str) -> None:
+        await self.request("POST", f"/inbox/messages/{quote(message_id, safe='')}/ack")
+
+    async def conversation(self, conversation_id: str) -> dict[str, Any]:
+        answer = await self._json("GET", f"/conversations/{quote(conversation_id, safe='')}")
+        if not isinstance(answer, dict):
+            raise bad_gateway(f"{SERVICE} sent an unexpected answer.")
+        return answer
+
+    async def download(self, message_id: str, limit: int) -> bytes | None:
+        """A received message's files. None if larger than `limit`, which are left at the gateway."""
+        collected = bytearray()
+        async for chunk in self.iter_download(message_id):
+            collected.extend(chunk)
+            if len(collected) > limit:
+                return None
+        return bytes(collected)
+
+    async def iter_download(self, message_id: str) -> AsyncIterator[bytes]:
+        token = self.connection.token()
+        if token is None:
+            raise unavailable("Not connected to the dataspace.")
+        url = f"{self.connection.gateway_url}/inbox/messages/{quote(message_id, safe='')}/download"
+        for may_renew in (True, False):
+            try:
+                async with (
+                    httpx.AsyncClient(timeout=SEND_TIMEOUT_S, transport=self._transport) as client,
+                    client.stream("GET", url, headers={"Authorization": f"Bearer {token}"}) as response,
+                ):
+                    if response.status_code == 401 and may_renew:
+                        token = await self.connection.renew_refused(token)
+                        if token is None:
+                            raise unavailable("The dataspace refused the token, and it could not be renewed.")
+                        continue
+                    if response.status_code >= 400:
+                        await response.aread()
+                        raise refusal(response)
+                    async for chunk in response.aiter_bytes():
+                        yield chunk
+                    return
+            except httpx.TimeoutException:
+                raise unavailable(f"{SERVICE} did not answer in time.") from None
+            except httpx.HTTPError:
+                raise unavailable(f"{SERVICE} can't be reached.") from None
 
     # ── Peers ────────────────────────────────────────────────────────────────
 

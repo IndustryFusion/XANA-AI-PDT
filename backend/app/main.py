@@ -44,11 +44,15 @@ from app.ngsi.history import AttributeHistory
 from app.ngsi.live import LiveUpdates
 from app.ngsi.stream import ConnectionInScope
 from app.redact import RedactingFilter, Redactor
+from app.runs.conversation import ConversationDesk
 from app.runs.escalation import Escalator
+from app.runs.inbox import InboxPoller
 from app.runs.machines import MachineResolver
 from app.runs.manager import RunManager
+from app.runs.model import RunState
 from app.tracing import tracing_callbacks
 from xana_agent import NgsiContextSource, TimescaleHistorySource, Workflow
+from xana_agent.conversation import ConversationAgent
 from xana_agent.sources import AlertaAlertSource, FusekiOntologySource
 from xana_agent.sources.base import AlertSource, ContextSource, HistorySource, IncidentMemory
 
@@ -152,6 +156,29 @@ def create_app(
         model_problem=health.model_problem,
         escalator=escalator,
     )
+    ontology = FusekiOntologySource(
+        settings.fuseki_url,
+        settings.fuseki_dataset,
+        settings.fuseki_graph_base,
+        token=session.token,
+        timeout_s=settings.health_timeout_s,
+    )
+
+    def conversation_agent(state: RunState) -> ConversationAgent:
+        return ConversationAgent(
+            agent.llm,
+            agent.context,
+            agent.history,
+            incident_store.memory_for(state),
+            alerts=agent.alerts,
+            ontology=ontology,
+            llm_timeout_s=settings.llm_timeout_s,
+            callbacks=callbacks,
+        )
+
+    run_store = manager._store
+    manager.desk = ConversationDesk(manager, gateway_client, escalator, run_store, incident_store, conversation_agent)
+    inbox = InboxPoller(gateway_client, manager.desk, settings.inbox_poll_interval_s)
 
     @contextlib.asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -160,6 +187,8 @@ def create_app(
         # that needs them (or from the memory health check).
         await db.open()
         task = asyncio.create_task(manager.start_up())
+        if settings.gateway_url:
+            inbox.start()
         if not session.enabled:
             live.start()
             gateway_connection.start()
@@ -169,6 +198,7 @@ def create_app(
         with contextlib.suppress(asyncio.CancelledError):
             await task
         try:
+            await inbox.stop()
             await manager.shut_down()
             await gateway_connection.close()
             await session.close()
@@ -197,13 +227,8 @@ def create_app(
     session.on_sign_in.append(gateway_connection.on_sign_in)
     app.state.attribute_history = AttributeHistory(settings, session.token)
     app.state.alerta = AlertaClient(settings)
-    app.state.ontology = FusekiOntologySource(
-        settings.fuseki_url,
-        settings.fuseki_dataset,
-        settings.fuseki_graph_base,
-        token=session.token,
-        timeout_s=settings.health_timeout_s,
-    )
+    app.state.ontology = ontology
+    app.state.inbox = inbox
     errors.install(app)
     app.add_middleware(ConnectionInScope)
 

@@ -4,11 +4,11 @@
   "status": 200,
   "body": [
     {
-      "id": "5c910972-4c5e-4ce9-95b4-8c1e834e5b40",
+      "id": "079b07f0-77b0-4745-afbc-4a788f0c8185",
       "requester_id": "urn:example:xana-builder",
-      "capability": "twin:history",
-      "purpose": "Compare runs",
-      "requested_at": "2026-11-07T03:22:33.236542+00:00",
+      "capability": "twin:adjacents",
+      "purpose": "See parts",
+      "requested_at": "2026-11-07T03:44:56.983018+00:00",
       "status": "pending",
       "note": null,
       "decided_at": null

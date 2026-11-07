@@ -91,8 +91,31 @@ class RunStore:
     def __init__(self, db: Database) -> None:
         self._db = db
 
-    async def save(self, run: RunState) -> RunState:
-        """Writes the run in one transaction and returns it as stored.
+    async def was_processed(self, message_id: str) -> bool:
+        async with self._db.transaction() as conn:
+            cur = await conn.execute("SELECT 1 FROM processed_inbox WHERE message_id = %s", (message_id,))
+            return await cur.fetchone() is not None
+
+    async def mark_processed(self, message_id: str, run_id: str | None) -> None:
+        async with self._db.transaction() as conn:
+            await _mark_processed(conn, message_id, run_id)
+
+    async def save_file(self, message_id: str, run_id: str, content: bytes) -> None:
+        async with self._db.transaction() as conn:
+            await conn.execute(
+                "INSERT INTO conversation_files (message_id, run_id, content) VALUES (%s, %s, %s) "
+                "ON CONFLICT (message_id) DO NOTHING",
+                (message_id, run_id, content),
+            )
+
+    async def read_file(self, message_id: str) -> bytes | None:
+        async with self._db.transaction() as conn:
+            cur = await conn.execute("SELECT content FROM conversation_files WHERE message_id = %s", (message_id,))
+            row = await cur.fetchone()
+        return bytes(row["content"]) if row else None
+
+    async def save(self, run: RunState, processed: str | None = None) -> RunState:
+        """Writes the run in one transaction and returns it as stored, with a received message marked as handled.
 
         A run that has left `running` without an incident number receives the next one here.
         """
@@ -117,6 +140,8 @@ class RunStore:
                 """,
                 _run_row(run),
             )
+            if processed:
+                await _mark_processed(conn, processed, run.run_id)
         return run
 
     async def load(self) -> list[RunState]:
@@ -144,6 +169,13 @@ class RunStore:
             )
             for r in rows
         ]
+
+
+async def _mark_processed(conn: psycopg.AsyncConnection, message_id: str, run_id: str | None) -> None:
+    await conn.execute(
+        "INSERT INTO processed_inbox (message_id, run_id) VALUES (%s, %s) ON CONFLICT (message_id) DO NOTHING",
+        (message_id, run_id),
+    )
 
 
 def _run_row(run: RunState) -> dict[str, Any]:
@@ -180,6 +212,9 @@ def resolution_text(run: RunState) -> str | None:
             return run.data.get("reason") or "Stopped by the operator."
         case "failed":
             return f"The run failed: {run.data.get('error')}"
+        case "mb_closed":
+            reason = run.data.get("reason") or "Closed by the machine builder."
+            return f"{reason} (outcome: {run.data['outcome']})" if run.data.get("outcome") else reason
     return None
 
 
@@ -200,11 +235,11 @@ class IncidentStore:
                 """
                 INSERT INTO incidents (number, run_id, machine_id, machine_type, issue, outcome, root_cause,
                                        recommended_action, decision, resolution, started_at, closed_at, archived_at,
-                                       builder, escalation, conversation_id)
+                                       builder, escalation, conversation_id, conversation_state)
                 VALUES (COALESCE(%(number)s, nextval('incident_number')), %(run_id)s, %(machine_id)s,
                         %(machine_type)s, %(issue)s, %(outcome)s, %(root_cause)s, %(recommended_action)s,
                         %(decision)s, %(resolution)s, %(started_at)s, %(at)s, %(at)s,
-                        %(builder)s, %(escalation)s, %(conversation_id)s)
+                        %(builder)s, %(escalation)s, %(conversation_id)s, %(conversation_state)s)
                 ON CONFLICT (run_id) DO UPDATE SET
                     number = EXCLUDED.number,
                     machine_type = COALESCE(EXCLUDED.machine_type, incidents.machine_type),
@@ -212,7 +247,8 @@ class IncidentStore:
                     recommended_action = EXCLUDED.recommended_action, decision = EXCLUDED.decision,
                     resolution = EXCLUDED.resolution, closed_at = EXCLUDED.closed_at,
                     archived_at = EXCLUDED.archived_at, builder = EXCLUDED.builder,
-                    escalation = EXCLUDED.escalation, conversation_id = EXCLUDED.conversation_id
+                    escalation = EXCLUDED.escalation, conversation_id = EXCLUDED.conversation_id,
+                    conversation_state = EXCLUDED.conversation_state
                 RETURNING id
                 """,
                 {
@@ -231,6 +267,7 @@ class IncidentStore:
                     "builder": run.escalation["recipient"]["name"] if run.escalation else None,
                     "escalation": Jsonb(run.escalation) if run.escalation else None,
                     "conversation_id": run.conversation_id,
+                    "conversation_state": _conversation_state(run),
                 },
             )
             incident_id = (await cur.fetchone())["id"]
@@ -291,14 +328,69 @@ class IncidentStore:
             "builder": row["builder"],
             "escalation": row["escalation"],
             "conversation_id": row["conversation_id"],
-            "conversation": [],
+            "conversation_state": row["conversation_state"],
+            "conversation": [{**step["output"], "at": step["at"]} for step in trace if step["node"] == "message"],
             "trace": trace,
             "run_id": row["run_id"],
         }
 
+    async def run_of_conversation(self, conversation_id: str) -> str | None:
+        """The run of the archived incident that holds this conversation."""
+        async with self._db.transaction() as conn:
+            cur = await conn.execute(
+                "SELECT run_id FROM incidents WHERE conversation_id = %s AND archived_at IS NOT NULL "
+                "ORDER BY id DESC LIMIT 1",
+                (conversation_id,),
+            )
+            row = await cur.fetchone()
+        return row["run_id"] if row else None
+
+    async def add_late_message(self, conversation_id: str, step: dict[str, Any], message_id: str) -> bool:
+        """A message for a conversation already archived: added to the record, in one transaction. False if none."""
+        async with self._db.transaction() as conn:
+            cur = await conn.execute(
+                "SELECT id FROM incidents WHERE conversation_id = %s AND archived_at IS NOT NULL "
+                "ORDER BY id DESC LIMIT 1",
+                (conversation_id,),
+            )
+            row = await cur.fetchone()
+            if row is None:
+                return False
+            cur = await conn.execute(
+                "SELECT COALESCE(MAX(step), 0) + 1 AS next FROM agent_traces WHERE incident_id = %s", (row["id"],)
+            )
+            number = (await cur.fetchone())["next"]
+            await conn.execute(
+                """
+                INSERT INTO agent_traces (incident_id, step, round, action, input, output, timestamp)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    row["id"],
+                    number,
+                    step.get("round", 1),
+                    step["node"],
+                    None,
+                    Jsonb(step["output"]),
+                    datetime.fromisoformat(step["at"]),
+                ),
+            )
+            await conn.execute(
+                "UPDATE incidents SET conversation_state = %s WHERE id = %s", (step["output"]["conv_state"], row["id"])
+            )
+            await _mark_processed(conn, message_id, None)
+        return True
+
     async def set_reopened(self, incident_id: int, run_id: str) -> None:
         async with self._db.transaction() as conn:
             await conn.execute("UPDATE incidents SET reopened_run_id = %s WHERE id = %s", (run_id, incident_id))
+
+
+def _conversation_state(run: RunState) -> str | None:
+    for step in reversed(run.steps):
+        if step["node"] == "message" and step["output"].get("conv_state"):
+            return step["output"]["conv_state"]
+    return "open" if run.conversation_id else None
 
 
 def _incident_summary(row: dict[str, Any]) -> dict[str, Any]:

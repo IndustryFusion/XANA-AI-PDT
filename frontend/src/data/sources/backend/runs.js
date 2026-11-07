@@ -113,8 +113,22 @@ export const runs = {
   escalationPreflight: (runId) => request(AREA, 'GET', path('escalate-preflight', runId), { timeoutMs: 60_000 }),
   escalate: (runId) => request(AREA, 'POST', path('escalate', runId), { timeoutMs: SEND_TIMEOUT_MS }),
   getOutboxStatus: (runId) => request(AREA, 'GET', path('outbox-status', runId)),
-  reopenRun: (runId) => request(AREA, 'POST', path('reopen', runId)),
-  stopRun: (runId, { reason } = {}) => request(AREA, 'POST', path('stop', runId), { body: { reason: reason ?? null } }),
+  sendConversationAct: (runId, { act, outcome, text = '', inReplyTo } = {}) =>
+    request(AREA, 'POST', path('conversation-act', runId), {
+      timeoutMs: SEND_TIMEOUT_MS,
+      body: { act, text, outcome: outcome ?? null, in_reply_to: inReplyTo ?? null },
+    }),
+  askAgent: (runId, message) => request(AREA, 'POST', path('ask', runId), { timeoutMs: SEND_TIMEOUT_MS, body: { message } }),
+  approveDataRequest: (runId, { approved, note = '', requestId } = {}) =>
+    request(AREA, 'POST', path('approve-data-request', runId), { timeoutMs: SEND_TIMEOUT_MS, body: { approved: !!approved, note, request_id: requestId ?? null } }),
+  replyToRecommendation: (runId, { action, message = '', recommendationId } = {}) =>
+    request(AREA, 'POST', path('recommendation-reply', runId), { timeoutMs: SEND_TIMEOUT_MS, body: { action, message, recommendation_id: recommendationId ?? null } }),
+  refreshConversationStatus: (runId) => request(AREA, 'POST', path('refresh-conversation', runId), { timeoutMs: 60_000 }),
+  recordMachineBuilderClose: (runId, { outcome, reason = '' } = {}) =>
+    request(AREA, 'POST', path('record-close', runId), { body: { outcome, reason } }),
+  reopenRun: (runId) => request(AREA, 'POST', path('reopen', runId), { timeoutMs: SEND_TIMEOUT_MS }),
+  stopRun: (runId, { reason } = {}) =>
+    request(AREA, 'POST', path('stop', runId), { timeoutMs: SEND_TIMEOUT_MS, body: { reason: reason ?? null } }),
   archiveRun: async (runId) => {
     await request(AREA, 'POST', path('archive', runId))
   },

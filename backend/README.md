@@ -36,6 +36,12 @@ The health report's `connector` check reads through the participant's adapter, a
 
 A failed send leaves the run's status as it was. Trying again doesn't send the files again, except if the backend stopped just after the gateway accepted them, as the contract has no idempotency key.
 
+## Conversation with the machine builder
+
+`INBOX_POLL_INTERVAL_S` (default 15) sets how often the inbox is read. A message is stored, with its step and ID in one transaction, before it is acknowledged, and a message for no run stays unacknowledged. Only an operator's request sends anything. The incident agent reads and answers, and what it drafts is a suggestion. It has no way to reach the dataspace.
+
+Evaluation cases for tool selection and behaviour need no dataspace: `python -m xana_agent.conversation.evaluate` runs them by rules, as the tests do, and `python -m app.evaluate` with the configured model.
+
 ## IFRIC registry
 
 With `IFRIC_URL`, including its port (the registry's default is 4007), company names, machine builders and factory details come from the IFRIC registry, asked with the dataspace token. The registry and dataspace must share a realm, and a participant's ID must equal its company's `company_ifric_id`, or the registry refuses it. `FACTORY_ID` names the factory when the operator's token has no `ifric_factory_id`.

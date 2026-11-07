@@ -317,7 +317,6 @@ async def test_escalation_is_refused_in_other_states_and_nothing_goes_out(url):
         for route, body in (("clarify", {"text": "x"}), ("confirm-resolution", {"confirmed": True})):
             assert (await client.post(f"/api/agent/{route}/{run_id}", json=body)).status_code == 409
         assert (await client.post(f"/api/agent/archive/{run_id}")).status_code == 409
-        assert (await client.post(f"/api/agent/stop/{run_id}", json={})).status_code == 200
     assert len(space.sent) == before
 
 

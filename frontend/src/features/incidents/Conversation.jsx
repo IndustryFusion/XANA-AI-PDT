@@ -15,10 +15,10 @@
 //
 
 import { useEffect, useId, useRef, useState } from 'react'
-import { runs } from '../../data'
+import { filesHref, runs } from '../../data'
 import { useData } from '../../data/useData'
 import {
-  ACTS, allowedActs, CLOSE_OUTCOMES, closeOutcomes, CONVERSATION_STATUSES,
+  ACTS, allowedActs, CLOSE_OUTCOMES, closeOutcomes, CONVERSATION_STATUSES, OUTCOME_LABELS,
   conversationState, MESSAGE_KINDS, pendingRequest,
 } from '../../data/conversationActs'
 import { Button, EmptyState, StatusBadge } from '../../ui/components'
@@ -70,7 +70,7 @@ function Message({ message, at, builder, delivery }) {
         {outgoing && delivery && <StatusBadge kind="delivery" value={delivery} />}
       </div>
       <p className="message__text">{message.text}</p>
-      {message.outcome && <p className="message__meta">Outcome: {CLOSE_OUTCOMES[message.outcome] ?? message.outcome}</p>}
+      {message.outcome && <p className="message__meta">Outcome: {OUTCOME_LABELS[message.outcome] ?? message.outcome}</p>}
       {message.recordedByOperator && <p className="message__meta">Recorded by the operator; the machine builder communicated the close outside the application.</p>}
       {message.internal && !message.recordedByOperator && <p className="message__meta">Between you and the incident agent; not sent to the machine builder.</p>}
       {message.dataRequest && (
@@ -79,6 +79,8 @@ function Message({ message, at, builder, delivery }) {
           <ul className="plain-list">{message.dataRequest.items.map((i) => <li key={i.label}>{i.label}</li>)}</ul>
         </div>
       )}
+      {message.filesUrl && <p className="message__meta"><a href={filesHref(message.filesUrl)}>Download the files</a></p>}
+      {message.filesUnavailable && <p className="message__meta">The files of this message are no longer available.</p>}
       {message.recommendation && (
         <ol className="action-items">{message.recommendation.actions.map((a) => <li key={a}>{a}</li>)}</ol>
       )}

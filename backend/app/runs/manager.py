@@ -27,18 +27,28 @@ import asyncio
 import contextlib
 import logging
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Coroutine
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
 from app.errors import Refused, conflict, invalid, not_found, unavailable
 from app.memory.migrate import MigrationError, Migrator
 from app.memory.store import IncidentStore, RunStore, StoreUnavailable
+from app.runs.conversation import ConversationDesk
 from app.runs.escalation import DELIVERY, FINAL_STATUSES, Escalator, NotPossible, Plan, incident_message
 from app.runs.files import Attachment, check_files
 from app.runs.machines import MachineResolver
-from app.runs.model import ALLOWED, AWAITING_MACHINE_BUILDER, FAILED, RUNNING, STOPPED, RunState, outcome_state
+from app.runs.model import (
+    ALLOWED,
+    AWAITING_MACHINE_BUILDER,
+    CONVERSATION,
+    FAILED,
+    RUNNING,
+    STOPPED,
+    RunState,
+    outcome_state,
+)
 from app.runs.stream import GOING_AWAY, QUEUE_LIMIT, UNKNOWN_RUN, Subscriber
 from xana_agent import Outcome, Rejection, RoundInput, StepEvent, Workflow
 from xana_agent.sources.base import IncidentMemory
@@ -48,8 +58,10 @@ log = logging.getLogger(__name__)
 MAX_ISSUE = 2000
 MAX_TEXT = 4000
 OUTBOX_POLL_S = 5
+CLOSE_RETRY_S = 60
+CLOSE_RETRY_MAX_S = 3600
 NO_ESCALATION = "No dataspace is configured for this installation."
-NOT_REOPENABLE = "Only runs with a machine-builder conversation can be reopened, and this version has none."
+NOT_REOPENABLE = "Only runs with a machine-builder conversation can be reopened."
 
 Work = Literal["analyse", "act"]
 WorkflowFactory = Callable[[IncidentMemory], Workflow]
@@ -62,6 +74,7 @@ class RunRecord:
         self.task: asyncio.Task[None] | None = None
         self.subscribers: set[Subscriber] = set()
         self.busy = False  # an operation is talking to the dataspace, without holding the lock
+        self.asking = False  # the incident agent is answering a question
 
 
 class RunManager:
@@ -79,6 +92,7 @@ class RunManager:
         escalator: Escalator | None = None,
         outbox_poll_s: float = OUTBOX_POLL_S,
     ) -> None:
+        self.desk: ConversationDesk | None = None
         self._escalator = escalator
         self._outbox_poll_s = outbox_poll_s
         self._outbox_task: asyncio.Task[None] | None = None
@@ -107,6 +121,38 @@ class RunManager:
             await self.ready()
         except Refused as refused:
             log.warning("Runs not restored yet: %s", refused.message)
+
+    # What the conversation desk uses.
+
+    def records(self) -> list[RunRecord]:
+        return list(self._runs.values())
+
+    def record(self, run_id: str) -> RunRecord:
+        return self._record(run_id)
+
+    def is_current(self, rec: RunRecord) -> bool:
+        """False once the run has been archived: what still holds its record must not bring it back."""
+        return self._runs.get(rec.state.run_id) is rec
+
+    def cancel(self, rec: RunRecord) -> None:
+        self._cancel(rec)
+
+    def now(self) -> datetime:
+        return self._now()
+
+    def new_run_id(self) -> str:
+        return str(uuid.uuid4())
+
+    def make_step(self, node: str, step_input: Any, output: dict[str, Any], round_: int) -> dict[str, Any]:
+        return self._step(node, step_input, output, round_)
+
+    async def change(self, rec: RunRecord, **fields: Any) -> None:
+        await self._change(rec, **fields)
+
+    def spawn(self, work: Coroutine[Any, Any, None], name: str) -> None:
+        task = asyncio.create_task(work, name=name)
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
 
     async def shut_down(self) -> None:
         """Cancels rounds in progress without changing their stored state; they run again after a restart."""
@@ -276,15 +322,29 @@ class RunManager:
         rec = self._record(run_id)
         async with rec.lock:
             self._require(rec, "stop")
-            data = {"by": "operator", "reason": _operator_text(reason or "") or None, "reopenable": False}
-            await self._change(rec, status=STOPPED, data=data, after_save=lambda: self._cancel(rec))
-            return {"status": STOPPED}
+            text = _operator_text(reason or "") or None
+            half_escalated = bool(not rec.state.conversation_id and (rec.state.attempt or {}).get("files_message_id"))
+            if self.desk and (half_escalated or (rec.state.conversation_id and rec.state.status in CONVERSATION)):
+                conversation = True
+            else:
+                conversation = False
+                data = {"by": "operator", "reason": text, "reopenable": False}
+                await self._change(rec, status=STOPPED, data=data, after_save=lambda: self._cancel(rec))
+                return {"status": STOPPED}
+        if conversation:
+            return await self.desk.stop(rec, text)
+        return {"status": STOPPED}
 
     async def archive(self, run_id: str) -> None:
         await self.ready()
         rec = self._record(run_id)
         async with rec.lock:
             self._require(rec, "archive")
+            if rec.state.data.get("close_pending"):
+                raise conflict(
+                    "The machine builder hasn't been told yet that this conversation is closed. "
+                    "It can be archived once that has gone out."
+                )
             try:
                 await self._incidents.archive(rec.state, self._now())
             except StoreUnavailable as error:
@@ -442,7 +502,10 @@ class RunManager:
             except Refused as refused:
                 log.info("Run %s: delivery not known yet: %s", rec.state.run_id, refused.message)
         async with rec.lock:
+            if not self.is_current(rec):
+                return
             changed = False
+            closes_failed = []
             outbox = []
             for entry in rec.state.outbox:
                 answer = answers.get(entry["message_id"])
@@ -451,14 +514,41 @@ class RunManager:
                     if answer.get("error_message"):
                         entry["error"] = answer["error_message"]
                     changed = True
+                    if entry["status"] == "failed" and (entry.get("close") or self._is_close(rec, entry["message_id"])):
+                        closes_failed.append(entry.get("error") or "The machine builder didn't receive the close.")
                 outbox.append(entry)
             if changed:
-                await self._change(rec, outbox=tuple(outbox))
+                fields: dict[str, Any] = {}
+                if closes_failed and rec.state.status == STOPPED:
+                    data = rec.state.data | {"close_pending": True, "close_problem": closes_failed[-1]}
+                    fields["data"] = data | self.close_backoff(rec.state.data)
+                await self._change(rec, outbox=tuple(outbox), **fields)
 
-    async def reopen(self, run_id: str) -> None:
+    def close_backoff(self, data: dict[str, Any]) -> dict[str, Any]:
+        """When to try a failed close again: later each time, as a receiver that is down stays so for a while."""
+        attempts = int(data.get("close_attempts") or 0) + 1
+        wait = min(CLOSE_RETRY_S * 2 ** (attempts - 1), CLOSE_RETRY_MAX_S)
+        return {"close_attempts": attempts, "close_retry_at": (self._now() + timedelta(seconds=wait)).isoformat()}
+
+    def close_is_due(self, data: dict[str, Any]) -> bool:
+        due = data.get("close_retry_at")
+        return not due or datetime.fromisoformat(due) <= self._now()
+
+    @staticmethod
+    def _is_close(rec: RunRecord, message_id: str) -> bool:
+        return any(
+            step["node"] == "message"
+            and step["output"].get("message_id") == message_id
+            and step["output"].get("act") == "close"
+            for step in rec.state.steps
+        )
+
+    async def reopen(self, run_id: str) -> dict[str, str]:
         await self.ready()
         self._record(run_id)
-        raise conflict(NOT_REOPENABLE)
+        if self.desk is None:
+            raise conflict(NOT_REOPENABLE)
+        return await self.desk.reopen(run_id)
 
     async def reopen_incident(self, incident_id: int) -> str:
         await self.ready()
@@ -472,13 +562,25 @@ class RunManager:
             reopened = incident["reopened_run_id"]
             if reopened and reopened in self._runs:
                 raise conflict(f"Incident {incident['number']} is already open again as run {reopened}.")
-            await self._require_model()
-            run_id = await self._create(incident["machine_id"], incident["issue"])
+            if self.desk and incident.get("conversation_id") and incident.get("escalation"):
+                run_id = await self._continue_conversation(incident)
+            else:
+                await self._require_model()
+                run_id = await self._create(incident["machine_id"], incident["issue"])
             try:
                 await self._incidents.set_reopened(incident_id, run_id)
             except StoreUnavailable:
                 log.warning("Incident %s reopened as %s, but the link was not stored", incident_id, run_id)
             return run_id
+
+    async def _continue_conversation(self, incident: dict[str, Any]) -> str:
+        state = await self.desk.reopen_incident(incident)
+        try:
+            state = await self._store.save(state)
+        except StoreUnavailable as error:
+            raise unavailable(f"{error} The conversation was reopened, but the run was not stored.") from None
+        self._runs[state.run_id] = RunRecord(state)
+        return state.run_id
 
     def _require(self, rec: RunRecord, operation: str) -> None:
         if rec.busy:
@@ -574,12 +676,16 @@ class RunManager:
         rec: RunRecord,
         step: dict[str, Any] | None = None,
         after_save: Callable[[], None] | None = None,
+        processed: str | None = None,
         **fields: Any,
     ) -> None:
         """Stores the change, then tells the watchers: the step first, then the status."""
+        if not self.is_current(rec):
+            raise not_found(f"Run {rec.state.run_id} was archived.")
         steps = rec.state.steps + ((step,) if step else ())
         try:
-            rec.state = await self._store.save(replace(rec.state, steps=steps, updated_at=self._now(), **fields))
+            changed = replace(rec.state, steps=steps, updated_at=self._now(), **fields)
+            rec.state = await self._store.save(changed, processed) if processed else await self._store.save(changed)
         except StoreUnavailable as error:
             raise unavailable(f"{error} The change was not saved.") from None
         if after_save:

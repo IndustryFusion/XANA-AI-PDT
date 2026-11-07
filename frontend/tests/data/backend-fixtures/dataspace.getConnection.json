@@ -5,7 +5,7 @@
   "body": {
     "state": "connected",
     "participant_id": "urn:example:xana-factory",
-    "expires_at": "2026-11-07T03:24:43.440222+00:00",
+    "expires_at": "2026-11-07T03:47:07.204538+00:00",
     "credential_configured": true,
     "sharing_tier": "minimal",
     "detail": null,

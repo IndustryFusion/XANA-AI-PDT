@@ -46,6 +46,7 @@ config:
   PGREST_URL: http://pgrest:3000
   GATEWAY_KEYCLOAK_REALM: dataspace
   DATA_SHARING_POLICY: minimal
+  INBOX_POLL_INTERVAL_S: "15"
   ALERTA_URL: http://alerta:8080/api
   ALERTS_REFRESH_INTERVAL_S: "30"
   FUSEKI_URL: http://fuseki:3030

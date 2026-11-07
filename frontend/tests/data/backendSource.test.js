@@ -217,7 +217,7 @@ describe('delegation to the mock', () => {
   test('the backend serves runs, incidents, entities and health; the mock serves everything else', () => {
     expect(backend.SERVED).toEqual({
       session: ['getAuthConfig', 'getSession', 'signIn', 'signOut', 'getFactory'],
-      runs: ['listActiveRuns', 'startRun', 'getRun', 'subscribeRun', 'clarify', 'confirmResolution', 'escalationPreflight', 'escalate', 'getOutboxStatus', 'reopenRun', 'stopRun', 'archiveRun'],
+      runs: ['listActiveRuns', 'startRun', 'getRun', 'subscribeRun', 'clarify', 'confirmResolution', 'escalationPreflight', 'escalate', 'getOutboxStatus', 'sendConversationAct', 'askAgent', 'approveDataRequest', 'replyToRecommendation', 'refreshConversationStatus', 'recordMachineBuilderClose', 'reopenRun', 'stopRun', 'archiveRun'],
       incidents: ['listIncidents', 'getIncident', 'reopenIncident'],
       entities: [
         'getStats', 'listTypes', 'listAttributes', 'queryEntities', 'getEntity', 'updateAttributes', 'appendAttributes',
@@ -230,7 +230,6 @@ describe('delegation to the mock', () => {
     })
     expect(backend.session.signIn).not.toBe(mock.session.signIn)
     expect(backend.info.signInHint).toBeUndefined()
-    expect(backend.runs.sendConversationAct).toBe(mock.runs.sendConversationAct)
     expect(backend.system.getServiceSettings).toBe(mock.system.getServiceSettings)
     expect(backend.runs.startRun).not.toBe(mock.runs.startRun)
   })
@@ -241,6 +240,22 @@ describe('delegation to the mock', () => {
     const settings = await bindArea('system', backend.system).getServiceSettings()
     expect(settings.length).toBeGreaterThan(0)
     expect(fetch).not.toHaveBeenCalled()
+  })
+})
+
+describe('a decision names what the operator looked at', () => {
+  const body = () => JSON.parse(fetch.mock.calls.at(-1)[1].body)
+
+  test('a data request', async () => {
+    fakeFetch({ 'POST /api/agent/approve-data-request/r': { status: 200, body: { status: 'awaiting_machine_builder' } } })
+    await bindArea('runs', backend.runs).approveDataRequest('r', { approved: true, note: 'n', requestId: 'm-1' })
+    expect(body()).toEqual({ approved: true, note: 'n', request_id: 'm-1' })
+  })
+
+  test('a recommendation', async () => {
+    fakeFetch({ 'POST /api/agent/recommendation-reply/r': { status: 200, body: { status: 'completed' } } })
+    await bindArea('runs', backend.runs).replyToRecommendation('r', { action: 'resolved', recommendationId: 'm-2' })
+    expect(body()).toEqual({ action: 'resolved', message: '', recommendation_id: 'm-2' })
   })
 })
 

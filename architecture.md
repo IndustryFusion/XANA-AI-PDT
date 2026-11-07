@@ -160,14 +160,19 @@ Fields are snake_case. A refused request answers `{"error": {"kind", "message"}}
 | `/api/agent/escalate-preflight/{run_id}` | GET | Whether escalation is possible, why not, the recipient and what would be sent. Sends nothing |
 | `/api/agent/escalate/{run_id}` | POST | Send the incident to the machine builder. A failure leaves the status as it was |
 | `/api/agent/outbox-status/{run_id}` | GET | Delivery of what the run sent |
-| `/api/agent/reopen/{run_id}` | POST | Reopen a run with a machine-builder conversation; always `conflict` in phase 1 |
+| `/api/agent/reopen/{run_id}` | POST | Go on with a run's conversation; `conflict` without one, or after `escalated` or `superseded` |
 | `/api/incidents` | GET | History, filtered by `machine_id`, outcomes (`status=a,b`) and an inclusive closing date range (`from`, `to`) |
 | `/api/incidents/{id}` | GET | Incident detail + full agent trace |
 | `/api/incidents/{id}/reopen` | POST | Start a new run with the incident's machine and issue |
 | `/api/diagnostics` | GET | Live connectivity check: PostgreSQL, TimescaleDB, Scorpio, LLM |
 | `/ws/run/{run_id}` | WebSocket | Live stream: the run's snapshot first, then step and status events |
-| `/api/agent/mb-feedback/{run_id}` | POST | *Later phase.* Process a machine builder reply (called by inbox poller) |
-| `/api/agent/operator-approve/{run_id}` | POST | *Later phase.* Operator approves or declines an out-of-policy data request |
+| `/api/agent/conversation-act/{run_id}` | POST | The operator sends `inform`, `request`, `escalate`, `deescalate`, `close` (with an outcome) or `cancel` |
+| `/api/agent/ask/{run_id}` | POST | A question to the incident agent; nothing is sent to the machine builder |
+| `/api/agent/approve-data-request/{run_id}` | POST | Approve or decline a data request |
+| `/api/agent/recommendation-reply/{run_id}` | POST | `resolved`, `still_failing` or `escalate` |
+| `/api/agent/refresh-conversation/{run_id}` | POST | Read the conversation's state at the gateway |
+| `/api/agent/record-close/{run_id}` | POST | Record a close communicated elsewhere |
+| `/api/agent/message-files/{run_id}/{message_id}` | GET | The files of a received message, also after archiving, by the message alone |
 | `/api/ngsi/*` | — | Data Explorer: query, edit, import, history and time-shift, on `NGSI_URL` and `PGREST_URL` only, and live updates (`/api/ngsi/ws`) through a broker subscription with an MQTT endpoint. For operators; the workflow has no path to it |
 | `/api/alerta/*` | — | Alerts screen: list, count, detail, actions, environments, services, on `ALERTA_URL` only. Actions are for operators; the workflow only reads |
 | `/api/gateway/*` | — | The dataspace connection: `config`, `status`, `connect`, `disconnect`, `token-claims`, `peers`, `peers/{id}/capabilities`, `policies`, `capabilities/requests`, `capabilities/policy`. Answers never hold a token or secret |
@@ -244,21 +249,22 @@ POST /api/agent/escalate/{run_id}
 
 Possible from `awaiting_input` and `awaiting_confirmation`. While it sends, a mark on the run refuses other operator actions, without holding the run's lock, so the stream goes on. A failure is an `escalate_failed` step and the status stays; trying again doesn't send the files again. A background task polls `GET /outbox/messages/{id}/status` until final: `notified` shows as `delivered`, `error` and `rejected` as `failed`.
 
-**Inbox polling.** A background `asyncio` task polls `GET /inbox/messages?status=received` every 30 seconds. When a message arrives whose `conversation_id` matches a pending escalation, `machine_builder_feedback` is invoked automatically.
+**Inbox polling.** A background task reads `GET /inbox/messages?status=received` every `INBOX_POLL_INTERVAL_S` (default 15). A message's conversation is read from `GET /conversations/{id}`, its files are stored, and the run with its step and the message's ID are stored in one transaction before it is acknowledged, so nothing is lost or handled twice. A message for no run or incident stays unacknowledged.
 
-**Policy-gated data sharing.** When a machine builder reply arrives:
+**Policy-gated data sharing.** When a machine builder asks for data, with a `request` naming a capability, the run moves to `awaiting_operator_approval`, within the tier or not, showing which it is. Nothing is sent to a peer except by an operator's request:
 
 ```
-machine_builder_feedback
+request(capability)
   │
-  ├─ LLM review: classify what data types the MB is requesting
-  ├─ within policy?
-  │    ├─ YES → policy_check step → send approved files → run stays in awaiting_machine_builder
-  │    └─ NO  → run transitions to awaiting_operator_approval
-  │                 │
-  │                 └─ operator approves → policy_check step → send allowed files
-  │                    operator declines → refusal message sent to MB
+  ├─ awaiting_operator_approval, with an agent review
+  │    ├─ approve → POST /capabilities/policy, grant with an authorization, that capability's data
+  │    │            → policy_check step → awaiting_machine_builder
+  │    └─ decline → deny → awaiting_machine_builder
 ```
+
+An `inform` with `recommendation` in its payload moves the run to `awaiting_recommendation_review`. That field is the only source, so a model can't make one up.
+
+**Conversation agent** (`agent/xana_agent/conversation/`). Apart from the read-only workflow, with a graph of its own. It reads through data tools limited to the entities observed in the run, and the ontology's read functions, and it answers the operator. Its `send_*` tools only prepare a suggestion: the package has no way to reach the dataspace. A turn starts from the run's stored steps, so a restart loses nothing. `agent/xana_agent/conversation/cases.json` holds repeatable evaluation cases.
 
 Data-sharing tiers mirror the pre-negotiated IFF Dataspace capabilities:
 
@@ -382,6 +388,10 @@ incidents (
     escalation         JSONB,
     conversation_id    TEXT
 )
+
+-- 006_conversation.sql
+processed_inbox (message_id TEXT PRIMARY KEY, run_id TEXT, processed_at TIMESTAMPTZ)
+conversation_files (message_id TEXT PRIMARY KEY, run_id TEXT, content BYTEA)
 
 -- 004_gateway_credentials.sql
 gateway_credentials (
@@ -577,9 +587,9 @@ Not part of the current system: if the [`rag-tool`](#knowledge-base-rag-tool) kn
 
 **Run persistence.** Every run that is not archived is written to the `runs` PostgreSQL table on every step and status change, before watchers hear of it, and restored into the in-memory manager on startup. Paused runs (`awaiting_input`, `awaiting_confirmation`, and later `awaiting_machine_builder`, `awaiting_operator_approval`) and finished but not yet archived runs survive backend restarts; a round in progress runs again from its start.
 
-**Dataspace escalation.** Unresolved incidents can be escalated to the machine builder via the IFF Dataspace. The backend resolves the machine builder from the IFRIC registry, matches the gateway participant ID, enforces the data-sharing policy, and sends the NGSI-LD entity as a file-transfer and the incident summary as a structured message. A background inbox polling loop (30 s interval) picks up replies automatically.
+**Dataspace escalation.** Unresolved incidents can be escalated to the machine builder via the IFF Dataspace. The backend resolves the machine builder from the IFRIC registry, matches the gateway participant ID, enforces the data-sharing policy, and sends the NGSI-LD entity as a file-transfer and the incident summary as a structured message. A background inbox polling loop picks up replies automatically.
 
-**Policy-enforced data sharing.** Every outbound file transfer passes through `apply_policy()` before the gateway call. The data-sharing policy tiers (`minimal`, `adjacent`, `timeseries`) map directly to the pre-negotiated IFF Dataspace capabilities (`twin:direct`, `twin:adjacents`, `twin:history`). If a machine builder requests data beyond the configured tier, the operator is asked to approve or decline before any additional data leaves the system.
+**Policy-enforced data sharing.** Every outbound file transfer passes through `apply_policy()` before the gateway call. The data-sharing policy tiers (`minimal`, `adjacent`, `timeseries`) map directly to the pre-negotiated IFF Dataspace capabilities (`twin:direct`, `twin:adjacents`, `twin:history`). If a machine builder requests data, within the configured tier or beyond it, the operator is asked to approve or decline before any additional data leaves the system.
 
 **Single LLM factory.** `get_llm()` resolves the provider at call time from settings. Ollama is the default for local development; switching to Anthropic or OpenAI requires only an environment variable change.
 

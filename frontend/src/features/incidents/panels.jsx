@@ -168,7 +168,7 @@ export function RecommendationPanel({ run }) {
   const [message, setMessage] = useState('')
   const action = useAction()
   const { builder, summary, actions = [] } = run.data
-  const reply = (choice) => action.run(() => runs.replyToRecommendation(run.runId, { action: choice, message }))
+  const reply = (choice) => action.run(() => runs.replyToRecommendation(run.runId, { action: choice, message, recommendationId: run.data.recommendationId }))
 
   return (
     <Card headingLevel={3} title={`Recommendation from ${builder}`} className="panel panel--success">
@@ -201,7 +201,7 @@ export function ApprovalPanel({ run }) {
   const [note, setNote] = useState('')
   const action = useAction()
   const { builder, text, tier, requested, withinTier, needsApproval } = run.data
-  const decide = (approved) => action.run(() => runs.approveDataRequest(run.runId, { approved, note }))
+  const decide = (approved) => action.run(() => runs.approveDataRequest(run.runId, { approved, note, requestId: run.data.requestId }))
 
   return (
     <Card headingLevel={3} title="Data request needs your approval" className="panel panel--warning">
@@ -308,6 +308,12 @@ export function OutcomePanel({ run, onArchived }) {
           <dl className="details">
             <dt>Reason</dt><dd>{data.reason}</dd>
             {data.outcome && <><dt>Outcome</dt><dd>{CLOSE_OUTCOMES[data.outcome] ?? data.outcome}</dd></>}
+            {data.closePending && (
+              <>
+                <dt>Machine builder</dt>
+                <dd role="status">Not told yet that this is closed: {data.closeProblem}. It is tried again, and the run can be archived once it has gone out.</dd>
+              </>
+            )}
           </dl>
         )}
         {status === 'mb_closed' && (
