@@ -693,6 +693,7 @@ async def test_an_alert_and_a_quiet_write_during_the_wait_dont_replace_each_othe
             "/events/alert", json={"resource": MACHINE, "event": "Hot", "severity": "major"}, headers=AUTH
         )
         await client.post("/events/ngsi", json=notification(status(MACHINE, f"{FAIL} a")), headers=AUTH)
+        await runs_are(client, 1)  # both handled, within the wait
         later_by(app, 301)
         found = await runs_are(client, 2)
     assert "Alert Hot" in [r["issue"] for r in found]
