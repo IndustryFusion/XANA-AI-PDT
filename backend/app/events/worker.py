@@ -36,6 +36,8 @@ RETRY_S = 5.0
 HELD_CHECK_S = 5.0
 MAX_MACHINE_ID = 500
 MAX_VALUE = 200
+# The issue of a notification that holds none of the watched values.
+NO_VALUES = "state change detected"
 # What Alerta reports without there being anything to diagnose.
 QUIET_SEVERITIES = {"ok", "normal", "up", "cleared", "informational", "debug", "trace"}
 QUIET_STATUSES = {"closed", "expired", "shelved", "blackout"}
@@ -48,7 +50,6 @@ class Event:
     machine_id: str
     issue: str
     source: str
-    watched: dict[str, Any] | None = None  # the values a broker reported; none for an alert
 
 
 def _local_name(name: str) -> str:
@@ -97,12 +98,12 @@ def ngsi_events(body: Any, watched: list[str]) -> tuple[list[Event], int]:
     events, ignored = [], 0
     for entity in data:
         machine = _machine(entity.get("id")) if isinstance(entity, dict) else None
-        values = _watched_values(entity, watched) if machine else {}
-        if not values:
+        if machine is None:
             ignored += 1
             continue
-        shown = ", ".join(f"{name}={str(value)[:MAX_VALUE]}" for name, value in values.items())
-        events.append(Event(machine, clean(f"Machine event: {shown}")[:MAX_ISSUE], NGSI, values))
+        values = _watched_values(entity, watched)
+        shown = ", ".join(f"{name}={str(value)[:MAX_VALUE]}" for name, value in values.items()) or NO_VALUES
+        events.append(Event(machine, clean(f"Machine event: {shown}")[:MAX_ISSUE], NGSI))
     return events, ignored
 
 
@@ -127,11 +128,11 @@ def alert_event(body: Any) -> Event | None:
 
 
 class EventWorker:
-    """One worker, one event at a time, so that the check for an open run can't race with itself.
+    """One worker, one event at a time, so that the check for a run in progress can't race with itself.
 
     The queue is in memory: what it holds when the backend stops is lost. See the change's design.
     So is what it holds back: the latest event per machine and source while a triggered run has just failed, started
-    when that wait ends. Its values aren't stored until then, so it still counts as new.
+    when that wait ends.
     """
 
     def __init__(
@@ -212,7 +213,7 @@ class EventWorker:
                     self._held[(machine, event.source)] = replace(event, machine_id=machine)
                     log.info("Machine events: %s for %s waits, as a run of it has just failed.", event.source, machine)
                     return
-                run_id = await self._runs.start_triggered(machine, event.issue, event.source, event.watched)
+                run_id = await self._runs.start_triggered(machine, event.issue, event.source)
             except Refused as refused:
                 if refused.kind != "unavailable":
                     log.warning("Machine events: event for %s dropped: %s", machine, refused.message)

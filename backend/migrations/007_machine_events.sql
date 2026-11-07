@@ -17,10 +17,3 @@
 -- Where a run came from: operator, ngsi or alert.
 ALTER TABLE runs ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'operator';
 ALTER TABLE incidents ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'operator';
-
--- The watched values last seen per machine, as the context broker notifies every write, changed or not.
-CREATE TABLE IF NOT EXISTS machine_watched_values (
-    machine_id TEXT PRIMARY KEY,
-    watched    JSONB NOT NULL,
-    seen_at    TIMESTAMPTZ NOT NULL DEFAULT now()
-);

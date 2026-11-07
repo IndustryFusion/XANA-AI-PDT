@@ -151,21 +151,6 @@ class RunStore:
                 await _mark_processed(conn, processed, run.run_id)
         return run
 
-    async def watched_values(self, machine_id: str) -> dict[str, Any] | None:
-        """The watched values last seen for a machine, or None if it hasn't been seen."""
-        async with self._db.transaction() as conn:
-            cur = await conn.execute("SELECT watched FROM machine_watched_values WHERE machine_id = %s", (machine_id,))
-            row = await cur.fetchone()
-        return row["watched"] if row else None
-
-    async def remember_watched_values(self, machine_id: str, watched: dict[str, Any]) -> None:
-        async with self._db.transaction() as conn:
-            await conn.execute(
-                "INSERT INTO machine_watched_values (machine_id, watched) VALUES (%s, %s) ON CONFLICT (machine_id) "
-                "DO UPDATE SET watched = EXCLUDED.watched, seen_at = now()",
-                (machine_id, Jsonb(watched)),
-            )
-
     async def load(self) -> list[RunState]:
         async with self._db.transaction() as conn:
             cur = await conn.execute("SELECT * FROM runs ORDER BY started_at")

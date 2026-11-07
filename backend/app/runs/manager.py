@@ -27,7 +27,6 @@ import asyncio
 import contextlib
 import logging
 import uuid
-from collections import Counter
 from collections.abc import Awaitable, Callable, Coroutine
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -45,8 +44,8 @@ from app.runs.model import (
     AWAITING_MACHINE_BUILDER,
     CONVERSATION,
     FAILED,
-    OPEN,
     OPERATOR,
+    OPERATOR_STEPS,
     RUNNING,
     STOPPED,
     RunState,
@@ -114,7 +113,6 @@ class RunManager:
         self._ready = False
         self._ready_lock = asyncio.Lock()
         self._reopen_lock = asyncio.Lock()
-        self._starting: Counter[str] = Counter()  # machines whose new run is being stored
 
     # ── Startup and shutdown ─────────────────────────────────────────────────
 
@@ -249,37 +247,37 @@ class RunManager:
         await self._require_model()
         return await self._create(await self._machines.resolve(machine_id), issue)
 
-    async def start_triggered(
-        self, machine_id: str, issue: str, source: str, watched: dict[str, Any] | None = None
-    ) -> str | None:
-        """Starts a run for an event, unless the machine has an open one, or reported nothing new.
+    async def start_triggered(self, machine_id: str, issue: str, source: str) -> str | None:
+        """Starts a run for an event, unless a run an event started for this machine is still in progress.
 
         The ID of the run, or None. Raises `unavailable` if the memory database can't be used, and then
-        trying again is safe: the values are stored last, and by then the open run stops a second one.
+        trying again is safe: nothing was stored.
         """
         await self.ready()
+        if self._triggered_in_progress(machine_id):
+            return None
         try:
-            known = await self._store.watched_values(machine_id) if watched is not None else None
-            changed = watched is None or watched != known
-            run_id = None
-            has_open_run = self._has_open_run(machine_id)
-            if changed and not has_open_run:
-                # No check of the language model: nobody is there to read a refusal, so a failed run shows it.
-                run_id = await self._create(machine_id, issue, source)
-            # A short name held back by a run under a longer identifier may be another machine's: not seen yet.
-            if watched is not None and changed and (not has_open_run or self._has_open_run(machine_id, exact=True)):
-                await self._store.remember_watched_values(machine_id, watched)
+            # No check of the language model: nobody is there to read a refusal, so a failed run shows it.
+            return await self._create(machine_id, issue, source)
         except StoreRefused as error:
             raise invalid(str(error)) from None
         except StoreUnavailable as error:
             raise unavailable(str(error)) from None
-        return run_id
 
-    def _has_open_run(self, machine_id: str, exact: bool = False) -> bool:
-        same = str.__eq__ if exact else _same_machine
-        if any(same(starting, machine_id) for starting in self._starting):
-            return True
-        return any(same(r.state.machine_id, machine_id) and r.state.status in OPEN for r in self._runs.values())
+    def _triggered_in_progress(self, machine_id: str) -> bool:
+        """A run an event started for this machine is still working on its first analysis.
+
+        It stops counting once that analysis ends: completed, failed, stopped, or waiting for the operator,
+        whatever happens to the run afterwards.
+        """
+        return any(
+            r.state.source != OPERATOR
+            and r.state.status == RUNNING
+            and r.state.round == 1
+            and not any(step["node"] in OPERATOR_STEPS for step in r.state.steps)
+            and _same_machine(r.state.machine_id, machine_id)
+            for r in self._runs.values()
+        )
 
     def failed_lately(self, machine_id: str) -> bool:
         """A triggered run failed for this machine a moment ago: another would fail too, and only add to the list."""
@@ -295,17 +293,12 @@ class RunManager:
     async def _create(self, machine_id: str, issue: str, source: str = OPERATOR) -> str:
         now = self._now()
         state = RunState(str(uuid.uuid4()), machine_id, issue, RUNNING, started_at=now, updated_at=now, source=source)
-        self._starting[machine_id] += 1
         try:
             state = await self._store.save(state)
         except StoreRefused as error:
             raise invalid(f"{error} The run was not started.") from None
         except StoreUnavailable as error:
             raise unavailable(f"{error} The run was not started.") from None
-        finally:
-            self._starting[machine_id] -= 1
-            if self._starting[machine_id] == 0:
-                del self._starting[machine_id]
         rec = RunRecord(state)
         self._runs[state.run_id] = rec
         self._launch(rec, "analyse")
