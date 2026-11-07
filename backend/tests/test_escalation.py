@@ -15,12 +15,15 @@
 #
 import asyncio
 import json
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
 
-from app.dataspace.sharing import ADJACENTS, DIRECT, HISTORY, TIERS, apply_policy
+from app.dataspace.sharing import ADJACENTS, DIRECT, HISTORY, TIERS, Sharing, apply_policy
 from app.memory.migrate import Migrator
+from app.runs.escalation import Escalator
+from app.runs.model import RunState
 from app.runs.stream import Subscriber
 from tests.dataspace_support import BUILDER
 from tests.runs_support import (
@@ -37,7 +40,7 @@ from tests.runs_support import (
 )
 from tests.space_support import Space, connect, space_app
 from xana_agent.sources.base import SourceUnavailable
-from xana_agent.testing import FakeContextSource, sample_entities
+from xana_agent.testing import FakeContextSource, FakeHistorySource, sample_entities, sample_history
 
 pytestmark = pytest.mark.db
 
@@ -151,6 +154,45 @@ async def test_timeseries_adds_history(url):
     history = bundle["files"]["signal-history.json"]
     assert history and history[0]["buckets"] and {"entity_id", "attribute", "buckets"} == set(history[0])
     assert [d["category"] for d in run["escalation"]["data"]] == [DIRECT, ADJACENTS, HISTORY]
+
+
+class RecordingHistory(FakeHistorySource):
+    asked_for: list[str] = []
+
+    async def recent(self, entity_ids, window):
+        self.asked_for = list(entity_ids)
+        return await super().recent(entity_ids, window)
+
+
+@pytest.mark.parametrize(
+    ("allowed", "with_related"), [((HISTORY,), False), ((DIRECT, HISTORY), False), ((DIRECT, ADJACENTS, HISTORY), True)]
+)
+async def test_history_holds_related_entities_only_if_those_may_go(allowed, with_related):
+    history = RecordingHistory(sample_history())
+    escalator = Escalator(None, None, FakeContextSource(sample_entities()), history, None, "timeseries", lambda: True)
+    now = datetime.now(UTC)
+    run = RunState("r", MACHINE, "issue", "awaiting_input", started_at=now, updated_at=now)
+    await escalator.files(run, Sharing("timeseries", tuple(dict.fromkeys((DIRECT, *allowed))), ()))
+    assert history.asked_for[0] == MACHINE
+    assert (len(history.asked_for) > 1) is with_related
+
+
+async def test_a_retry_records_what_the_first_attempt_sent(url):
+    space = Space()
+    space.access_here[BUILDER][1]["status"] = "on-request"
+    async with running(app_at(url, space, "adjacent")) as client:
+        run_id = await escalatable(client)
+        space.status_for["POST /outbox/messages"] = 503
+        assert (await client.post(f"/api/agent/escalate/{run_id}")).status_code >= 400
+        assert list(space.sent[0]["files"]) == ["machine.json"]
+        space.status_for.clear()
+        space.access_here[BUILDER][1]["status"] = "approved"
+        assert (await client.post(f"/api/agent/escalate/{run_id}")).status_code == 200
+        run = (await client.get(f"/api/agent/status/{run_id}")).json()
+    assert [d["category"] for d in run["escalation"]["data"]] == [DIRECT]
+    assert run["escalation"]["files"] == ["machine.json"]
+    done = next(s for s in run["steps"] if s["node"] == "escalate")
+    assert len(done["output"]["sent"]) == 1
 
 
 async def test_the_message_holds_only_the_incident(url):

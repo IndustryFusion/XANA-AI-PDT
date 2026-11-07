@@ -34,7 +34,7 @@ A send can take 2 minutes, and the lock also holds up watchers. So a run has an 
 |---|---|
 | `twin:direct` | `machine.json`: the entity read anew, with its active alerts |
 | `twin:adjacents` | `related-entities.json`: entities one relationship away, at most 20, with their active alerts |
-| `twin:history` | `signal-history.json`: 24 hours of hourly buckets of the numeric signals of the machine and the entities one relationship away, as a platform keeps most signals on sensors |
+| `twin:history` | `signal-history.json`: 24 hours of hourly buckets of the numeric signals of the machine, and of the entities one relationship away only if `twin:adjacents` goes too, as those signals tell what those entities are. A platform keeps most signals on sensors, so with `twin:adjacents` withheld this can be thin. A maintainer can overrule this |
 
 They go as one bundle, as the contract delivers files as one ZIP, naming the highest capability sent. The incident message holds the reference, machine ID, issue, the state of the diagnosis, the tier, and the names of the files; no data beyond those. A source failing fails the send rather than sending less than the operator saw.
 

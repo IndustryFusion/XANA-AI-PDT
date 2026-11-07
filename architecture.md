@@ -272,7 +272,7 @@ Data-sharing tiers mirror the pre-negotiated IFF Dataspace capabilities:
 |---|---|---|
 | `minimal` | `twin:direct` | The machine's entity and active alerts |
 | `adjacent` | `twin:adjacents` | Plus entities one relationship away and their active alerts |
-| `timeseries` | `twin:history` | Plus 24 hours of signal history of those entities |
+| `timeseries` | `twin:history` | Plus 24 hours of signal history: the machine's, and of related entities only if those may go too |
 
 Every transmission goes through `apply_policy()` which strips files outside the configured tier before the gateway call. A `policy_check` step event is pushed over the WebSocket so the operator can see exactly what was allowed and what was stripped.
 

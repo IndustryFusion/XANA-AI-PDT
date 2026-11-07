@@ -50,6 +50,10 @@ class Sharing:
     def data(self) -> list[dict[str, str]]:
         return [{"label": LABELS[capability], "category": capability} for capability in self.allowed]
 
+    def narrowed_to(self, capabilities: list[str]) -> Sharing:
+        """What actually went out in an earlier attempt, when access may have changed since."""
+        return Sharing(self.tier, tuple(capabilities), self.withheld)
+
 
 def apply_policy(tier: str, access: list[dict[str, Any]]) -> Sharing:
     """Filters to the tier and to the access the dataspace reports. A capability it doesn't list isn't allowed."""
