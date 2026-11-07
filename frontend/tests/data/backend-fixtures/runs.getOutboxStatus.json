@@ -1,0 +1,17 @@
+{
+  "method": "GET",
+  "path": "/api/agent/outbox-status/277414a3-ce59-4561-bd53-024349f367b7",
+  "status": 200,
+  "body": [
+    {
+      "message_id": "60fc137e-3400-4927-9e63-58cac68e5f3a",
+      "status": "pending",
+      "kind": "files"
+    },
+    {
+      "message_id": "f0f4da4c-c10f-44f2-9432-2efb30b75ed7",
+      "status": "pending",
+      "kind": "request"
+    }
+  ]
+}

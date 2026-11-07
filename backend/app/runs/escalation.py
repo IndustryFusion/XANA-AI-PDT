@@ -159,7 +159,7 @@ class Escalator:
             if ADJACENTS in sharing.allowed:
                 contents[ADJACENTS] = await self._related(entity)
             if HISTORY in sharing.allowed:
-                contents[HISTORY] = await self._signal_history(run.machine_id)
+                contents[HISTORY] = await self._signal_history(entity)
         except Refused:
             raise
         except SourceUnavailable as error:
@@ -179,14 +179,20 @@ class Escalator:
         related = await self._context.related(entity, MAX_RELATED)
         return [{"entity": item, "active_alerts": await self._active_alerts(item["id"])} for item in related]
 
-    async def _signal_history(self, machine_id: str) -> list[dict[str, Any]]:
-        signals = await self._history.recent([machine_id], HISTORY_WINDOW)
+    async def _signal_history(self, entity: dict[str, Any]) -> list[dict[str, Any]]:
+        """The machine's own signals and those of its sensors and parts, which is where a platform keeps most."""
+        related = await self._context.related(entity, MAX_RELATED)
+        ids = [entity["id"], *(item["id"] for item in related)]
+        signals = await self._history.recent(ids, HISTORY_WINDOW)
         return [
             {
+                "entity_id": signal.entity_id,
                 "attribute": signal.attribute,
                 "buckets": [
                     bucket.model_dump(mode="json")
-                    for bucket in await self._history.metrics(machine_id, signal.attribute, HISTORY_WINDOW, BUCKET)
+                    for bucket in await self._history.metrics(
+                        signal.entity_id, signal.attribute, HISTORY_WINDOW, BUCKET
+                    )
                 ],
             }
             for signal in signals

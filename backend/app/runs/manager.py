@@ -355,18 +355,19 @@ class RunManager:
             "files": attempt["files"],
             "sent_at": now,
         }
-        step_input = {
+        output = {
             "escalation_ref": ref,
             "recipient": plan.builder.name,
             "tier": plan.sharing.tier,
             "sent": [item["label"] for item in plan.sharing.data()],
+            "conversation_id": attempt["conversation_id"],
         }
         outbox = (
             {"message_id": attempt["files_message_id"], "status": "pending", "kind": "files"},
             {"message_id": request_id, "status": "pending", "kind": "request"},
         )
         async with rec.lock:
-            step = self._step("escalate", step_input, {"conversation_id": attempt["conversation_id"]}, rec.state.round)
+            step = self._step("escalate", {"confidence": rec.state.data.get("confidence")}, output, rec.state.round)
             await self._change(
                 rec,
                 step=step,

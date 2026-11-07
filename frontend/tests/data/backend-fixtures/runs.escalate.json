@@ -1,0 +1,9 @@
+{
+  "method": "POST",
+  "path": "/api/agent/escalate/277414a3-ce59-4561-bd53-024349f367b7",
+  "status": 200,
+  "body": {
+    "status": "awaiting_machine_builder",
+    "escalation_ref": "ESC-2"
+  }
+}

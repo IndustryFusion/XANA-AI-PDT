@@ -157,14 +157,15 @@ Fields are snake_case. A refused request answers `{"error": {"kind", "message"}}
 | `/api/agent/confirm-resolution/{run_id}` | POST | Confirm the proposed resolution (runs `act`) or reject it with a reason (new round) |
 | `/api/agent/stop/{run_id}` | POST | Stop an open run, cancelling a round in progress |
 | `/api/agent/archive/{run_id}` | POST | Move a finished run to the incident history |
-| `/api/agent/escalate-preflight/{run_id}` | GET | Whether escalation is possible; always not possible in phase 1 |
+| `/api/agent/escalate-preflight/{run_id}` | GET | Whether escalation is possible, why not, the recipient and what would be sent. Sends nothing |
+| `/api/agent/escalate/{run_id}` | POST | Send the incident to the machine builder. A failure leaves the status as it was |
+| `/api/agent/outbox-status/{run_id}` | GET | Delivery of what the run sent |
 | `/api/agent/reopen/{run_id}` | POST | Reopen a run with a machine-builder conversation; always `conflict` in phase 1 |
 | `/api/incidents` | GET | History, filtered by `machine_id`, outcomes (`status=a,b`) and an inclusive closing date range (`from`, `to`) |
 | `/api/incidents/{id}` | GET | Incident detail + full agent trace |
 | `/api/incidents/{id}/reopen` | POST | Start a new run with the incident's machine and issue |
 | `/api/diagnostics` | GET | Live connectivity check: PostgreSQL, TimescaleDB, Scorpio, LLM |
 | `/ws/run/{run_id}` | WebSocket | Live stream: the run's snapshot first, then step and status events |
-| `/api/agent/escalate/{run_id}` | POST | *Later phase.* Escalate to machine builder via IFF Dataspace |
 | `/api/agent/mb-feedback/{run_id}` | POST | *Later phase.* Process a machine builder reply (called by inbox poller) |
 | `/api/agent/operator-approve/{run_id}` | POST | *Later phase.* Operator approves or declines an out-of-policy data request |
 | `/api/ngsi/*` | — | Data Explorer: query, edit, import, history and time-shift, on `NGSI_URL` and `PGREST_URL` only, and live updates (`/api/ngsi/ws`) through a broker subscription with an MQTT endpoint. For operators; the workflow has no path to it |
@@ -234,12 +235,14 @@ POST /api/agent/escalate/{run_id}
   │
   ├─ IFRIC lookup: GET /company/assets/{machine_id}/manufacturer → company_ifric_id, company_name
   ├─ Gateway peer match: GET /participants/compatible
-  ├─ Policy check (apply_policy): enforce DATA_SHARING_POLICY before sending
-  │    → emits policy_check step event over WebSocket
-  ├─ File transfer: POST /outbox/files (NGSI-LD entity as JSON; message_type=file-transfer)
-  ├─ Structured message: POST /outbox/messages (incident payload; message_type=request)
-  └─ Run transitions to awaiting_machine_builder
+  ├─ Policy: DATA_SHARING_POLICY and GET /capabilities/access?consumer= (auto or approved)
+  │    → policy_check step
+  ├─ File transfer: POST /outbox/files (starts the conversation)
+  ├─ Structured message: POST /outbox/messages (incident; performative request; same conversation)
+  └─ Run transitions to awaiting_machine_builder, with an ESC-… reference
 ```
+
+Possible from `awaiting_input` and `awaiting_confirmation`. While it sends, a mark on the run refuses other operator actions, without holding the run's lock, so the stream goes on. A failure is an `escalate_failed` step and the status stays; trying again doesn't send the files again. A background task polls `GET /outbox/messages/{id}/status` until final: `notified` shows as `delivered`, `error` and `rejected` as `failed`.
 
 **Inbox polling.** A background `asyncio` task polls `GET /inbox/messages?status=received` every 30 seconds. When a message arrives whose `conversation_id` matches a pending escalation, `machine_builder_feedback` is invoked automatically.
 
@@ -261,9 +264,9 @@ Data-sharing tiers mirror the pre-negotiated IFF Dataspace capabilities:
 
 | Policy | Capability | Data sent |
 |---|---|---|
-| `minimal` | `twin:direct` | Single NGSI-LD entity (always sent on escalation) |
-| `adjacent` | `twin:adjacents` | Entity + directly linked component entities |
-| `timeseries` | `twin:history` | Above + time-series signal history |
+| `minimal` | `twin:direct` | The machine's entity and active alerts |
+| `adjacent` | `twin:adjacents` | Plus entities one relationship away and their active alerts |
+| `timeseries` | `twin:history` | Plus 24 hours of signal history of those entities |
 
 Every transmission goes through `apply_policy()` which strips files outside the configured tier before the gateway call. A `policy_check` step event is pushed over the WebSocket so the operator can see exactly what was allowed and what was stripped.
 
@@ -347,7 +350,11 @@ runs (
     clarifications  JSONB,
     rejected        JSONB,  -- rejected resolutions with reasons
     started_at      TIMESTAMPTZ,
-    updated_at      TIMESTAMPTZ
+    updated_at      TIMESTAMPTZ,
+    escalation      JSONB,  -- 005_escalation.sql: reference, recipient, tier, data sent
+    outbox          JSONB,  -- delivery of what was sent
+    conversation_id TEXT,
+    attempt         JSONB   -- how far an escalation that failed got
 )
 
 -- 003_incidents.sql
@@ -370,7 +377,10 @@ incidents (
     started_at         TIMESTAMPTZ,
     closed_at          TIMESTAMPTZ,
     archived_at        TIMESTAMPTZ,
-    reopened_run_id    TEXT
+    reopened_run_id    TEXT,
+    builder            TEXT,     -- 005_escalation.sql
+    escalation         JSONB,
+    conversation_id    TEXT
 )
 
 -- 004_gateway_credentials.sql

@@ -3,6 +3,6 @@
   "path": "/api/ifric/resolve-builders",
   "status": 200,
   "body": {
-    "urn:ngsi-ld:Machine:press-01": "Machine Builder GmbH"
+    "urn:ngsi-ld:Machine:laser-cutter-01": "Machine Builder GmbH"
   }
 }

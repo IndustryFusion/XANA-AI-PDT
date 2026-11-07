@@ -30,6 +30,12 @@ The client secret is entered on the Dataspace screen or set in `GATEWAY_CLIENT_S
 
 The health report's `connector` check reads through the participant's adapter, as the contract offers agents nothing that reaches the connector. A connector failing behind a working adapter doesn't show there.
 
+## Escalation
+
+`POST /api/agent/escalate/{id}` sends an incident to the machine's builder, from `awaiting_input` or `awaiting_confirmation`, and `GET /api/agent/escalate-preflight/{id}` says first whether that is possible, and why not. `DATA_SHARING_POLICY` decides what may go: `minimal` the machine's entity and alerts, `adjacent` also entities one relationship away, `timeseries` also 24 hours of signal history. The dataspace doesn't enforce this, so the backend filters. A capability also needs access `auto` or `approved` for that builder, so `adjacent` sends only the machine's data until `twin:adjacents` is approved on the Dataspace screen. A `policy_check` step shows what was sent and withheld.
+
+A failed send leaves the run's status as it was. Trying again doesn't send the files again, except if the backend stopped just after the gateway accepted them, as the contract has no idempotency key.
+
 ## IFRIC registry
 
 With `IFRIC_URL`, including its port (the registry's default is 4007), company names, machine builders and factory details come from the IFRIC registry, asked with the dataspace token. The registry and dataspace must share a realm, and a participant's ID must equal its company's `company_ifric_id`, or the registry refuses it. `FACTORY_ID` names the factory when the operator's token has no `ifric_factory_id`.

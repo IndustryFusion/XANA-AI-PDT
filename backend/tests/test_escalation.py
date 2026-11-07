@@ -149,7 +149,7 @@ async def test_timeseries_adds_history(url):
     assert set(bundle["files"]) == {"machine.json", "related-entities.json", "signal-history.json"}
     assert bundle["capability"] == HISTORY
     history = bundle["files"]["signal-history.json"]
-    assert history and history[0]["buckets"] and {"attribute", "buckets"} == set(history[0])
+    assert history and history[0]["buckets"] and {"entity_id", "attribute", "buckets"} == set(history[0])
     assert [d["category"] for d in run["escalation"]["data"]] == [DIRECT, ADJACENTS, HISTORY]
 
 
@@ -206,6 +206,10 @@ async def test_escalating_moves_the_run_and_records_it(url):
     assert run["escalation"]["tier"] == "minimal" and run["escalation"]["sent_at"]
     assert [o["status"] for o in run["outbox"]] == ["pending", "pending"]
     assert [s["node"] for s in run["steps"]][-2:] == ["policy_check", "escalate"]
+    # What the run view reads to show the escalation, as the stream's step event carries it.
+    output = run["steps"][-1]["output"]
+    assert output["escalation_ref"] == answer["escalation_ref"] and output["recipient"] == "Builder GmbH"
+    assert output["tier"] == "minimal" and output["sent"]
 
 
 async def test_escalation_is_possible_from_awaiting_input(url):
@@ -537,6 +541,18 @@ async def test_outage_of_the_status_route_keeps_it_pending(url):
         space.message_status["m-1"] = space.message_status["m-2"] = "notified"
         await app.state.runs.check_outbox()
         assert [o["status"] for o in await wait_status(space, client, run_id)] == ["delivered", "delivered"]
+
+
+async def test_one_message_failing_to_answer_does_not_hold_up_another(url):
+    space = Space()
+    app = app_at(url, space)
+    async with running(app) as client:
+        run_id = await escalatable(client)
+        await client.post(f"/api/agent/escalate/{run_id}")
+        space.status_for["GET /outbox/messages/m-1/status"] = 503
+        space.message_status["m-2"] = "notified"
+        await app.state.runs.check_outbox()
+        assert [o["status"] for o in await wait_status(space, client, run_id)] == ["pending", "delivered"]
 
 
 async def test_the_background_task_really_polls(url):

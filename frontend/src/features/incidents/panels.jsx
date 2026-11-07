@@ -248,12 +248,10 @@ export function WaitingPanel({ run }) {
 const DELIVERY_POLL_MS = 3000
 const SENT_KINDS = { files: 'Machine data', request: 'Incident' }
 
-/** Delivery of what the escalation sent, for as long as it isn't final. */
+/** Delivery of what the escalation sent. Read here, as the run's stream doesn't carry it. */
 function EscalationDelivery({ run }) {
-  const sent = (run.outbox ?? []).filter((o) => SENT_KINDS[o.kind])
-  const unfinished = sent.some((o) => o.status === 'pending')
-  const polled = useData('runs', 'getOutboxStatus', [run.runId], { enabled: sent.length > 0, refreshMs: unfinished ? DELIVERY_POLL_MS : 0 })
-  const current = (polled.data ?? sent).filter((o) => SENT_KINDS[o.kind])
+  const polled = useData('runs', 'getOutboxStatus', [run.runId], { refreshMs: DELIVERY_POLL_MS })
+  const current = (polled.data ?? run.outbox ?? []).filter((o) => SENT_KINDS[o.kind])
   if (current.length === 0) return null
   return (
     <ul className="plain-list stack" aria-label="Delivery of the escalation">
