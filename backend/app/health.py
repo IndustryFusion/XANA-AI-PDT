@@ -35,7 +35,15 @@ import psycopg
 from app.config import Settings
 from app.dataspace.gateway import GatewayClient
 from app.errors import Refused
-from app.events.subscription import ACTIVE, DELIVERY_FAILING, NOT_CONFIGURED, TENANT_LIMIT, WAITING, MachineWatch
+from app.events.subscription import (
+    ACTIVE,
+    BROKER_UNREACHABLE,
+    DELIVERY_FAILING,
+    NOT_CONFIGURED,
+    TENANT_LIMIT,
+    WAITING,
+    MachineWatch,
+)
 from app.ifric import RegistryClient
 from app.memory.migrate import Migrator
 from app.ngsi.live import MQTT_USER, NOT_AUTHORISED
@@ -262,6 +270,8 @@ class HealthService:
             headers["Authorization"] = f"Bearer {token}"
         async with httpx.AsyncClient(timeout=self._s.health_timeout_s, transport=self._transport) as client:
             response = await client.get(f"{self._s.ngsi_url.rstrip('/')}/ngsi-ld/v1/types", headers=headers)
+        if response.status_code in (401, 403):
+            return "error", f"{self._s.ngsi_url} refused the token (HTTP {response.status_code})"
         if response.status_code != 200:
             return "error", f"{self._s.ngsi_url} answered HTTP {response.status_code}"
         return "ok", f"Reachable at {self._s.ngsi_url}"
@@ -373,7 +383,7 @@ class HealthService:
         if watch.state == ACTIVE:
             return "ok", watch.detail
         return (
-            "degraded" if watch.state in (WAITING, DELIVERY_FAILING, TENANT_LIMIT) else "error"
+            "degraded" if watch.state in (WAITING, DELIVERY_FAILING, TENANT_LIMIT, BROKER_UNREACHABLE) else "error"
         ), watch.detail
 
     def _label(self) -> str:

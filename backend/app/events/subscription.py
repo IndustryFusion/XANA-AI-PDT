@@ -46,6 +46,7 @@ ACTIVE = "active"
 DELIVERY_FAILING = "delivery_failing"
 FAILED = "failed"
 TENANT_LIMIT = "no_delivery_in_tenant"
+BROKER_UNREACHABLE = "broker_unreachable"
 
 
 class MachineWatch:
@@ -122,7 +123,10 @@ class MachineWatch:
                     await self._verify(client, token)
         except httpx.HTTPError as error:
             self._ensured = False
-            self._set(FAILED, f"The context broker could not be reached ({type(error).__name__}); trying again.")
+            # The broker's own check says it is down. This one only follows from that.
+            self._set(
+                BROKER_UNREACHABLE, f"The context broker could not be reached ({type(error).__name__}); trying again."
+            )
 
     async def _ensure(self, client: httpx.AsyncClient, token: str | None) -> None:
         response = await client.post(self._url, json=self._subscription(), headers=self._headers(token, True))

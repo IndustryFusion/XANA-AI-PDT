@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import logging
 import re
-from urllib.parse import unquote, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, unquote, urlencode, urlsplit, urlunsplit
 
 MASK = "***"
 # What may hold a token wherever it appears, known to this process or not.
@@ -28,14 +28,22 @@ _JWT = re.compile(r"\beyJ[\w\-]+\.[\w\-]+(\.[\w\-]*)?")
 _BEARER = re.compile(r"\b(Bearer|Key)\s+[\w\-.~+/=]{8,}")
 
 
+_SECRET_NAME = re.compile("password|passwd|pwd|token|key|secret", re.IGNORECASE)
+
+
 def mask_url(url: str) -> str:
-    """The URL with its password replaced by `***`."""
+    """The URL with its password, and query values that name a secret, replaced by `***`."""
     try:
         parts = urlsplit(url)
+        pairs = parse_qsl(parts.query, keep_blank_values=True)
+        password = parts.password
     except ValueError:
         return MASK
-    if parts.password is None:
-        return url
+    if any(_SECRET_NAME.search(name) for name, _ in pairs):
+        masked = [(name, MASK if _SECRET_NAME.search(name) else value) for name, value in pairs]
+        parts = parts._replace(query=urlencode(masked, safe="*"))
+    if password is None:
+        return urlunsplit(parts)
     host = parts.hostname or ""
     if parts.port is not None:
         host = f"{host}:{parts.port}"

@@ -26,6 +26,7 @@ from app.api.config import service_settings
 from app.health import HINTS, LABELS, HealthService
 from app.main import create_app
 from app.memory.migrate import Migrator
+from app.redact import mask_url
 from tests.conftest import make_settings
 
 KEY = "alerta-key-value"
@@ -214,6 +215,37 @@ def test_settings_show_addresses_with_passwords_masked_and_no_key():
     assert all(item["editable"] is False and item["changed"] is False for item in found)
     assert {item["key"] for item in found} >= {"context_broker", "message_broker", "alert_manager"}
     assert not any(item["key"] == "gateway" for item in found)  # none configured
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        f"postgresql://u@h/db?password={PASSWORD}&sslmode=require",
+        f"http://h/x?access_token={PASSWORD}",
+        f"http://h/x?API_KEY={PASSWORD}",
+        f"http://h/x?client_secret={PASSWORD}",
+        f"postgresql://u:{PASSWORD}@h/db?password={PASSWORD}",
+    ],
+)
+def test_a_secret_in_an_address_is_masked_also_in_its_query(url):
+    assert PASSWORD not in mask_url(url)
+
+
+def test_the_rest_of_an_address_stays_as_it_is():
+    assert mask_url("postgresql://u@h:5/db?sslmode=require") == "postgresql://u@h:5/db?sslmode=require"
+    assert "sslmode=require" in mask_url("postgresql://u@h/db?password=x&sslmode=require")
+
+
+def test_settings_and_probes_mask_a_query():
+    settings = {"timescale_db_url": f"postgresql://u@h/tsdb?password={PASSWORD}"}
+    assert PASSWORD not in str(service_settings(make_settings(**settings)))
+    assert PASSWORD not in service(**settings)._probe_address("timeseries")
+
+
+async def test_a_broker_refusing_the_token_says_so():
+    status, detail = await service(answering(401))._broker()
+    assert status == "error"
+    assert "refused" in detail
 
 
 def test_settings_can_be_read_and_not_changed():
