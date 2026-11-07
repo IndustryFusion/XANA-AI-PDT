@@ -105,7 +105,7 @@ async def test_nothing_reachable_real_probes():
     s = make_settings()
     report = await HealthService(s, Migrator(s.postgres_memory_url.get_secret_value())).report()
     assert report["overall"] == "error"
-    assert {c["status"] for c in report["checks"] if c["id"] not in ("gateway", "connector")} == {"error"}
+    assert {c["status"] for c in report["checks"] if c["id"] not in ("gateway", "connector", "ifric")} == {"error"}
 
 
 async def test_password_masked_in_detail_and_log(caplog):
@@ -174,7 +174,7 @@ def test_app_starts_without_dependencies():
     assert response.status_code == 200
     body = response.json()
     assert body["overall"] == "error"
-    assert {c["id"] for c in body["checks"]} == {"memory", "timeseries", "broker", "llm", "gateway", "connector"}
+    assert {c["id"] for c in body["checks"]} == {"memory", "timeseries", "broker", "llm", "gateway", "connector", "ifric"}
 
 
 def openai_models(status=200, models=("m1",)):
