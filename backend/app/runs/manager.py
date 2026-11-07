@@ -330,7 +330,12 @@ class RunManager:
                 files = await escalator.files(state, plan.sharing)
                 names = [name for name, _ in files]
                 await self._add_policy_check(rec, plan, names)
-                attempt = {"files": names, "files_message_id": await escalator.send_files(plan, files)}
+                attempt = {
+                    "files": names,
+                    "capabilities": list(plan.sharing.allowed),
+                    "receiver": plan.builder.company_id,
+                    "files_message_id": await escalator.send_files(plan, files),
+                }
                 await self._remember_attempt(rec, attempt)
             if not attempt.get("conversation_id"):
                 attempt["conversation_id"] = await escalator.conversation_of(attempt["files_message_id"])
@@ -347,19 +352,21 @@ class RunManager:
         self, rec: RunRecord, plan: Plan, ref: str, attempt: dict[str, Any], request_id: str
     ) -> dict[str, str]:
         now = self._now().isoformat()
+        # What the first attempt sent, as access may have changed before this one.
+        sharing = plan.sharing.narrowed_to(attempt.get("capabilities", list(plan.sharing.allowed)))
         escalation = {
             "ref": ref,
             "recipient": plan.recipient(),
-            "tier": plan.sharing.tier,
-            "data": plan.sharing.data(),
+            "tier": sharing.tier,
+            "data": sharing.data(),
             "files": attempt["files"],
             "sent_at": now,
         }
         output = {
             "escalation_ref": ref,
             "recipient": plan.builder.name,
-            "tier": plan.sharing.tier,
-            "sent": [item["label"] for item in plan.sharing.data()],
+            "tier": sharing.tier,
+            "sent": [item["label"] for item in sharing.data()],
             "conversation_id": attempt["conversation_id"],
         }
         outbox = (
@@ -388,7 +395,7 @@ class RunManager:
             "sent": [item["label"] for item in sharing.data()],
             "files": names,
             "withheld": [f"{item['label']}: {item['reason']}" for item in sharing.withheld],
-            "decision": f"Sent under the tier {sharing.tier}; nothing beyond it, or the builder's access, goes out.",
+            "decision": f"Going out under the tier {sharing.tier}; nothing beyond it, or the builder's access.",
         }
         async with rec.lock:
             await self._change(rec, step=self._step("policy_check", {"tier": sharing.tier}, output, rec.state.round))
