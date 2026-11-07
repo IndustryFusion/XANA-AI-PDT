@@ -97,6 +97,14 @@ The backend SHALL delete its subscription on sign-out and on shutdown, and SHALL
 - **WHEN** a change made through this backend doesn't arrive within 15 seconds
 - **THEN** the status is `unavailable`, and the reason names what to check
 
+#### Scenario: A write that changed nothing
+- **WHEN** the context broker answers a write through this backend without changing anything, such as an upsert with every entity rejected
+- **THEN** no notification is expected, and the status doesn't become `unavailable`
+
+#### Scenario: A message that is no notification
+- **WHEN** a message arrives on the topic that isn't a valid notification of a change
+- **THEN** it doesn't count as delivery
+
 #### Scenario: Topic refused
 - **WHEN** the MQTT broker accepts the connection and refuses the topic
 - **THEN** the status is `unavailable`, and the reason says so

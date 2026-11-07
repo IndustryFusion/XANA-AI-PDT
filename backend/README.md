@@ -186,7 +186,7 @@ The machine ontology and SHACL shapes are read from Fuseki (`FUSEKI_URL`, `FUSEK
 
 - **Graph names** start with `FUSEKI_GRAPH_BASE`: `<base>/shacl.ttl` and `<base>/knowledge.ttl`. On the platform that is `http://<Fuseki's external host>/<realm>`, which differs from the service's address, so it must be set.
 - **Tokens:** the operator's token is sent. Through the platform's ingress, operators need `Factory-Admin` or `Factory-Reader` on client `fuseki`; the service `fuseki:3030` itself doesn't check.
-- **For the agent (#29):** `xana_agent.sources.FusekiOntologySource` has `query`, `shapes` and `knowledge`, which only read and give errors as data. `query` decides on the parsed query, and refuses updates, `SERVICE` (Fuseki would call any address in a query) and what can't be parsed.
+- **For the agent (#29):** `xana_agent.sources.FusekiOntologySource` has `query`, `shapes` and `knowledge`, which only read and give errors as data. `query` first refuses the word `service` anywhere in the text, in any case (Fuseki would call any address in a query, and this parser and Fuseki's don't read every text alike), any `\u` or `&#`, and more than 4000 characters. A query that merely holds the word is refused too. Then it refuses updates and what can't be parsed.
 - **Query input:** entity types and attributes go into queries only escaped. Tests parse the resulting queries, and try hostile input against a real Fuseki (`TEST_FUSEKI_URL`).
 
 ## Language model

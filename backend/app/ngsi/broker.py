@@ -87,6 +87,9 @@ def _now() -> str:
     return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+MAX_DEPTH = 64
+
+
 def _is_number(value: Any) -> bool:
     return isinstance(value, int | float) and not isinstance(value, bool)
 
@@ -102,6 +105,33 @@ def _problem(item: Any) -> str:
     if isinstance(error, dict):
         return scrubbed(str(error.get("detail") or error.get("title") or "The broker rejected this entity."))
     return "The broker rejected this entity."
+
+
+def check_document(document: Any) -> None:
+    """Refuses a document too deeply nested to handle, or holding text JSON can't carry to the broker.
+
+    Walks it without recursion, and needs no parser's limit to hold: what follows can recurse safely.
+    """
+    stack = [(document, 1)]
+    while stack:
+        value, depth = stack.pop()
+        if depth > MAX_DEPTH:
+            raise invalid(f"The document is nested more than {MAX_DEPTH} levels deep.")
+        if isinstance(value, dict):
+            stack.extend((key, depth + 1) for key in value)
+            stack.extend((item, depth + 1) for item in value.values())
+        elif isinstance(value, list):
+            stack.extend((item, depth + 1) for item in value)
+        elif isinstance(value, str) and not _encodable(value):
+            raise invalid("The document holds text that isn't valid Unicode, such as a lone surrogate.")
+
+
+def _encodable(text: str) -> bool:
+    try:
+        text.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return True
 
 
 def _inner_context(value: Any) -> bool:
@@ -198,7 +228,7 @@ class ContextBroker:
         if response.status_code >= 400:
             raise refusal(SERVICE, response)
         # The broker notifies changes, but not deletions.
-        if self.on_write and method in ("PATCH", "POST") and _changes_entities(path):
+        if self.on_write and method in ("PATCH", "POST") and _changes_entities(path) and _something_changed(response):
             self.on_write()
         return response
 
@@ -511,6 +541,17 @@ class ContextBroker:
             return len(response.json().get("success", []))
         except (ValueError, AttributeError):
             return 0
+
+
+def _something_changed(response: httpx.Response) -> bool:
+    """A 207 can say that nothing changed: an upsert with every entity rejected, so no notification follows."""
+    if response.status_code != 207:
+        return True
+    try:
+        body = response.json()
+    except ValueError:
+        return False
+    return isinstance(body, dict) and bool(body.get("success") or body.get("updated"))
 
 
 def _changes_entities(path: str) -> bool:
