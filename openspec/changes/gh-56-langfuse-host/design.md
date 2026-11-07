@@ -14,7 +14,7 @@ Alternative: one name wins silently. With traces holding run data, going to the 
 
 ### The address is configuration, not a secret
 
-It goes into the backend's ConfigMap, from the `XANA_LANGFUSE_HOST` environment variable in Helmfile or the chart value, like `GATEWAY_URL`. It's shown masked wherever addresses are shown. Unset, nothing is rendered and the backend's default applies.
+It goes into the backend's ConfigMap, from the `XANA_LANGFUSE_HOST` environment variable in Helmfile or the chart value, like `GATEWAY_URL`. It isn't shown anywhere: no screen or route lists it. Unset, nothing is rendered and the backend's default applies.
 
 ### No keys, no traces
 
