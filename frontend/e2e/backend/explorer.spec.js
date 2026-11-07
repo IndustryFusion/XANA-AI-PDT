@@ -71,6 +71,8 @@ test('edit a value in place, and it stays after a reload', async ({ page }) => {
     await attribute(node(page, id), 'note').getByRole('button', { name: /old/ }).click()
     await page.getByLabel('New value of note').fill('new text')
     await page.getByLabel('New value of note').press('Enter')
+    // The save has to be over: a reload would otherwise cut it off.
+    await expect(page.getByLabel('New value of note')).toHaveCount(0)
     await page.reload()
     await expect(attribute(node(page, id), 'note')).toContainText('new text')
 
