@@ -246,12 +246,9 @@ class _Listener(BaseHTTPRequestHandler):
 @pytest.mark.skipif(not CALLBACK_HOST, reason="needs TEST_FUSEKI_CALLBACK_HOST")
 async def test_on_data_with_full_iris_the_subscription_matches_under_a_context():
     base = "https://platform.example.org/v0.1/"
-    _Listener.context = {
-        "@context": [
-            "https://uri.etsi.org/ngsi-ld/v1/ngsi-ld-core-context.jsonld",
-            {name: f"{base}{name}" for name in ("Machine", "status", "errorCode", "alarmLevel", "faultCode")},
-        ]
-    }
+    # Names only: the broker adds the core context itself, and a context naming it there has it fetched from outside.
+    names = ("Machine", "status", "errorCode", "alarmLevel", "faultCode")
+    _Listener.context = {"@context": {name: f"{base}{name}" for name in names}}
     _Listener.received = []
     server = ThreadingHTTPServer(("0.0.0.0", 0), _Listener)  # noqa: S104
     threading.Thread(target=server.serve_forever, daemon=True).start()
