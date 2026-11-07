@@ -74,7 +74,7 @@ The operator SHALL be able to change attribute values in place on the attribute'
 - **THEN** only that sub-attribute is removed and the attribute remains
 
 ### Requirement: Attribute history
-For attributes with recorded history the UI SHALL show the values over a selectable time range as a chart for numeric values and as a table for all values.
+For attributes with recorded history the UI SHALL show the values over a selectable time range as a chart for numeric values and as a table for all values. An attribute whose latest recorded state is deleted SHALL say so.
 
 #### Scenario: Numeric history
 - **WHEN** the operator opens the history of a numeric attribute and picks a time range
@@ -87,6 +87,18 @@ For attributes with recorded history the UI SHALL show the values over a selecta
 #### Scenario: Chart alternative
 - **WHEN** the chart is shown
 - **THEN** the same values are available in the table, so the information does not depend on seeing the chart
+
+#### Scenario: Deleted attribute
+- **WHEN** the operator opens the history of an attribute whose latest recorded state is deleted
+- **THEN** the history says when it was deleted, and still shows its earlier values
+
+#### Scenario: Attribute without an observation time
+- **WHEN** the store holds rows for an attribute that states no observation time
+- **THEN** its history can be opened
+
+#### Scenario: History service unavailable
+- **WHEN** the history cannot be read
+- **THEN** the history says so with the reason, and the rest of the explorer keeps working
 
 ### Requirement: Time-shift
 The operator SHALL be able to view entity types and entities as they were at a chosen past moment, clearly marked as a historical view, and return to the present.
@@ -111,7 +123,7 @@ The operator SHALL be able to import entities from a file or a URL after a previ
 - **THEN** the number of deleted entities per type is shown and the list is refreshed
 
 ### Requirement: Live updates
-The Data explorer SHALL show attribute changes as they happen when live updates are on, highlight changed values briefly, and indicate whether live updates are working.
+The Data explorer SHALL show attribute changes as they happen when live updates are on, highlight changed values briefly, and indicate whether live updates are working. When they stop working, it SHALL recover by itself once they work again.
 
 #### Scenario: Value changes live
 - **WHEN** live updates are on and a shown attribute changes
@@ -120,3 +132,26 @@ The Data explorer SHALL show attribute changes as they happen when live updates 
 #### Scenario: Live updates unavailable
 - **WHEN** live updates cannot be delivered
 - **THEN** the indicator says so and the explorer keeps working without them
+
+#### Scenario: Live updates return
+- **WHEN** live updates work again
+- **THEN** the indicator shows it, what is shown is read again, so that changes from the outage appear, and later changes appear with no reload
+
+#### Scenario: Only what changed is highlighted
+- **WHEN** a notification holds the whole entity, and one attribute differs from what is shown
+- **THEN** only that attribute is highlighted
+
+### Requirement: Allowed ranges while editing
+The value editor SHALL show the allowed range of a value, where the data model gives one, as well as its suggested values. It SHALL work the same when there are no hints.
+
+#### Scenario: Range shown
+- **WHEN** the operator edits a value with an allowed range
+- **THEN** the range is shown next to the input, saying whether each limit is included
+
+#### Scenario: No hints
+- **WHEN** no hints exist
+- **THEN** the editor works as usual, and no error is shown
+
+#### Scenario: Hints can't be read
+- **WHEN** hints can't be read, for example for a missing role or a wrong graph base
+- **THEN** the editor works as usual, and says why there are no suggestions

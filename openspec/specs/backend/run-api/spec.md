@@ -117,11 +117,11 @@ The backend SHALL run at most the configured number of rounds at the same time. 
 - **THEN** two rounds run at once, and the third starts its first step only after one of them has paused or ended
 
 ### Requirement: Stable error kinds
-Every refused request SHALL carry an error kind (`not_found`, `conflict`, `invalid`, `unavailable`) and a readable message, with a matching HTTP status.
+Every refused request SHALL carry an error kind (`not_found`, `conflict`, `invalid`, `unavailable`, `unauthorized`) and a readable message, with a matching HTTP status. `unavailable` answers 503 for the backend's own state, and 502 for a service behind the backend that cannot be used.
 
 #### Scenario: Error shape
 - **WHEN** any request is refused
-- **THEN** the response holds the kind and the message, and the HTTP status is 404, 409, 422 or 503 respectively
+- **THEN** the response holds the kind and the message, and the HTTP status is 404, 409, 422, 503 or 401 respectively, or 502 for a service behind the backend
 
 ### Requirement: Model readiness
 Before starting a new analysis round for an operator's request, the backend SHALL check that the language model is available, and SHALL refuse the request as `unavailable` with a reason if it is not, within the health check timeout.

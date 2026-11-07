@@ -24,7 +24,7 @@ An analysis round SHALL run the steps observe, hypothesize, validate and decide 
 - **THEN** exactly one observe, one hypothesize, one validate and one decide step complete, in this order
 
 ### Requirement: Observe the machine
-The observe step SHALL read the machine and its directly related entities from the context broker, and their recent attribute history from the time-series store. It SHALL report what it read, per source, with that source's status.
+The observe step SHALL read the machine and its directly related entities from the context broker, and their recent attribute history, relationship and text changes and entity lifecycle from the time-series store. History SHALL include rows where the deleted flag is null. It SHALL report what it read, per source, with that source's status.
 
 #### Scenario: Machine with components
 - **WHEN** the observed machine has relationships to two components
@@ -33,6 +33,26 @@ The observe step SHALL read the machine and its directly related entities from t
 #### Scenario: Unknown machine
 - **WHEN** the context broker has no entity with the given machine identifier
 - **THEN** the step reports the machine as not found and the round continues with the issue text and any history found
+
+#### Scenario: Relationship and text changes
+- **WHEN** a relationship target or a text attribute changed within the window
+- **THEN** the step's content lists those changes, newest first, with their time
+
+#### Scenario: Entity lifecycle
+- **WHEN** a related entity was created or deleted within the window
+- **THEN** the step's content lists that with its time
+
+#### Scenario: Null deleted flag
+- **WHEN** history rows have a null deleted flag
+- **THEN** they count as not deleted
+
+#### Scenario: Attributes named by full IRIs
+- **WHEN** an entity's attributes are full IRIs and history holds the same IRIs
+- **THEN** each signal appears once, with its current value and trend
+
+#### Scenario: Changes cannot be read
+- **WHEN** reading changes or lifecycle fails, or the entities table does not exist
+- **THEN** the round continues with the rest, and the step says so
 
 ### Requirement: Hypotheses
 The hypothesize step SHALL propose two or three hypotheses for the issue, ranked by confidence. Each has a title, a confidence and the observed evidence it rests on.
@@ -139,3 +159,42 @@ The workflow SHALL only read from the context broker and the time-series store. 
 #### Scenario: Instruction in the issue text
 - **WHEN** the issue text asks the agent to delete an entity or to query another machine's data
 - **THEN** no write happens, and only the run's machine, its related entities and their history are read
+
+### Requirement: Active alerts as evidence
+The observe step SHALL read `open` and `ack` alerts for the machine and up to 5 related entities, by their full entity IDs, remove duplicates, weight them by age and severity, and pass them to the hypothesize step. They SHALL be part of the run's evidence, and of the machine data the round keeps. A workflow without an alert source SHALL work as before.
+
+#### Scenario: Machine with an active alert
+- **WHEN** the machine has an open alert whose resource is its full entity ID
+- **THEN** the observe step lists it, the hypothesize step receives it, and Alerta shows as `ok`
+
+#### Scenario: Alert in the form of the platform's rules
+- **WHEN** an alert has the form the platform's rules produce
+- **THEN** it is found by the full entity ID
+
+#### Scenario: Other statuses
+- **WHEN** an alert is closed or shelved
+- **THEN** it is not listed
+
+#### Scenario: Duplicates
+- **WHEN** the same alert is returned for more than one read
+- **THEN** it is listed once
+
+#### Scenario: Age
+- **WHEN** two alerts of the same severity differ in age
+- **THEN** the newer one has the higher weight and comes first
+
+#### Scenario: Many related entities
+- **WHEN** the machine has more than 5 related entities
+- **THEN** alerts are read for the machine and 5 of them
+
+#### Scenario: One entity fails
+- **WHEN** reading alerts fails for one entity
+- **THEN** alerts of the others are listed, the source shows as `unavailable` and says how many failed, and the round continues
+
+#### Scenario: Alerta unavailable
+- **WHEN** Alerta cannot be reached
+- **THEN** the round reaches a decision, and the source shows as `unavailable`
+
+#### Scenario: Only reads
+- **WHEN** any round runs
+- **THEN** only read requests are sent to Alerta

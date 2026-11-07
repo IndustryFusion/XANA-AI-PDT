@@ -56,3 +56,66 @@ The local environment SHALL offer an identity provider on request, with a realm 
 #### Scenario: Without it
 - **WHEN** a contributor starts the local environment as usual
 - **THEN** no identity provider starts, and the UI opens without sign-in
+
+### Requirement: Optional history service
+The local environment SHALL offer PostgREST on request, on the sample history, in the platform's table layout. Without the request, it SHALL start without one, and everything except the explorer's history and time-shift SHALL work.
+
+#### Scenario: With the service
+- **WHEN** a contributor starts the local environment with its documented history profile
+- **THEN** history and time-shift work in the explorer
+
+#### Scenario: Without it
+- **WHEN** a contributor starts the local environment as usual
+- **THEN** no PostgREST starts, and history and time-shift say the service is unavailable
+
+#### Scenario: Existing data
+- **WHEN** the environment starts with a database from before this change
+- **THEN** the tables gain the missing columns, and the sample data stays
+
+#### Scenario: Token accepted
+- **WHEN** the history profile runs with the authentication profile
+- **THEN** a signed-in operator's token is accepted, with no anonymous access needed
+
+### Requirement: Optional MQTT broker
+The local environment SHALL offer an MQTT broker on request, so that changes reach the explorer live. Without the request, it SHALL start without one.
+
+#### Scenario: With the broker
+- **WHEN** a contributor starts the local environment with its documented live updates profile, and changes an entity
+- **THEN** the change reaches an open explorer
+
+#### Scenario: Without it
+- **WHEN** a contributor starts the local environment as usual
+- **THEN** no MQTT broker starts, and the explorer says live updates are unavailable
+
+### Requirement: Optional ontology service
+The local environment SHALL offer Fuseki on request, loaded with sample shapes and knowledge for the sample machines. Without the request, it SHALL start without one.
+
+#### Scenario: With the service
+- **WHEN** a contributor starts the local environment with its documented ontology profile
+- **THEN** the value editor shows hints for the sample machines
+
+#### Scenario: Without it
+- **WHEN** a contributor starts the local environment as usual
+- **THEN** no Fuseki starts, and the value editor works without hints
+
+### Requirement: Optional alert manager
+The local environment SHALL offer Alerta on request, with the platform's severities and sample alerts on the sample machines in the form the platform's rules produce. Without the request, it SHALL start without one.
+
+#### Scenario: With the service
+- **WHEN** a contributor starts the local environment with its documented alerts profile
+- **THEN** the Alerts screen lists the sample alerts, and a run on such a machine shows its alert
+
+#### Scenario: Without it
+- **WHEN** a contributor starts the local environment as usual
+- **THEN** no Alerta starts, the Alerts screen says it is unavailable, and runs still work
+
+### Requirement: Optional registry stub
+The local environment SHALL offer a stub of the registry's routes under a profile.
+
+#### Scenario: Started with the profile
+- **WHEN** the environment is started with the profile `ifric`
+- **THEN** the routes the backend uses answer as the registry does, for the sample machines
+
+#### Scenario: Without the profile
+- **WHEN** the environment is started without it
+- **THEN** no stub runs, and the backend reports the registry as not configured
