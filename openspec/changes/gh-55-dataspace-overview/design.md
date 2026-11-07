@@ -43,7 +43,12 @@ Alternative: one `resolve` that tries every kind for every ID. Up to four reques
 
 ### A slow or failing registry
 
-Found in review: names were looked up one after the other where the directory and a factory's owner were asked, with 10 s limits, so a hanging registry made `peers` and `access-levels` take about 10 s per peer, past the UI's 15 s. Now all of one lookup of names ends within 3 s, whatever the number of IDs; what isn't known by then has an empty name, as a failed lookup has. A registry that timed out, couldn't be reached or failed with a server error isn't asked again for 30 s, by names or machine names, and once it has failed in a lookup, the directory and owners aren't asked in it. A refusal or an unknown company doesn't count as failing.
+Found in review: names were looked up one after the other where the directory and a factory's owner were asked, with 10 s limits, so a hanging registry made `peers` and `access-levels` take about 10 s per peer, past the UI's 15 s. Now:
+
+- All of one lookup of names ends within 3 s, whatever the number of IDs. What isn't known by then has an empty name in that answer only; running out of time doesn't count as the registry failing, so a long list on a slow registry doesn't stop it being asked.
+- A request of a name lookup that takes over 2.5 s, a registry that can't be reached, or 3 server errors in a row pause the registry's name lookups for 30 s. A single server error for one record, a refusal or an unknown company don't.
+- The directory kept from an earlier read is used first, also while the registry is paused: only the requests are skipped, so it names the companies in it for its 300 s.
+- The directory is read once at a time, with its own 10 s limit. A read still going when a lookup's time is up goes on and is kept for the next lookup.
 
 ## Risks
 
