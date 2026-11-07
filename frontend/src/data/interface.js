@@ -267,6 +267,7 @@ const user = { username: 'string', name: 'string', email: 'string' }
 const runSummary = {
   runId: 'string', incidentId: '?number', machineId: 'string', issue: 'string',
   status: { $enum: RUN_STATES }, startedAt: 'date', updatedAt: 'date', escalationRef: '?string', source: { $enum: RUN_SOURCES },
+  machineBuilder: { $optional: { id: 'string', name: '?string' } },
 }
 const step = { node: 'string', input: { $optional: {} }, output: {}, at: 'date' }
 const outbox = [{ messageId: 'string', status: { $enum: DELIVERY_STATES } }]

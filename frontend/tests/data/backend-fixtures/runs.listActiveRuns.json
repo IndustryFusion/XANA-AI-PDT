@@ -12,6 +12,7 @@
       "started_at": "2026-11-07T00:56:26.456262+00:00",
       "updated_at": "2026-11-07T00:56:27.177878+00:00",
       "escalation_ref": null,
+      "machine_builder": null,
       "source": "operator"
     },
     {
@@ -23,6 +24,7 @@
       "started_at": "2026-11-07T00:47:28.630017+00:00",
       "updated_at": "2026-11-07T00:47:29.152656+00:00",
       "escalation_ref": null,
+      "machine_builder": null,
       "source": "operator"
     },
     {
@@ -34,6 +36,7 @@
       "started_at": "2026-11-07T00:47:24.051504+00:00",
       "updated_at": "2026-11-07T00:47:27.542378+00:00",
       "escalation_ref": null,
+      "machine_builder": null,
       "source": "operator"
     },
     {
@@ -45,6 +48,7 @@
       "started_at": "2026-11-07T00:31:05.192243+00:00",
       "updated_at": "2026-11-07T00:31:05.649119+00:00",
       "escalation_ref": null,
+      "machine_builder": null,
       "source": "operator"
     },
     {
@@ -56,6 +60,7 @@
       "started_at": "2026-11-07T00:31:01.102269+00:00",
       "updated_at": "2026-11-07T00:31:03.974405+00:00",
       "escalation_ref": null,
+      "machine_builder": null,
       "source": "operator"
     }
   ]

@@ -40,7 +40,7 @@ A problem on a machine starts a run by itself. `POST /events/ngsi` and `POST /ev
 
 With `GATEWAY_URL`, the backend is a participant of the IndustryFusion Dataspace. Its contract is `gateway-api.md` in that repository. `GATEWAY_KEYCLOAK_URL` has to be the address the dataspace's services know Keycloak by, as they compare a token's issuer exactly, and `SETTINGS_ENCRYPTION_KEY` is required. The client ID is an operator's `ifric_company_id` claim, or else `GATEWAY_CLIENT_ID`.
 
-The client secret is entered on the Dataspace screen or set in `GATEWAY_CLIENT_SECRET`. Once accepted, it is stored encrypted in `gateway_credentials`. If the key changes, the stored secret can't be read, and the screen asks for it again. The token stays in memory. It is checked every 60 seconds and renewed with 120 seconds left, and after 3 failures in a row renewal stops and the screen says so. The backend connects by itself after sign-in, or at startup when sign-in is off, unless the operator disconnected.
+The client secret is entered on the Dataspace screen or set in `GATEWAY_CLIENT_SECRET`. Once accepted, it is stored encrypted in `gateway_credentials`. If the key changes, the stored secret can't be read, and the screen asks for it again. The token stays in memory. It is checked every 60 seconds and renewed with 120 seconds left, and after 3 failures in a row renewal stops and the screen says so. The backend connects by itself at startup, with sign-in on or off, and after sign-in when it isn't connected, unless the operator disconnected. With sign-in on and nobody signed in, the client is `GATEWAY_CLIENT_ID`; a connection that is made stays when an operator of another company signs in, and the status names the client in use. If the dataspace can't be reached, it tries again every 60 seconds until it connects; a rejected credential is not tried again. The `dataspace_connector` health check says why it isn't connected.
 
 The health report's `dataspace_connector` check reads through the participant's adapter, as the contract offers agents nothing that reaches the connector. A connector failing behind a working adapter doesn't show there.
 
@@ -172,6 +172,7 @@ Fields are snake_case. A refused request answers `{"error": {"kind", "message"}}
 - **Persistence:** every change is stored before the stream reports it. After a restart, open runs are listed again; a round that was in progress runs again from its start.
 - **Archiving:** always an operator's act: a finished run stays listed until then, also after a restart.
 - **Concurrency:** at most `MAX_CONCURRENT_ROUNDS` rounds run at once; others wait in status `running`.
+- **Automatic archive:** a finished run (`completed`, `failed`, `stopped`, `mb_closed`) with no change for `AUTO_ARCHIVE_AFTER_S` seconds (3600 by default) is archived as an operator archive would, checked every minute. A run whose close hasn't reached the machine builder, or one waiting for anyone, stays. `0` turns it off. The time counts from the run's last stored change, so a restart doesn't reset it.
 
 ## Configuration
 

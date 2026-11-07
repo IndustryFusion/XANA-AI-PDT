@@ -133,6 +133,7 @@ async def test_list_includes_finished_runs_newest_first(url):
         "started_at",
         "updated_at",
         "escalation_ref",
+        "machine_builder",
         "source",
     }
 
@@ -508,13 +509,15 @@ async def test_ollama_down_refuses_within_the_health_timeout(url):
         assert asyncio.get_running_loop().time() - started < 2
 
 
-async def test_a_finished_run_stays_until_archived_also_after_a_restart(url):
-    async with running(make_app(url)) as client:
+async def test_with_automatic_archive_off_a_finished_run_stays_also_after_a_restart(url):
+    async with running(make_app(url, auto_archive_after_s=0)) as client:
         run_id = await start(client, MACHINE, FAIL)
         await until(client, run_id, "failed")
         assert [r["run_id"] for r in (await client.get("/api/agent/runs")).json()] == [run_id]
     rows(url, "UPDATE runs SET updated_at = now() - interval '400 days' RETURNING 1")
-    async with running(make_app(url)) as client:
+    app = make_app(url, auto_archive_after_s=0)
+    async with running(app) as client:
+        assert await app.state.runs.archive_due() == []
         assert [r["run_id"] for r in (await client.get("/api/agent/runs")).json()] == [run_id]
         assert (await client.post(f"/api/agent/archive/{run_id}")).status_code == 204
         assert (await client.get("/api/agent/runs")).json() == []

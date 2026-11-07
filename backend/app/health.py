@@ -366,7 +366,12 @@ class HealthService:
         if self._gateway is None or not self._s.gateway_url:
             return "ok", NO_DATASPACE
         if self._gateway.connection.token() is None:
-            return "degraded", "Not connected to the dataspace, so the path to the connector can't be checked"
+            problem, retrying = self._gateway.connection.not_connected_reason()
+            detail = "Not connected to the dataspace, so the path to the connector can't be checked"
+            if problem:
+                again = "It is tried again every minute." if retrying else "It is not tried again by itself."
+                detail = f"{detail}. The last attempt failed: {problem} {again}"
+            return "degraded", detail
         await self._gateway.request("GET", "/capabilities/requests", params={"status": "pending"})
         return "ok", "The participant's adapter answers; the connector behind it can't be checked from here"
 
