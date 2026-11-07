@@ -15,6 +15,7 @@
 #
 import asyncio
 import json
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
@@ -714,6 +715,10 @@ async def test_stop_with_the_gateway_failing_stops_and_closes_later(url):
         await s.poll()
         assert len(space.sent) == before
         del space.status_for["POST /outbox/messages"]
+        await s.poll()
+        assert len(space.sent) == before, "a failed repeat waits before the next"
+        now = app.state.runs._now
+        app.state.runs._now = lambda: now() + timedelta(seconds=61)
         await s.poll()
         run = await s.run()
         assert space.sent[-1]["outcome"] == "withdrawn" and "close_pending" not in run["data"]
