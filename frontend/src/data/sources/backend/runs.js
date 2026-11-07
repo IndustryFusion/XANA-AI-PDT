@@ -119,10 +119,10 @@ export const runs = {
       body: { act, text, outcome: outcome ?? null, in_reply_to: inReplyTo ?? null },
     }),
   askAgent: (runId, message) => request(AREA, 'POST', path('ask', runId), { timeoutMs: SEND_TIMEOUT_MS, body: { message } }),
-  approveDataRequest: (runId, { approved, note = '' } = {}) =>
-    request(AREA, 'POST', path('approve-data-request', runId), { timeoutMs: SEND_TIMEOUT_MS, body: { approved: !!approved, note } }),
-  replyToRecommendation: (runId, { action, message = '' } = {}) =>
-    request(AREA, 'POST', path('recommendation-reply', runId), { timeoutMs: SEND_TIMEOUT_MS, body: { action, message } }),
+  approveDataRequest: (runId, { approved, note = '', requestId } = {}) =>
+    request(AREA, 'POST', path('approve-data-request', runId), { timeoutMs: SEND_TIMEOUT_MS, body: { approved: !!approved, note, request_id: requestId ?? null } }),
+  replyToRecommendation: (runId, { action, message = '', recommendationId } = {}) =>
+    request(AREA, 'POST', path('recommendation-reply', runId), { timeoutMs: SEND_TIMEOUT_MS, body: { action, message, recommendation_id: recommendationId ?? null } }),
   refreshConversationStatus: (runId) => request(AREA, 'POST', path('refresh-conversation', runId), { timeoutMs: 60_000 }),
   recordMachineBuilderClose: (runId, { outcome, reason = '' } = {}) =>
     request(AREA, 'POST', path('record-close', runId), { body: { outcome, reason } }),

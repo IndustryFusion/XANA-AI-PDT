@@ -63,11 +63,13 @@ class AskRequest(BaseModel):
 class DecisionRequest(BaseModel):
     approved: bool
     note: str = ""
+    request_id: str | None = None
 
 
 class RecommendationRequest(BaseModel):
     action: str
     message: str = ""
+    recommendation_id: str | None = None
 
 
 class CloseRecord(BaseModel):
@@ -153,12 +155,12 @@ async def ask(run_id: str, body: AskRequest, request: Request) -> dict[str, str]
 
 @router.post("/approve-data-request/{run_id}")
 async def approve_data_request(run_id: str, body: DecisionRequest, request: Request) -> dict[str, str]:
-    return await runs(request).desk.decide(run_id, body.approved, body.note)
+    return await runs(request).desk.decide(run_id, body.approved, body.note, body.request_id)
 
 
 @router.post("/recommendation-reply/{run_id}")
 async def recommendation_reply(run_id: str, body: RecommendationRequest, request: Request) -> dict[str, str]:
-    return await runs(request).desk.answer_recommendation(run_id, body.action, body.message)
+    return await runs(request).desk.answer_recommendation(run_id, body.action, body.message, body.recommendation_id)
 
 
 @router.post("/refresh-conversation/{run_id}")
@@ -174,6 +176,6 @@ async def record_close(run_id: str, body: CloseRecord, request: Request) -> dict
 @router.get("/message-files/{run_id}/{message_id}")
 async def message_files(run_id: str, message_id: str, request: Request) -> StreamingResponse:
     """The files of a received message, as the ZIP the dataspace delivered."""
-    content = await runs(request).desk.read_file(run_id, message_id)
+    content = await runs(request).desk.read_file(message_id)
     headers = {"Content-Disposition": f'attachment; filename="{message_id}.zip"'}
     return StreamingResponse(content, media_type="application/zip", headers=headers)

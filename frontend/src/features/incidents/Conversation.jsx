@@ -15,7 +15,7 @@
 //
 
 import { useEffect, useId, useRef, useState } from 'react'
-import { runs } from '../../data'
+import { filesHref, runs } from '../../data'
 import { useData } from '../../data/useData'
 import {
   ACTS, allowedActs, CLOSE_OUTCOMES, closeOutcomes, CONVERSATION_STATUSES, OUTCOME_LABELS,
@@ -79,7 +79,7 @@ function Message({ message, at, builder, delivery }) {
           <ul className="plain-list">{message.dataRequest.items.map((i) => <li key={i.label}>{i.label}</li>)}</ul>
         </div>
       )}
-      {message.filesUrl && <p className="message__meta"><a href={message.filesUrl}>Download the files</a></p>}
+      {message.filesUrl && <p className="message__meta"><a href={filesHref(message.filesUrl)}>Download the files</a></p>}
       {message.filesUnavailable && <p className="message__meta">The files of this message are no longer available.</p>}
       {message.recommendation && (
         <ol className="action-items">{message.recommendation.actions.map((a) => <li key={a}>{a}</li>)}</ol>

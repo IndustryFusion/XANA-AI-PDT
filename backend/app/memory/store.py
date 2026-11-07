@@ -213,7 +213,8 @@ def resolution_text(run: RunState) -> str | None:
         case "failed":
             return f"The run failed: {run.data.get('error')}"
         case "mb_closed":
-            return run.data.get("reason") or "Closed by the machine builder."
+            reason = run.data.get("reason") or "Closed by the machine builder."
+            return f"{reason} (outcome: {run.data['outcome']})" if run.data.get("outcome") else reason
     return None
 
 
@@ -332,6 +333,17 @@ class IncidentStore:
             "trace": trace,
             "run_id": row["run_id"],
         }
+
+    async def run_of_conversation(self, conversation_id: str) -> str | None:
+        """The run of the archived incident that holds this conversation."""
+        async with self._db.transaction() as conn:
+            cur = await conn.execute(
+                "SELECT run_id FROM incidents WHERE conversation_id = %s AND archived_at IS NOT NULL "
+                "ORDER BY id DESC LIMIT 1",
+                (conversation_id,),
+            )
+            row = await cur.fetchone()
+        return row["run_id"] if row else None
 
     async def add_late_message(self, conversation_id: str, step: dict[str, Any], message_id: str) -> bool:
         """A message for a conversation already archived: added to the record, in one transaction. False if none."""

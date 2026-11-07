@@ -293,6 +293,12 @@ describe('outcomes, stop, reopen and archive', () => {
     expect(screen.getAllByRole('button', { name: 'Reopen…' })).toHaveLength(1)
   })
 
+  test('a close that has not reached the machine builder says so and why', async () => {
+    const data = { by: 'operator', reason: 'Done', closePending: true, closeProblem: 'only the machine builder can close it now' }
+    renderWithRouter(<OutcomePanel run={{ runId: 'r', status: 'stopped', data, escalation: { ref: 'E' }, reopenable: true }} />)
+    expect(await screen.findByText(/Not told yet that this is closed: only the machine builder can close it now/)).toBeVisible()
+  })
+
   test('closed by the machine builder shows outcome and reason; not reopenable when final', async () => {
     openNew({ scenario: 'mb_closes', machine: 'extractor-01', actions: [['escalate'], ['refreshConversationStatus']] })
     const p = await panel('Closed by the machine builder')

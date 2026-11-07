@@ -128,6 +128,13 @@ class RunManager:
     def record(self, run_id: str) -> RunRecord:
         return self._record(run_id)
 
+    def is_current(self, rec: RunRecord) -> bool:
+        """False once the run has been archived: what still holds its record must not bring it back."""
+        return self._runs.get(rec.state.run_id) is rec
+
+    def cancel(self, rec: RunRecord) -> None:
+        self._cancel(rec)
+
     def now(self) -> datetime:
         return self._now()
 
@@ -314,7 +321,8 @@ class RunManager:
         async with rec.lock:
             self._require(rec, "stop")
             text = _operator_text(reason or "") or None
-            if self.desk and rec.state.conversation_id and rec.state.status in CONVERSATION:
+            half_escalated = bool(not rec.state.conversation_id and (rec.state.attempt or {}).get("files_message_id"))
+            if self.desk and (half_escalated or (rec.state.conversation_id and rec.state.status in CONVERSATION)):
                 conversation = True
             else:
                 conversation = False
@@ -330,6 +338,11 @@ class RunManager:
         rec = self._record(run_id)
         async with rec.lock:
             self._require(rec, "archive")
+            if rec.state.data.get("close_pending"):
+                raise conflict(
+                    "The machine builder hasn't been told yet that this conversation is closed. "
+                    "It can be archived once that has gone out."
+                )
             try:
                 await self._incidents.archive(rec.state, self._now())
             except StoreUnavailable as error:
@@ -487,7 +500,10 @@ class RunManager:
             except Refused as refused:
                 log.info("Run %s: delivery not known yet: %s", rec.state.run_id, refused.message)
         async with rec.lock:
+            if not self.is_current(rec):
+                return
             changed = False
+            closes_failed = []
             outbox = []
             for entry in rec.state.outbox:
                 answer = answers.get(entry["message_id"])
@@ -496,9 +512,24 @@ class RunManager:
                     if answer.get("error_message"):
                         entry["error"] = answer["error_message"]
                     changed = True
+                    if entry["status"] == "failed" and self._is_close(rec, entry["message_id"]):
+                        closes_failed.append(entry.get("error") or "The machine builder didn't receive the close.")
                 outbox.append(entry)
             if changed:
-                await self._change(rec, outbox=tuple(outbox))
+                fields: dict[str, Any] = {}
+                if closes_failed and rec.state.status == STOPPED:
+                    data = rec.state.data | {"close_pending": True, "close_problem": closes_failed[-1]}
+                    fields["data"] = data
+                await self._change(rec, outbox=tuple(outbox), **fields)
+
+    @staticmethod
+    def _is_close(rec: RunRecord, message_id: str) -> bool:
+        return any(
+            step["node"] == "message"
+            and step["output"].get("message_id") == message_id
+            and step["output"].get("act") == "close"
+            for step in rec.state.steps
+        )
 
     async def reopen(self, run_id: str) -> dict[str, str]:
         await self.ready()
@@ -519,7 +550,7 @@ class RunManager:
             reopened = incident["reopened_run_id"]
             if reopened and reopened in self._runs:
                 raise conflict(f"Incident {incident['number']} is already open again as run {reopened}.")
-            if self.desk and incident.get("conversation_id"):
+            if self.desk and incident.get("conversation_id") and incident.get("escalation"):
                 run_id = await self._continue_conversation(incident)
             else:
                 await self._require_model()
@@ -637,6 +668,8 @@ class RunManager:
         **fields: Any,
     ) -> None:
         """Stores the change, then tells the watchers: the step first, then the status."""
+        if not self.is_current(rec):
+            raise not_found(f"Run {rec.state.run_id} was archived.")
         steps = rec.state.steps + ((step,) if step else ())
         try:
             changed = replace(rec.state, steps=steps, updated_at=self._now(), **fields)

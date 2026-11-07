@@ -243,6 +243,22 @@ describe('delegation to the mock', () => {
   })
 })
 
+describe('a decision names what the operator looked at', () => {
+  const body = () => JSON.parse(fetch.mock.calls.at(-1)[1].body)
+
+  test('a data request', async () => {
+    fakeFetch({ 'POST /api/agent/approve-data-request/r': { status: 200, body: { status: 'awaiting_machine_builder' } } })
+    await bindArea('runs', backend.runs).approveDataRequest('r', { approved: true, note: 'n', requestId: 'm-1' })
+    expect(body()).toEqual({ approved: true, note: 'n', request_id: 'm-1' })
+  })
+
+  test('a recommendation', async () => {
+    fakeFetch({ 'POST /api/agent/recommendation-reply/r': { status: 200, body: { status: 'completed' } } })
+    await bindArea('runs', backend.runs).replyToRecommendation('r', { action: 'resolved', recommendationId: 'm-2' })
+    expect(body()).toEqual({ action: 'resolved', message: '', recommendation_id: 'm-2' })
+  })
+})
+
 describe('dataspace', () => {
   const dataspace = bindArea('dataspace', backend.dataspace)
   const lastCall = () => {

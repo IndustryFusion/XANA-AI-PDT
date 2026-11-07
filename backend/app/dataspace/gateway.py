@@ -162,20 +162,27 @@ class GatewayClient:
         if token is None:
             raise unavailable("Not connected to the dataspace.")
         url = f"{self.connection.gateway_url}/inbox/messages/{quote(message_id, safe='')}/download"
-        try:
-            async with (
-                httpx.AsyncClient(timeout=SEND_TIMEOUT_S, transport=self._transport) as client,
-                client.stream("GET", url, headers={"Authorization": f"Bearer {token}"}) as response,
-            ):
-                if response.status_code >= 400:
-                    await response.aread()
-                    raise refusal(response)
-                async for chunk in response.aiter_bytes():
-                    yield chunk
-        except httpx.TimeoutException:
-            raise unavailable(f"{SERVICE} did not answer in time.") from None
-        except httpx.HTTPError:
-            raise unavailable(f"{SERVICE} can't be reached.") from None
+        for may_renew in (True, False):
+            try:
+                async with (
+                    httpx.AsyncClient(timeout=SEND_TIMEOUT_S, transport=self._transport) as client,
+                    client.stream("GET", url, headers={"Authorization": f"Bearer {token}"}) as response,
+                ):
+                    if response.status_code == 401 and may_renew:
+                        token = await self.connection.renew_refused(token)
+                        if token is None:
+                            raise unavailable("The dataspace refused the token, and it could not be renewed.")
+                        continue
+                    if response.status_code >= 400:
+                        await response.aread()
+                        raise refusal(response)
+                    async for chunk in response.aiter_bytes():
+                        yield chunk
+                    return
+            except httpx.TimeoutException:
+                raise unavailable(f"{SERVICE} did not answer in time.") from None
+            except httpx.HTTPError:
+                raise unavailable(f"{SERVICE} can't be reached.") from None
 
     # ── Peers ────────────────────────────────────────────────────────────────
 
