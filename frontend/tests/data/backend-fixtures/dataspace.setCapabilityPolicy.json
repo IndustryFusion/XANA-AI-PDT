@@ -1,0 +1,11 @@
+{
+  "method": "POST",
+  "path": "/api/gateway/capabilities/policy",
+  "status": 200,
+  "body": {
+    "consumer_id": "urn:example:xana-builder",
+    "capability": "twin:history",
+    "status": "default",
+    "source": "default"
+  }
+}

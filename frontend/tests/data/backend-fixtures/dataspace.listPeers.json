@@ -1,0 +1,15 @@
+{
+  "method": "GET",
+  "path": "/api/gateway/peers",
+  "status": 200,
+  "body": [
+    {
+      "id": "urn:example:xana-builder",
+      "name": "urn:example:xana-builder",
+      "capabilities": [
+        "mb:confidential"
+      ],
+      "capabilities_unavailable": false
+    }
+  ]
+}

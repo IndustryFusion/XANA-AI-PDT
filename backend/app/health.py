@@ -29,6 +29,8 @@ import httpx
 import psycopg
 
 from app.config import Settings
+from app.dataspace.gateway import GatewayClient
+from app.errors import Refused
 from app.memory.migrate import Migrator
 from app.redact import mask_url
 
@@ -38,6 +40,7 @@ Status = Literal["ok", "degraded", "error"]
 Probe = Callable[[], Awaitable[tuple[Status, str]]]
 
 UNCONFIRMED = "could not be confirmed, so it is assumed to be available"
+NO_DATASPACE = "No dataspace is configured"
 NO_MODEL_LIST = (404, 405, 501)  # an OpenAI-compatible server need not offer a model list
 
 LABELS = {
@@ -45,6 +48,8 @@ LABELS = {
     "timeseries": "Time-series store",
     "broker": "Context broker",
     "llm": "Language model",
+    "gateway": "Dataspace gateway",
+    "connector": "Dataspace connector",
 }
 
 
@@ -76,8 +81,10 @@ class HealthService:
         clock: Callable[[], float] = time.monotonic,
         transport: httpx.AsyncBaseTransport | None = None,
         token: Callable[[], str | None] | None = None,
+        gateway: GatewayClient | None = None,
     ) -> None:
         self._token = token
+        self._gateway = gateway
         self._s = settings
         self._transport = transport
         self._migrator = migrator
@@ -87,6 +94,8 @@ class HealthService:
             "timeseries": self._timeseries,
             "broker": self._broker,
             "llm": self._llm,
+            "gateway": self._gateway_check,
+            "connector": self._connector_check,
         }
         self._clock = clock
         self._cached: tuple[float, dict] | None = None
@@ -99,7 +108,7 @@ class HealthService:
                 return self._cached[1]
             checks = await asyncio.gather(*(self._run(cid, probe) for cid, probe in self._probes.items()))
             result = {
-                "overall": overall([c.status for c in checks]),
+                "overall": overall([c.status for c in checks if c.detail != NO_DATASPACE]),
                 "checked_at": datetime.now(UTC).isoformat(),
                 "checks": [asdict(c) for c in checks],
                 "models": self._models(checks),
@@ -184,6 +193,20 @@ class HealthService:
             except httpx.ReadTimeout:
                 return "degraded", f"{self._label()} did not list its models in time; the model {UNCONFIRMED}"
 
+    async def _gateway_check(self) -> tuple[Status, str]:
+        if self._gateway is None or not self._s.gateway_url:
+            return "ok", NO_DATASPACE
+        await self._gateway.healthy()
+        return "ok", f"Reachable at {self._s.gateway_url}"
+
+    async def _connector_check(self) -> tuple[Status, str]:
+        if self._gateway is None or not self._s.gateway_url:
+            return "ok", NO_DATASPACE
+        if self._gateway.connection.token() is None:
+            return "degraded", "Not connected to the dataspace, so the path to the connector can't be checked"
+        await self._gateway.request("GET", "/capabilities/requests", params={"status": "pending"})
+        return "ok", "The participant's adapter answers; the connector behind it can't be checked from here"
+
     def _label(self) -> str:
         return (self._s.llm_provider_name or "Ollama") if self._s.llm_provider == "ollama" else self._s.llm_label
 
@@ -245,6 +268,8 @@ def _lists_model(response: httpx.Response, model: str) -> bool:
 
 
 def _describe(error: Exception) -> str:
+    if isinstance(error, Refused):
+        return error.message
     if isinstance(error, httpx.ConnectError | psycopg.OperationalError | OSError):
         return f"Not reachable: {str(error).strip().splitlines()[0] if str(error).strip() else type(error).__name__}"
     if isinstance(error, httpx.HTTPStatusError):

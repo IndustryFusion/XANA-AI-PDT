@@ -1,0 +1,268 @@
+#
+# Copyright (c) 2026 IndustryFusion Foundation
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+"""The gateway's routes, in the terms of the UI's data interface. The contract is `gateway-api.md`."""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+from collections.abc import Awaitable, Callable
+from typing import Any
+from urllib.parse import quote
+
+import httpx
+
+from app.dataspace.connection import GatewayConnection
+from app.errors import Refused, bad_gateway, conflict, invalid, not_found, unavailable
+
+log = logging.getLogger(__name__)
+
+SERVICE = "The dataspace gateway"
+READ_TIMEOUT_S = 30
+# The gateway gives up on an adapter after 120 seconds, so a send may take that long.
+SEND_TIMEOUT_S = 130
+
+ACCESS_STATUS = {
+    "auto": "granted",
+    "approved": "granted",
+    "on-request": "default",
+    "pending": "default",
+    "denied": "denied",
+}
+POLICY_ACTIONS = ("approve", "deny", "reset")
+DECISIONS = ("approve", "deny")
+
+NameLookup = Callable[[list[str]], Awaitable[dict[str, str]]]
+
+
+async def _no_names(ids: list[str]) -> dict[str, str]:
+    return {}
+
+
+class GatewayClient:
+    def __init__(
+        self,
+        connection: GatewayConnection,
+        transport: httpx.AsyncBaseTransport | None = None,
+        names: NameLookup = _no_names,
+    ) -> None:
+        self.connection = connection
+        self._transport = transport
+        self.names = names
+
+    async def request(
+        self, method: str, path: str, *, limit_s: float = READ_TIMEOUT_S, **kwargs: Any
+    ) -> httpx.Response:
+        """A request with the token, renewing it once if the gateway refuses it. Refusals are raised."""
+        token = self.connection.token()
+        if token is None:
+            raise unavailable("Not connected to the dataspace.")
+        response = await self._send(method, path, token, limit_s, kwargs)
+        if response.status_code == 401:
+            token = await self.connection.renew_refused(token)
+            if token is None:
+                raise unavailable("The dataspace refused the token, and it could not be renewed.")
+            response = await self._send(method, path, token, limit_s, kwargs)
+        if response.status_code >= 400:
+            raise refusal(response)
+        return response
+
+    async def _send(self, method: str, path: str, token: str, limit_s: float, kwargs: dict[str, Any]) -> httpx.Response:
+        url = f"{self.connection.gateway_url}{path}"
+        headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+        try:
+            async with httpx.AsyncClient(timeout=limit_s, transport=self._transport) as client:
+                return await client.request(method, url, headers=headers, **kwargs)
+        except httpx.TimeoutException:
+            raise unavailable(f"{SERVICE} did not answer in time.") from None
+        except httpx.HTTPError:
+            raise unavailable(f"{SERVICE} can't be reached.") from None
+
+    async def _json(self, method: str, path: str, **kwargs: Any) -> Any:
+        response = await self.request(method, path, **kwargs)
+        try:
+            return response.json()
+        except ValueError:
+            raise bad_gateway(f"{SERVICE} sent an answer that isn't JSON.") from None
+
+    async def healthy(self) -> None:
+        """Whether the gateway itself answers. Needs no token."""
+        try:
+            async with httpx.AsyncClient(timeout=READ_TIMEOUT_S, transport=self._transport) as client:
+                response = await client.get(f"{self.connection.gateway_url}/health")
+        except httpx.HTTPError:
+            raise unavailable(f"{SERVICE} can't be reached.") from None
+        if response.status_code != 200:
+            raise unavailable(f"{SERVICE} answered HTTP {response.status_code}.")
+
+    # ── Peers ────────────────────────────────────────────────────────────────
+
+    async def compatible(self) -> list[dict[str, Any]]:
+        answer = await self._json("GET", "/participants/compatible")
+        if not isinstance(answer, list):
+            raise bad_gateway(f"{SERVICE} sent an unexpected answer.")
+        return [item for item in answer if isinstance(item, dict) and item.get("participant_id")]
+
+    async def access(self, *, provider: str | None = None, consumer: str | None = None) -> list[dict[str, Any]]:
+        params = {"provider": provider} if provider else {"consumer": consumer}
+        answer = await self._json("GET", "/capabilities/access", params=params)
+        if not isinstance(answer, list):
+            raise bad_gateway(f"{SERVICE} sent an unexpected answer.")
+        return [item for item in answer if isinstance(item, dict)]
+
+    async def peers(self) -> list[dict[str, Any]]:
+        peers = await self.compatible()
+        ids = [peer["participant_id"] for peer in peers]
+        names = await self.names(ids)
+
+        async def offered(peer_id: str) -> list[str] | None:
+            try:
+                return [item["capability"] for item in await self.access(provider=peer_id) if "capability" in item]
+            except Refused as refused:
+                log.warning("The capabilities of a peer could not be read: %s", refused.message)
+                return None
+
+        found = await asyncio.gather(*(offered(peer_id) for peer_id in ids))
+        return [
+            {
+                "id": peer_id,
+                "name": names.get(peer_id) or peer_id,
+                "capabilities": capabilities or [],
+                "capabilities_unavailable": capabilities is None,
+            }
+            for peer_id, capabilities in zip(ids, found, strict=True)
+        ]
+
+    async def peer_capabilities(self, peer_id: str) -> dict[str, Any]:
+        if peer_id not in {peer["participant_id"] for peer in await self.compatible()}:
+            raise not_found(f"No compatible peer {peer_id} is known.")
+        at_peer, here = await asyncio.gather(self.access(provider=peer_id), self.access(consumer=peer_id))
+        names = await self.names([peer_id])
+        return {
+            "peer_id": peer_id,
+            "name": names.get(peer_id) or peer_id,
+            "at_peer": [_policy(item) for item in at_peer],
+            "here": [_policy(item) for item in here],
+        }
+
+    async def policies(self) -> list[dict[str, Any]]:
+        """What each compatible peer may access here."""
+        ids = [peer["participant_id"] for peer in await self.compatible()]
+
+        async def here(peer_id: str) -> dict[str, Any]:
+            try:
+                return {"peer_id": peer_id, "capabilities": [_policy(i) for i in await self.access(consumer=peer_id)]}
+            except Refused as refused:
+                return {"peer_id": peer_id, "capabilities": [], "error": refused.message}
+
+        return list(await asyncio.gather(*(here(peer_id) for peer_id in ids)))
+
+    # ── Capability requests and policy ───────────────────────────────────────
+
+    async def capability_requests(self, status: str | None = None) -> list[dict[str, Any]]:
+        answer = await self._json("GET", "/capabilities/requests", params={"status": status} if status else None)
+        if not isinstance(answer, list):
+            raise bad_gateway(f"{SERVICE} sent an unexpected answer.")
+        requests = [_request(item) for item in answer if isinstance(item, dict)]
+        requests.sort(key=lambda r: r["requested_at"] or "", reverse=True)
+        requests.sort(key=lambda r: r["status"] != "pending")
+        return requests
+
+    async def decide_request(self, request_id: str, action: str, note: str | None = None) -> dict[str, Any]:
+        if action not in DECISIONS:
+            raise invalid(f"{action} is not a decision. Use approve or deny.")
+        body: dict[str, Any] = {"action": action}
+        if note:
+            body["note"] = note
+        try:
+            answer = await self._json("PATCH", f"/capabilities/requests/{quote(request_id, safe='')}", json=body)
+        except Refused as refused:
+            if refused.kind != "conflict":
+                raise
+            raise conflict(await self._already_decided(request_id, refused.message)) from None
+        return _request(answer)
+
+    async def _already_decided(self, request_id: str, fallback: str) -> str:
+        try:
+            for request in await self.capability_requests():
+                if request["id"] == request_id:
+                    return f"Capability request {request_id} was already {request['status']}."
+        except Refused:
+            pass
+        return fallback
+
+    async def request_capability(self, provider: str, capability: str, **optional: Any) -> dict[str, Any]:
+        body = {"provider_participant": provider, "capability": capability}
+        body |= {key: value for key, value in optional.items() if value}
+        return _request(await self._json("POST", "/capabilities/requests", json=body))
+
+    async def set_policy(self, consumer: str, capability: str, action: str) -> dict[str, Any]:
+        if action not in POLICY_ACTIONS:
+            raise invalid(f"{action} is not a policy action. Use approve, deny or reset.")
+        body = {"consumer_id": consumer, "capability": capability, "action": action}
+        answer = await self._json("POST", "/capabilities/policy", json=body)
+        return {**answer, "status": ACCESS_STATUS.get(answer.get("status"), answer.get("status"))}
+
+
+def _policy(item: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "capability": item.get("capability"),
+        "status": ACCESS_STATUS.get(item.get("status"), "default"),
+        "label": item.get("label"),
+        "description": item.get("description"),
+        "decision_note": item.get("decision_note"),
+    }
+
+
+def _request(item: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": item.get("id"),
+        "requester_id": item.get("consumer_id"),
+        "capability": item.get("capability"),
+        "purpose": item.get("purpose"),
+        "requested_at": item.get("requested_at"),
+        "status": item.get("status"),
+        "note": item.get("decision_note"),
+        "decided_at": item.get("resolved_at"),
+    }
+
+
+def refusal(response: httpx.Response) -> Refused:
+    """A gateway error in the backend's terms. The gateway's reason is passed on; it holds no address or token."""
+    status = response.status_code
+    reason = _reason(response)
+    if status == 404:
+        return not_found(reason or "The dataspace doesn't know it.")
+    if status == 403:
+        return conflict(reason or "The dataspace refused it for this participant.")
+    if status == 409:
+        return conflict(reason or "The conversation's state doesn't allow it.")
+    if status in (400, 413, 422):
+        return invalid(reason or "The dataspace refused the request.")
+    return bad_gateway(f"{SERVICE} failed (HTTP {status}).")
+
+
+def _reason(response: httpx.Response) -> str | None:
+    try:
+        body = response.json()
+    except ValueError:
+        return None
+    if not isinstance(body, dict):
+        return None
+    for key in ("reason", "detail"):
+        if isinstance(body.get(key), str) and body[key]:
+            return body[key][:300]
+    return None

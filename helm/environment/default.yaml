@@ -39,6 +39,13 @@ pgrestUrl: http://pgrest:3000
 # Alerts. The key comes from XANA_ALERTA_API_KEY, or the existing secret.
 alertaUrl: http://alerta:8080/api
 alertsRefreshIntervalS: 30
+# The dataspace. Empty means none. The client secret and encryption key come from XANA_GATEWAY_CLIENT_SECRET
+# and XANA_SETTINGS_ENCRYPTION_KEY, or the existing secret.
+gatewayUrl: ""
+gatewayKeycloakUrl: ""
+gatewayKeycloakRealm: dataspace
+gatewayClientId: ""
+dataSharingPolicy: minimal
 # Machine ontology and shapes. The graph base is http://<Fuseki's external host>/<realm> on the platform.
 fusekiUrl: http://fuseki:3030
 fusekiDataset: iff

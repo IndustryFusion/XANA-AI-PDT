@@ -225,9 +225,10 @@ describe('delegation to the mock', () => {
         'getAttributeHistory', 'getAttributeStatus', 'listTypesAt', 'queryEntitiesAt', 'subscribeEntities', 'getLiveUpdateHealth', 'getValueHints',
       ],
       alerts: ['listAlerts', 'countAlerts', 'getAlert', 'applyAlertAction', 'listEnvironments', 'listServices', 'getAlertSettings'],
+      dataspace: ['getConnection', 'connect', 'disconnect', 'listPeers', 'getPeerCapabilities', 'listCapabilityRequests', 'decideCapabilityRequest', 'setCapabilityPolicy'],
       system: ['getHealth'],
     })
-    expect(backend.dataspace).toEqual(mock.dataspace)
+    expect(backend.dataspace.resolveNames).toBe(mock.dataspace.resolveNames)
     expect(backend.session.getFactory).toBe(mock.session.getFactory)
     expect(backend.session.signIn).not.toBe(mock.session.signIn)
     expect(backend.info.signInHint).toBeUndefined()
@@ -240,9 +241,47 @@ describe('delegation to the mock', () => {
   test('delegated operations work without a backend', async () => {
     mock.store.reset()
     fakeFetch({})
-    const peers = await bindArea('dataspace', backend.dataspace).getConnection()
-    expect(peers).toBeTruthy()
+    const names = await bindArea('dataspace', backend.dataspace).resolveNames([])
+    expect(names).toEqual({})
     expect(fetch).not.toHaveBeenCalled()
+  })
+})
+
+describe('dataspace', () => {
+  const dataspace = bindArea('dataspace', backend.dataspace)
+  const lastCall = () => {
+    const [url, options] = fetch.mock.calls.at(-1)
+    return { url, method: options.method, body: options.body && JSON.parse(options.body) }
+  }
+
+  test('a policy is sent in the gateway\'s words', async () => {
+    for (const [action, sent] of [['grant', 'approve'], ['deny', 'deny'], ['reset', 'reset']]) {
+      fakeFetch({ 'POST /api/gateway/capabilities/policy': { status: 200, body: { status: 'default' } } })
+      await dataspace.setCapabilityPolicy({ peerId: 'urn:p', capability: 'twin:history', action })
+      expect(lastCall().body).toEqual({ consumer_id: 'urn:p', capability: 'twin:history', action: sent })
+    }
+  })
+
+  test('an unknown policy action is refused without a request', async () => {
+    fakeFetch({})
+    await expect(dataspace.setCapabilityPolicy({ peerId: 'p', capability: 'c', action: 'maybe' })).rejects.toMatchObject({ kind: 'invalid' })
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
+  test('a decision is sent as approve or deny, with a peer identifier encoded', async () => {
+    fakeFetch({
+      'PATCH /api/gateway/capabilities/requests/a%2Fb': { status: 200, body: { id: 'a/b', status: 'denied' } },
+    })
+    await dataspace.decideCapabilityRequest('a/b', { approved: false, note: 'No' })
+    expect(lastCall().body).toEqual({ action: 'deny', note: 'No' })
+  })
+
+  test('connecting without a secret sends none, and a refusal keeps its kind', async () => {
+    fakeFetch({
+      'POST /api/gateway/connect': { status: 401, body: { error: { kind: 'unauthorized', message: 'The dataspace rejected the credential.' } } },
+    })
+    await expect(dataspace.connect()).rejects.toMatchObject({ kind: 'unauthorized', message: 'The dataspace rejected the credential.' })
+    expect(lastCall().body).toEqual({ secret: null })
   })
 })
 

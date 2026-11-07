@@ -24,13 +24,17 @@ from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from datetime import timedelta
 
+import httpx
 from fastapi import FastAPI
 from langchain_core.language_models import BaseChatModel
 
 from app.alerta import AlertaClient
-from app.api import alerta, auth, diagnostics, errors, incidents, ngsi, runs, shacl, stream
+from app.api import alerta, auth, diagnostics, errors, gateway, incidents, ngsi, runs, shacl, stream
 from app.auth import KeycloakSession
 from app.config import Settings, get_llm, load_settings
+from app.dataspace.connection import GatewayConnection
+from app.dataspace.credentials import CredentialStore
+from app.dataspace.gateway import GatewayClient
 from app.health import HealthService
 from app.memory.migrate import Migrator
 from app.memory.store import Database, IncidentStore, RunStore
@@ -87,15 +91,29 @@ def create_app(
     health: HealthService | None = None,
     agent: AgentDeps | None = None,
     session: KeycloakSession | None = None,
+    gateway_transport: httpx.AsyncBaseTransport | None = None,
 ) -> FastAPI:
     settings = settings or load_settings()
     redactor = settings.redactor()
     memory_url = settings.postgres_memory_url.get_secret_value()
     migrator = Migrator(memory_url, redactor=redactor, connect_timeout=settings.health_timeout_s)
     session = session or KeycloakSession(settings)
-    health = health or HealthService(settings, migrator, token=session.token)
-    agent = agent or AgentDeps.from_settings(settings, token=session.token)
     db = Database(memory_url, settings.health_timeout_s, redactor)
+    encryption_key = settings.settings_encryption_key
+
+    async def schema_ready() -> None:
+        if not migrator.up_to_date:
+            await migrator.apply()
+
+    gateway_connection = GatewayConnection(
+        settings,
+        CredentialStore(db, encryption_key and encryption_key.get_secret_value(), schema_ready),
+        company_id=lambda: session.status().get("company_id"),
+        transport=gateway_transport,
+    )
+    gateway_client = GatewayClient(gateway_connection, transport=gateway_transport)
+    health = health or HealthService(settings, migrator, token=session.token, gateway=gateway_client)
+    agent = agent or AgentDeps.from_settings(settings, token=session.token)
     incident_store = IncidentStore(db)
     callbacks = tracing_callbacks(settings)
 
@@ -131,6 +149,7 @@ def create_app(
         task = asyncio.create_task(manager.start_up())
         if not session.enabled:
             live.start()
+            gateway_connection.start()
         yield
         await live.stop()
         task.cancel()
@@ -138,6 +157,7 @@ def create_app(
             await task
         try:
             await manager.shut_down()
+            await gateway_connection.close()
             await session.close()
         finally:
             await db.close()
@@ -145,6 +165,8 @@ def create_app(
     app = FastAPI(title="XANA AI PDT backend", version="0.1.0", lifespan=lifespan)
     app.state.settings = settings
     app.state.session = session
+    app.state.gateway_connection = gateway_connection
+    app.state.gateway = gateway_client
     app.state.migrator = migrator
     app.state.health = health
     app.state.runs = manager
@@ -158,6 +180,7 @@ def create_app(
         live.start()
 
     session.on_sign_in.append(start_live_updates)
+    session.on_sign_in.append(gateway_connection.on_sign_in)
     app.state.attribute_history = AttributeHistory(settings, session.token)
     app.state.alerta = AlertaClient(settings)
     app.state.ontology = FusekiOntologySource(
@@ -182,5 +205,6 @@ def create_app(
     app.include_router(ngsi.router)
     app.include_router(shacl.router)
     app.include_router(alerta.router)
+    app.include_router(gateway.router)
     app.include_router(stream.router)
     return app

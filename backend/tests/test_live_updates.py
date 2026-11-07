@@ -847,7 +847,7 @@ async def test_sign_in_starts_live_updates():
     settings = make_settings(keycloak_url="http://keycloak.test")
     app = create_app(settings, session=KeycloakSession(settings))
     assert app.state.live._task is None
-    assert len(app.state.session.on_sign_in) == 1
+    assert len(app.state.session.on_sign_in) == 2  # live updates and the dataspace connection
     await app.state.session.on_sign_in[0]()
     assert app.state.live._task is not None
     await app.state.live.stop()

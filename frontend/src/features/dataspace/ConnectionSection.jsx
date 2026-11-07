@@ -57,6 +57,7 @@ function ConnectionDetails({ connection }) {
     <div className="stack">
       <StatusBadge kind="connection" value={state} />
       {state !== 'connected' && <p>{UNAVAILABLE[state]}</p>}
+      {connection.detail && <p role="status">{connection.detail}</p>}
       {state !== 'not_configured' && (
         <dl className="details">
           {state === 'connected' && connection.expiresAt && (
