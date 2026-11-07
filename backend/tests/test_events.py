@@ -594,6 +594,9 @@ async def test_a_value_the_database_cant_store_doesnt_stop_later_events(url):
         await client.post("/events/ngsi", json=notification(status(OTHER_MACHINE, "fault")), headers=AUTH)
         found = await runs_are(client, 2)
     assert "status=fault" in {r["issue"].removeprefix("Machine event: ") for r in found}
+    assert rows(url, "SELECT watched FROM machine_watched_values WHERE machine_id = %s", MACHINE) == [
+        ({"status": "fault"},)
+    ]
 
 
 @pytest.mark.db
