@@ -97,15 +97,19 @@ Nothing SHALL be sent to a peer except by an operator's request.
 
 #### Scenario: Grant
 - **WHEN** an operator approves a data request
-- **THEN** access is approved, `grant` is sent with an authorization, and then only that capability's data, in reply, with a policy check
+- **THEN** access is approved, `grant` is sent with an authorization, and then only that capability's data, in reply, with a policy check; for `twin:history` that is what the `timeseries` tier sends
 
 #### Scenario: A decision on what was shown
 - **WHEN** a decision or an answer names a request or recommendation that is no longer the one waiting
 - **THEN** it is refused as `conflict`, and nothing is sent
 
 #### Scenario: A grant of history
-- **WHEN** a grant of `twin:history` goes out
-- **THEN** its file holds the machine's own signals, and related entities' only if `twin:adjacents` is allowed for this builder, by tier and access, and the policy check gives the number of signals, saying `0 signals` when there are none
+- **WHEN** a grant of `twin:history` goes out, whatever the tier and the access to `twin:adjacents`
+- **THEN** it sends the machine's entity data, related entities, and the machine's own stored values of the last 24 hours, numbers and text alike, without the signals of related entities such as its sensors, and the policy check gives the number of signals, saying `0 signals` when there are none
+
+#### Scenario: A request that names attributes
+- **WHEN** a request for `twin:history` names attributes in its payload's `attributes`
+- **THEN** the history granted holds only those attributes
 
 #### Scenario: Declined after the grant went out
 - **WHEN** the grant went out and its data failed, and the operator declines
