@@ -36,7 +36,7 @@ A run starts only when an operator asks for one. When a machine reports a proble
 
 ## Impact
 
-- `backend/`: new `app/events/`, `app/api/events.py`, `alerta/xana_events/`, `migrations/007_machine_events.sql`; changes in `app/main.py`, `app/config.py`, `app/health.py`, `app/runs/manager.py`, `app/runs/model.py`, `app/memory/store.py`, `compose.yaml`, `keycloak/realm-iff.json`.
+- `backend/`: new `app/events/`, `app/api/events.py`, `alerta/plugin/`, `migrations/007_machine_events.sql`; changes in `app/main.py`, `app/config.py`, `app/health.py`, `app/runs/manager.py`, `app/runs/model.py`, `app/memory/store.py`, `compose.yaml`, `keycloak/realm-iff.json`.
 - `frontend/`: `src/data/interface.js`, the mock source, `ActiveIncidents.jsx`, `RunView.jsx`, `IncidentHistory.jsx`, `Dashboard.jsx`, `docs/data-interface.md`.
 - `helm/`: values and `README.md`.
 - `architecture.md`: Backend API table, Event Layer.
