@@ -19,7 +19,7 @@
 - [x] 3.1 Page a query with more matches than the limit to the end; verify against the local environment's Scorpio, comparing with the broker's own answers
 - [x] 3.2 Selected attributes and has-attribute return what the broker returns for the same NGSI-LD query; verify by comparing the answers
 - [x] 3.3 Re-import an entity with an attribute removed; verify the attribute is gone
-- [ ] 3.4 The three in a browser against the backend
+- [x] 3.4 The three in a browser against the backend
 
 ## 4. Documents
 
