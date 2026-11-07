@@ -68,6 +68,10 @@ class Settings(BaseSettings):
     ngsi_context_url: str | None = None
     ngsi_allowed_contexts: str | None = None
     pgrest_url: str = "http://pgrest:3000"
+    mqtt_broker_url: str = "mqtt://emqx-listeners:1883"
+    mqtt_mgmt_url: str = "http://emqx-dashboard:18083"
+    mqtt_broker_notify_url: str | None = None
+    ws_allowed_origins: str | None = None
     timescale_db_url: SecretStr = SecretStr("postgresql://xana@localhost:5432/tsdb")
     timescale_table: str = "attributes"
     timescale_entity_table: str = "entities"
@@ -83,10 +87,15 @@ class Settings(BaseSettings):
     backend_reload: bool = False
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
 
-    @field_validator("pgrest_url")
+    @field_validator("pgrest_url", "mqtt_mgmt_url")
     @classmethod
     def _http_address(cls, value: str) -> str:
         return with_scheme(value, "http")
+
+    @field_validator("mqtt_broker_url", "mqtt_broker_notify_url")
+    @classmethod
+    def _mqtt_address(cls, value: str | None) -> str | None:
+        return value and with_scheme(value, "mqtt")
 
     @field_validator("timescale_table", "timescale_entity_table")
     @classmethod

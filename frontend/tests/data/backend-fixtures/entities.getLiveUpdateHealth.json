@@ -1,0 +1,11 @@
+{
+  "method": "GET",
+  "path": "/api/ngsi/subscription-health",
+  "status": 200,
+  "body": {
+    "status": "unavailable",
+    "state": "stopped",
+    "detail": "Live updates are stopped.",
+    "expires_at": null
+  }
+}

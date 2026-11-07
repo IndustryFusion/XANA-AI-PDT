@@ -222,7 +222,7 @@ describe('delegation to the mock', () => {
       entities: [
         'getStats', 'listTypes', 'listAttributes', 'queryEntities', 'getEntity', 'updateAttributes', 'appendAttributes',
         'deleteAttribute', 'deleteEntity', 'importEntities', 'fetchImportDocument', 'deleteByTypes',
-        'getAttributeHistory', 'getAttributeStatus', 'listTypesAt', 'queryEntitiesAt',
+        'getAttributeHistory', 'getAttributeStatus', 'listTypesAt', 'queryEntitiesAt', 'subscribeEntities', 'getLiveUpdateHealth',
       ],
       system: ['getHealth'],
     })
@@ -287,6 +287,51 @@ describe('entities', () => {
   test('a stopped service keeps the backend kind and message', async () => {
     fakeFetch({ 'GET /api/ngsi/history': { status: 502, body: { error: { kind: 'unavailable', message: 'The history service (PostgREST) cannot be reached (ConnectError).' } } } })
     await expect(entities.getAttributeHistory('urn:a', 'b')).rejects.toMatchObject({ kind: 'unavailable', message: expect.stringContaining('PostgREST') })
+  })
+})
+
+describe('live updates', () => {
+  class Socket {
+    static last = null
+    constructor(url) { this.url = url; this.closed = false; Socket.last = this }
+    close() { this.closed = true; this.onclose?.({ code: 1000 }) }
+    receive(message) { this.onmessage?.({ data: typeof message === 'string' ? message : JSON.stringify(message) }) }
+  }
+  const entities = bindArea('entities', backend.entities)
+  beforeEach(() => vi.stubGlobal('WebSocket', Socket))
+
+  test('a change becomes an update event, with attribute names unchanged', () => {
+    const events = []
+    entities.subscribeEntities({ ids: ['urn:a', 'urn:b'] }, (e) => events.push(e))
+    expect(decodeURIComponent(Socket.last.url)).toContain('/api/ngsi/ws?ids=urn:a,urn:b')
+    Socket.last.receive({ type: 'keepalive' })
+    Socket.last.receive('not json')
+    Socket.last.receive({ type: 'update', entity_id: 'urn:a', attributes: { max_temp: { value: 1 } } })
+    expect(events).toEqual([{ type: 'update', entityId: 'urn:a', attributes: { max_temp: { value: 1 } } }])
+  })
+
+  test('a lost stream gives one error event, and then nothing', () => {
+    const events = []
+    entities.subscribeEntities({}, (e) => events.push(e))
+    Socket.last.onerror({})
+    Socket.last.onclose({ code: 1006 })
+    Socket.last.receive({ type: 'update', entity_id: 'urn:a', attributes: {} })
+    expect(events).toHaveLength(1)
+    expect(events[0]).toMatchObject({ type: 'error', error: { kind: 'unavailable' } })
+  })
+
+  test('unsubscribing closes the stream, with no events after it', () => {
+    const events = []
+    const stop = entities.subscribeEntities({ type: 'T' }, (e) => events.push(e))
+    expect(Socket.last.url).toContain('type=T')
+    stop()
+    expect(Socket.last.closed).toBe(true)
+    expect(events).toEqual([])
+  })
+
+  test('health keeps the status and detail', async () => {
+    fakeFetch({ 'GET /api/ngsi/subscription-health': { body: { status: 'unavailable', state: 'refused', detail: 'No role', expires_at: null } } })
+    expect(await entities.getLiveUpdateHealth()).toMatchObject({ status: 'unavailable', detail: 'No role' })
   })
 })
 

@@ -25,12 +25,15 @@ export const HEALTH_POLL_MS = 10_000
  * `connecting`, `ok`, `unavailable`) and `listen(entityId, onAttributes)`,
  * with which each shown entity receives its changed attributes; it returns
  * the function that stops listening. After a failure it resubscribes once
- * the health check reports `ok` again.
+ * the health check reports `ok` again, and calls `onResync`: changes made
+ * while the stream was down don't come again, so what is shown must be read again.
  */
-export function useLiveUpdates({ enabled, ids = [] }) {
+export function useLiveUpdates({ enabled, ids = [], onResync }) {
   const [status, setStatus] = useState('connecting')
   const [attempt, setAttempt] = useState(0)
   const statusRef = useRef(status)
+  const onResyncRef = useRef(onResync)
+  onResyncRef.current = onResync
   const listeners = useRef(new Map())
   const idsKey = [...ids].sort().join('\n')
 
@@ -59,6 +62,7 @@ export function useLiveUpdates({ enabled, ids = [] }) {
 
   useEffect(() => {
     if (!enabled || !idsKey) return undefined
+    if (attempt > 0) onResyncRef.current?.()
     return entities.subscribeEntities({ ids: idsKey.split('\n') }, (event) => {
       if (event.type === 'error') report('unavailable')
       else if (event.type === 'update') {

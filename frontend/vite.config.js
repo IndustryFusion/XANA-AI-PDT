@@ -19,9 +19,10 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
 // Forward API and run-stream requests to the backend (default: the local environment's address).
+// The Host header stays the page's, as the backend compares it with the Origin of a WebSocket.
 const backend = process.env.XANA_BACKEND_URL || 'http://localhost:8000'
 const proxy = {
-  '/api': { target: backend, changeOrigin: true },
+  '/api': { target: backend, ws: true, changeOrigin: false },
   '/ws': { target: backend, ws: true, changeOrigin: true },
 }
 

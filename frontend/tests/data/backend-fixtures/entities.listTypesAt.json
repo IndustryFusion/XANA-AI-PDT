@@ -1,6 +1,6 @@
 {
   "method": "GET",
-  "path": "/api/ngsi/timeshift/types?at=2026-11-06T20%3A52%3A54.906Z",
+  "path": "/api/ngsi/timeshift/types?at=2026-11-06T21%3A08%3A15.645Z",
   "status": 200,
   "body": [
     "Component",

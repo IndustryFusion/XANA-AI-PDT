@@ -4,27 +4,27 @@
   "status": 200,
   "body": {
     "overall": "ok",
-    "checked_at": "2026-11-06T21:52:50.158916+00:00",
+    "checked_at": "2026-11-06T22:08:10.921363+00:00",
     "checks": [
       {
         "id": "memory",
         "label": "Memory database",
         "status": "ok",
-        "latency_ms": 82,
+        "latency_ms": 89,
         "detail": "Reachable at postgresql://xana@127.0.0.1:25433/memory; schema up to date (3 migrations)"
       },
       {
         "id": "timeseries",
         "label": "Time-series store",
         "status": "ok",
-        "latency_ms": 86,
+        "latency_ms": 93,
         "detail": "Reachable at postgresql://xana@127.0.0.1:25433/tsdb; table attributes present"
       },
       {
         "id": "broker",
         "label": "Context broker",
         "status": "ok",
-        "latency_ms": 94,
+        "latency_ms": 106,
         "detail": "Reachable at http://127.0.0.1:29091"
       },
       {

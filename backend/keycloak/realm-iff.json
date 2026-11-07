@@ -2,6 +2,14 @@
   "realm": "iff",
   "enabled": true,
   "accessTokenLifespan": 300,
+  "roles": {
+    "client": {
+      "scorpio": [
+        { "name": "Factory-Admin" },
+        { "name": "Factory-Reader" }
+      ]
+    }
+  },
   "clients": [
     {
       "clientId": "scorpio",
@@ -54,12 +62,27 @@
   ],
   "users": [
     {
+      "username": "visitor",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Sample",
+      "lastName": "Visitor",
+      "email": "visitor@example.org",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "visitor"
+        }
+      ]
+    },
+    {
       "username": "operator",
       "enabled": true,
       "emailVerified": true,
       "firstName": "Sample",
       "lastName": "Operator",
       "email": "operator@example.org",
+      "clientRoles": { "scorpio": ["Factory-Admin"] },
       "credentials": [
         {
           "type": "password",

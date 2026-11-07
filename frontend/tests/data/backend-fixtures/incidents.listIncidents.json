@@ -4,6 +4,71 @@
   "status": 200,
   "body": [
     {
+      "id": "10",
+      "number": 9,
+      "machine_id": "urn:ngsi-ld:Machine:laser-cutter-01",
+      "issue": "Gas pressure warning",
+      "outcome": "stopped",
+      "root_cause": null,
+      "escalated": false,
+      "escalation_ref": null,
+      "started_at": "2026-11-06T22:08:13.068435+00:00",
+      "closed_at": "2026-11-06T22:08:13.551428+00:00",
+      "reopened_run_id": null
+    },
+    {
+      "id": "8",
+      "number": 8,
+      "machine_id": "urn:ngsi-ld:Machine:laser-cutter-01",
+      "issue": "Cut edges show burrs since this morning",
+      "outcome": "completed",
+      "root_cause": "Cooling or supply problem",
+      "escalated": false,
+      "escalation_ref": null,
+      "started_at": "2026-11-06T22:08:11.059440+00:00",
+      "closed_at": "2026-11-06T22:08:12.970973+00:00",
+      "reopened_run_id": null
+    },
+    {
+      "id": "7",
+      "number": 7,
+      "machine_id": "urn:ngsi-ld:Machine:laser-cutter-01",
+      "issue": "Fan noise (mw5in2p2)",
+      "outcome": "stopped",
+      "root_cause": null,
+      "escalated": false,
+      "escalation_ref": null,
+      "started_at": "2026-11-06T21:58:06.474443+00:00",
+      "closed_at": "2026-11-06T21:58:07.822448+00:00",
+      "reopened_run_id": null
+    },
+    {
+      "id": "5",
+      "number": 4,
+      "machine_id": "urn:ngsi-ld:Machine:laser-cutter-01",
+      "issue": "Cut edges show burrs (mw5imuz1)",
+      "outcome": "completed",
+      "root_cause": "Wear of a moving component",
+      "escalated": false,
+      "escalation_ref": null,
+      "started_at": "2026-11-06T21:57:56.706904+00:00",
+      "closed_at": "2026-11-06T21:57:59.328223+00:00",
+      "reopened_run_id": null
+    },
+    {
+      "id": "4",
+      "number": 3,
+      "machine_id": "urn:ngsi-ld:Machine:laser-cutter-01",
+      "issue": "Cut edges show burrs since this morning",
+      "outcome": "stopped",
+      "root_cause": null,
+      "escalated": false,
+      "escalation_ref": null,
+      "started_at": "2026-11-06T21:52:52.568873+00:00",
+      "closed_at": "2026-11-06T21:52:53.043756+00:00",
+      "reopened_run_id": null
+    },
+    {
       "id": "3",
       "number": 2,
       "machine_id": "urn:ngsi-ld:Machine:laser-cutter-01",
@@ -27,7 +92,7 @@
       "escalation_ref": null,
       "started_at": "2026-11-06T21:52:50.276618+00:00",
       "closed_at": "2026-11-06T21:52:51.977892+00:00",
-      "reopened_run_id": null
+      "reopened_run_id": "aa0ebef2-acb5-4b06-bf3b-b14d269bc264"
     }
   ]
 }

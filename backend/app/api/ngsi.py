@@ -24,18 +24,27 @@ travel as parameters.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Body, Query, Request, Response
+from fastapi import APIRouter, Body, Query, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from app.errors import invalid
 from app.ngsi.broker import check_document
 from app.ngsi.fetch import fetch_document
+from app.ngsi.live import Watcher
+from app.ngsi.stream import drop_connection, origin_allowed
 from app.ngsi.timeshift import TimeShift
 
 router = APIRouter(prefix="/api/ngsi", tags=["explorer"])
+
+KEEPALIVE_S = 20
+SEND_TIMEOUT_S = 10
+OVERFLOW_CODE = 1013
+ORIGIN_REFUSED_CODE = 4403
 
 
 class ImportUrl(BaseModel):
@@ -178,3 +187,55 @@ async def timeshift_entities(
     return await TimeShift(request.app.state.attribute_history).query(
         at, entity_type=type, entity_id=id, id_pattern=id_pattern, q=q, limit=limit
     )
+
+
+@router.get("/subscription-health")
+async def subscription_health(request: Request) -> dict:
+    return request.app.state.live.health()
+
+
+@router.websocket("/ws")
+async def changes(websocket: WebSocket, type: str | None = None, ids: str | None = None) -> None:
+    """Changes as they happen. A client that falls behind or stops reading is closed, and reconnects."""
+    settings = websocket.app.state.settings
+    if not origin_allowed(websocket.headers.get("origin"), websocket.headers.get("host"), settings.ws_allowed_origins):
+        await websocket.close(code=ORIGIN_REFUSED_CODE)
+        return
+    await websocket.accept()
+    live = websocket.app.state.live
+    watcher = live.watch(type, [i for i in (ids or "").split(",") if i])
+    keepalive = getattr(websocket.app.state, "stream_keepalive_s", KEEPALIVE_S)
+    send_timeout = getattr(websocket.app.state, "stream_send_timeout_s", SEND_TIMEOUT_S)
+    sender = asyncio.create_task(_send(websocket, watcher, keepalive, send_timeout))
+    receiver = asyncio.create_task(_receive(websocket))
+    try:
+        await asyncio.wait({sender, receiver}, return_when=asyncio.FIRST_COMPLETED)
+    finally:
+        live.unwatch(watcher)
+        for task in (sender, receiver):
+            task.cancel()
+        await asyncio.wait({sender, receiver})
+
+
+async def _send(websocket: WebSocket, watcher: Watcher, keepalive: float, send_timeout: float) -> None:
+    with contextlib.suppress(WebSocketDisconnect, RuntimeError):
+        try:
+            while True:
+                # What arrived in time is delivered first, in order, and only then does it close.
+                if watcher.overflowed and watcher.queue.empty():
+                    await asyncio.wait_for(websocket.close(code=OVERFLOW_CODE), send_timeout)
+                    return
+                try:
+                    message = await asyncio.wait_for(watcher.queue.get(), keepalive)
+                except TimeoutError:
+                    message = {"type": "keepalive"}
+                await asyncio.wait_for(websocket.send_json(message), send_timeout)
+        except TimeoutError:
+            # The socket is full and nothing reads it, so a close frame wouldn't get out either.
+            drop_connection(websocket)
+
+
+async def _receive(websocket: WebSocket) -> None:
+    with contextlib.suppress(WebSocketDisconnect, RuntimeError):
+        while True:
+            await websocket.receive_text()

@@ -159,6 +159,7 @@ class ContextBroker:
         self._token = token
         self._transport = transport
         self._entity_locks: dict[str, tuple[asyncio.Lock, int]] = {}
+        self.on_write: Callable[[], None] | None = None
 
     @asynccontextmanager
     async def _editing(self, entity_id: str) -> AsyncIterator[None]:
@@ -226,6 +227,9 @@ class ContextBroker:
             raise unreachable(SERVICE, error) from None
         if response.status_code >= 400:
             raise refusal(SERVICE, response)
+        # The broker notifies changes, but not deletions.
+        if self.on_write and method in ("PATCH", "POST") and _changes_entities(path) and _something_changed(response):
+            self.on_write()
         return response
 
     async def _json(self, method: str, path: str, **kwargs: Any) -> Any:
@@ -537,6 +541,25 @@ class ContextBroker:
             return len(response.json().get("success", []))
         except (ValueError, AttributeError):
             return 0
+
+
+def _something_changed(response: httpx.Response) -> bool:
+    """A 207 can say that nothing changed: an upsert with every entity rejected, so no notification follows."""
+    if response.status_code != 207:
+        return True
+    try:
+        body = response.json()
+    except ValueError:
+        return False
+    return isinstance(body, dict) and bool(body.get("success") or body.get("updated"))
+
+
+def _changes_entities(path: str) -> bool:
+    return (
+        path.endswith("/attrs")
+        or path == "/entityOperations/upsert"
+        or (path.startswith("/entities/") and "/" not in path.removeprefix("/entities/"))
+    )
 
 
 def _count_of(response: httpx.Response) -> int | None:
