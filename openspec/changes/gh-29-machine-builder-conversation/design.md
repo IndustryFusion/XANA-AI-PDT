@@ -39,9 +39,10 @@ Only an operator's request sends. The `busy` mark of `gh-28-escalate-to-builder`
 
 `close(withdrawn)` is sent. If it can't be, the run stops anyway, showing that, and the poller repeats it until it is accepted: a duplicate `close` is safe under the protocol. One the receiver didn't get is repeated too, after 60 seconds and then twice as long each time, up to an hour, with one close in the conversation, however often it had to go.
 
-### What a grant of history delivers
+### What a grant of history delivers: decided by a maintainer
 
-The machine's own signals, and related entities' only if `twin:adjacents` is allowed for this builder, by tier and access. On platform data signals are mostly on sensors, so a grant of history alone, at a tier or access without related entities, can hold none. **The policy check says how many signals went, and `0 signals` when none did.** No state or confirmation is added for this. Which default is right when related entities aren't allowed is for a maintainer: send nothing and say so, ask for `twin:adjacents` too, or include sensors' signals anyway.
+The maintainer decided that a grant of `twin:history` sends what the `timeseries` tier does: the machine's entity data, related entities, and the machine's own stored values of the last 24 hours, numbers and text alike. Its sensors' signals are not part of the history. This holds whatever the tier and the access to `twin:adjacents`: the operator's grant decides, and the files go with capability `twin:history`. A grant of any other capability still sends that capability's data alone. A request that names attributes in its payload's `attributes`, a list of names, gets only those; one that doesn't gets all. **The policy check says how many signals went, and `0 signals` when none did.**
+Alternatives that were considered: the machine's own signals plus those of related entities only if `twin:adjacents` is allowed, which the first version did and which makes a grant of history alone hold none where signals are kept on sensors; sending nothing and saying so; asking for `twin:adjacents` too; including sensors' signals anyway.
 
 ### The agent
 

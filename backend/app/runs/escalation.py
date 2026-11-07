@@ -32,13 +32,14 @@ from app.dataspace.sharing import ADJACENTS, DIRECT, FILES, HISTORY, Sharing, ap
 from app.errors import Refused, unavailable
 from app.ifric import Builder, NoBuilder, RegistryClient
 from app.runs.model import ESCALATABLE, RunState
-from xana_agent.sources.base import AlertSource, ContextSource, HistorySource, SourceUnavailable
+from xana_agent.sources.base import AlertSource, ContextSource, HistorySource, ObservationSource, SourceUnavailable
 
 log = logging.getLogger(__name__)
 
 MAX_RELATED = 20
 HISTORY_WINDOW = timedelta(hours=24)
-BUCKET = timedelta(hours=1)
+# The newest values sent as history, so that a busy machine's file stays a size the gateway takes.
+MAX_HISTORY_VALUES = 500
 FINAL_STATUSES = ("notified", "error", "rejected")
 DELIVERY = {"notified": "delivered", "error": "failed", "rejected": "failed"}
 
@@ -148,15 +149,12 @@ class Escalator:
     # ── The data ─────────────────────────────────────────────────────────────
 
     async def files(
-        self, run: RunState, sharing: Sharing, related_signals: bool | None = None
+        self, run: RunState, sharing: Sharing, attributes: list[str] | None = None
     ) -> list[tuple[str, bytes]]:
         """The files of what is allowed, read anew. A source failing raises a refusal: nothing goes out partly.
 
-        History holds related entities' signals if those entities may go too, in this sending by default,
-        or as `related_signals` says.
+        History holds only the attributes named in `attributes`, when it is given.
         """
-        if related_signals is None:
-            related_signals = ADJACENTS in sharing.allowed
         try:
             entity = await self._context.get(run.machine_id)
             if entity is None:
@@ -167,7 +165,7 @@ class Escalator:
             if ADJACENTS in sharing.allowed:
                 contents[ADJACENTS] = await self._related(entity)
             if HISTORY in sharing.allowed:
-                contents[HISTORY] = await self._signal_history(entity, related_signals)
+                contents[HISTORY] = await self._signal_history(entity["id"], attributes)
         except Refused:
             raise
         except SourceUnavailable as error:
@@ -187,23 +185,22 @@ class Escalator:
         related = await self._context.related(entity, MAX_RELATED)
         return [{"entity": item, "active_alerts": await self._active_alerts(item["id"])} for item in related]
 
-    async def _signal_history(self, entity: dict[str, Any], with_related: bool) -> list[dict[str, Any]]:
-        """The machine's own signals, and those of its sensors and parts only if related entities may go too."""
-        related = await self._context.related(entity, MAX_RELATED) if with_related else []
-        ids = [entity["id"], *(item["id"] for item in related)]
-        signals = await self._history.recent(ids, HISTORY_WINDOW)
+    async def _signal_history(self, entity_id: str, attributes: list[str] | None) -> list[dict[str, Any]]:
+        """The machine's own stored values of the window, numbers and text alike, one entry per attribute.
+
+        Related entities' signals, such as those of its sensors, are not part of it.
+        """
+        if not isinstance(self._history, ObservationSource):
+            raise unavailable("The time-series store can't give the machine's stored values.")
+        found = await self._history.observations(entity_id, HISTORY_WINDOW, attributes, MAX_HISTORY_VALUES)
+        signals: dict[str, list[dict[str, Any]]] = {}
+        for item in sorted(found, key=lambda o: o.at):
+            signals.setdefault(item.attribute, []).append(
+                {"observed_at": item.at.isoformat(), "value": item.value, "value_type": item.value_type}
+            )
         return [
-            {
-                "entity_id": signal.entity_id,
-                "attribute": signal.attribute,
-                "buckets": [
-                    bucket.model_dump(mode="json")
-                    for bucket in await self._history.metrics(
-                        signal.entity_id, signal.attribute, HISTORY_WINDOW, BUCKET
-                    )
-                ],
-            }
-            for signal in signals
+            {"entity_id": entity_id, "attribute": attribute, "values": values}
+            for attribute, values in sorted(signals.items())
         ]
 
     # ── Sending ──────────────────────────────────────────────────────────────

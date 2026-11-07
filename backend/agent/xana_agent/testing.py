@@ -37,7 +37,15 @@ from xana_agent.schemas import (
     ValidationPlan,
 )
 from xana_agent.scripted import ScriptedChatModel, register_example
-from xana_agent.sources.base import AttributeChange, Bucket, LifecycleEvent, SignalHistory, SourceUnavailable, trend
+from xana_agent.sources.base import (
+    AttributeChange,
+    Bucket,
+    LifecycleEvent,
+    Observation,
+    SignalHistory,
+    SourceUnavailable,
+    trend,
+)
 from xana_agent.sources.ngsi import relationship_objects
 from xana_agent.steps import normalised
 
@@ -208,6 +216,8 @@ class FakeHistorySource:
         self.calls: list[tuple[str, Any]] = []
         self.attribute_changes: list[AttributeChange] = []
         self.lifecycle_events: list[LifecycleEvent] = []
+        # Values that aren't numbers, given with the numeric series as observations.
+        self.text_values: list[Observation] = []
 
     def _check(self, method: str, args: Any) -> None:
         self.calls.append((method, args))
@@ -245,6 +255,24 @@ class FakeHistorySource:
     async def lifecycle(self, entity_ids: list[str], window: timedelta, limit: int = 50) -> list[LifecycleEvent]:
         self._check("lifecycle", tuple(entity_ids))
         return self.lifecycle_events[:limit]
+
+    async def observations(
+        self, entity_id: str, window: timedelta, attributes: list[str] | None = None, limit: int = 500
+    ) -> list[Observation]:
+        self._check("observations", (entity_id, tuple(attributes) if attributes is not None else None))
+        since = datetime.now(UTC) - window
+        found = [
+            Observation(entity_id=entity, attribute=attribute, at=at, value=str(value), value_type="double")
+            for (entity, attribute), points in self.series.items()
+            for at, value in points
+        ]
+        found += self.text_values
+        found = [
+            o
+            for o in found
+            if o.entity_id == entity_id and o.at > since and (attributes is None or o.attribute in attributes)
+        ]
+        return sorted(found, key=lambda o: o.at, reverse=True)[:limit]
 
     async def metrics(self, entity_id: str, attribute: str, window: timedelta, bucket: timedelta) -> list[Bucket]:
         self._check("metrics", (entity_id, attribute))
