@@ -15,6 +15,11 @@
 #
 """What goes into a query, and how answers become hints. No network: answers come from a stub."""
 
+import asyncio
+import threading
+import time
+from unittest.mock import patch
+
 import httpx
 import pytest
 from pydantic import ValidationError
@@ -24,6 +29,7 @@ from rdflib.plugins.sparql.processor import translateQuery
 from app.config import Settings
 from xana_agent.sources.ontology import (
     MAX_BYTES,
+    MAX_QUERY,
     FusekiOntologySource,
     UnsafeTerm,
     iri_ref,
@@ -237,7 +243,19 @@ def test_names_uses_equality_for_iris_and_local_part_for_short_names():
         "SELECT * WHERE { ?a ?b ?c . { SELECT * WHERE { OPTIONAL { SERVICE ?x { ?s ?p ?o } } } } }",
         'SELECT * WHERE { ?a ?b "x" SERVICE <http://internal/> { ?s ?p ?o } }',
         "SELECT nonsense {{{",
-        "a" * 100_001,
+        "a" * (MAX_QUERY + 1),
+        "SELECT * WHERE { # x\rSERVICE <http://internal/cr> { ?a ?b ?c }\n}",
+        'SELECT * WHERE { VALUES ?v { "x\\u0022 " } SERVICE <http://internal/uq> { ?a ?b ?c } # " }\n}',
+        'SELECT * WHERE { VALUES ?v { "x" " } SERVICE <http://internal/uq> { ?a ?b ?c } # " }\n}',
+        "SELECT * WHERE { sErViCe <http://internal/> { ?s ?p ?o } }",
+        "SELECT * WHERE { \u017fervice <http://internal/> { ?s ?p ?o } }",
+        "SELECT * WHERE { SE\\U00000052VICE <http://internal/> { ?s ?p ?o } }",
+        'SELECT * WHERE { ?s ?p "a&#83;b" }',
+        'SELECT * WHERE { ?s ?p "\\u0061" }',
+        "# service in a comment\nASK { ?s ?p ?o }",
+        'SELECT * WHERE { ?s ?p "the service record" }',
+        "PREFIX ex: <urn:ex:> SELECT * WHERE { ?s ex:service ?o }",
+        "DESCRIBE <urn:SERVICE>",
         "PREFIX a: <urn:a> SERVICE",
         "# only a comment",
         "",
@@ -254,11 +272,9 @@ async def test_query_refuses_what_is_not_a_plain_read_with_nothing_sent(query):
     "query",
     [
         "SELECT * WHERE { ?s ?p ?o }",
-        "PREFIX ex: <urn:ex:> SELECT * WHERE { ?s ex:service ?o }",
-        'SELECT * WHERE { ?s ?p "please DELETE this SERVICE" }',
+        'SELECT * WHERE { ?s ?p "please DELETE this" }',
         "# DELETE is only in a comment\nASK { ?s ?p ?o }",
         "BASE <urn:b> PREFIX a: <urn:a> CONSTRUCT { ?s ?p ?o } WHERE { ?s ?p ?o }",
-        "DESCRIBE <urn:SERVICE>",
         "SELECT ?shape WHERE { GRAPH <http://fuseki.local/iff/shacl.ttl> "
         "{ ?shape a <http://www.w3.org/ns/shacl#NodeShape> } } LIMIT 10",
         "SELECT ?cls WHERE { GRAPH <http://fuseki.local/iff/knowledge.ttl> "
@@ -271,6 +287,79 @@ async def test_query_refuses_what_is_not_a_plain_read_with_nothing_sent(query):
 )
 def test_query_allows_plain_reads_whatever_their_text_holds(query):
     assert refusal_of(query) is None
+
+
+def test_a_false_refusal_says_why_and_what_to_do():
+    message = refusal_of('SELECT * WHERE { ?s ?p "the service record" }')
+    assert "holds the word service" in message and "Rewrite it" in message
+    assert "holds the word service" in refusal_of("ASK { \u017fervice <urn:a> { ?s ?p ?o } }")
+    assert "code point" in refusal_of('ASK { ?s ?p "\\u0061" }')
+    assert "too complex" in refusal_of("SELECT * WHERE " + "{ " * 300 + "?s ?p ?o " + "} " * 300)
+
+
+def worst_query() -> str:
+    """The kind of query that costs the most per character to parse, as long as allowed."""
+    head, tail = "SELECT * WHERE { ?s ?p ?o FILTER(1", ") }"
+    return head + "+1" * ((MAX_QUERY - len(head) - len(tail)) // 2) + tail
+
+
+def test_the_longest_query_allowed_is_parsed_in_bounded_time():
+    query = worst_query()
+    assert len(query) <= MAX_QUERY
+    started = time.perf_counter()
+    assert refusal_of(query) is None
+    assert time.perf_counter() - started < 20  # about 2 seconds here; it is 40 at 100 KB
+
+
+async def test_too_long_is_refused_at_once():
+    started = time.perf_counter()
+    assert "longer than" in refusal_of(worst_query() + " " * MAX_QUERY)
+    assert time.perf_counter() - started < 0.1
+
+
+async def test_parsing_does_not_hold_up_the_event_loop():
+    longest_gap = 0.0
+    done = asyncio.Event()
+
+    async def ticking():
+        nonlocal longest_gap
+        last = time.perf_counter()
+        while not done.is_set():
+            await asyncio.sleep(0.01)
+            now = time.perf_counter()
+            longest_gap = max(longest_gap, now - last)
+            last = now
+
+    ticker = asyncio.create_task(ticking())
+    await asyncio.sleep(0.02)  # it is ticking before the parse starts
+    fuseki = Fuseki()
+    started = time.perf_counter()
+    await source(fuseki).query(worst_query())
+    spent = time.perf_counter() - started
+    done.set()
+    await ticker
+    assert spent > 0.2, "this query should take some time, or the test shows nothing"
+    assert longest_gap < spent / 2
+
+
+async def test_queries_at_once_are_parsed_one_at_a_time():
+    running, most = 0, 0
+    lock = threading.Lock()
+
+    def counted(query):
+        nonlocal running, most
+        with lock:
+            running += 1
+            most = max(most, running)
+        time.sleep(0.02)
+        with lock:
+            running -= 1
+
+    fuseki = Fuseki()
+    made = source(fuseki)
+    with patch("xana_agent.sources.ontology.refusal_of", counted):
+        await asyncio.gather(*(made.query("ASK { ?s ?p ?o }") for _ in range(5)))
+    assert most == 1
 
 
 async def test_query_reports_truncation_at_the_limit():

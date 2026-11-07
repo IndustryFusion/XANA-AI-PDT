@@ -53,8 +53,16 @@ The backend SHALL offer three read functions for the conversation agent: a SPARQ
 - **THEN** it returns an error as data, and nothing is sent
 
 #### Scenario: Federated query refused
-- **WHEN** the query function is given a query that calls another service, however it is written
-- **THEN** it returns an error as data, and nothing is sent
+- **WHEN** the query function is given a query that calls another service, however it is written, including what a parser here reads differently from Fuseki
+- **THEN** it returns an error as data, nothing is sent, and a real Fuseki calls nothing
+
+#### Scenario: The word and escapes refused in the raw text
+- **WHEN** a query's text holds the word `service` in any case and at any place, including a comment or a string, or a `\u` or `\U` escape, or an `&#` entity
+- **THEN** it is refused before any parser sees it, and the message says that a query merely holding the word is refused too
+
+#### Scenario: Size and complexity
+- **WHEN** a query is longer than the limit, or too deeply nested to parse
+- **THEN** it is refused, with a message saying which, and a query at the limit takes about 2 seconds to check, off the event loop
 
 #### Scenario: Query that can't be parsed
 - **WHEN** the query function is given what can't be parsed as a query

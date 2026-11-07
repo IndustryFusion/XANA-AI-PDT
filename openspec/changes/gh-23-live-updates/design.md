@@ -91,7 +91,7 @@ The endpoint is built only where it is sent, and is never stored, logged or retu
 
 ### 7. Which pages may open the stream
 
-Browsers don't apply the same-origin rule to WebSockets, so any page could otherwise read live data. A browser's `Origin` must match the `Host` that the backend sees, or be in `WS_ALLOWED_ORIGINS`. A client with no `Origin` isn't a web page, and isn't refused: anyone who can reach the API can already read it (see #36). The development server keeps the page's `Host`, and the frontend's proxy now passes it with its port. **`/ws/run` has the same gap, from an earlier change.** It is left as it is, and listed for #36.
+Browsers don't apply the same-origin rule to WebSockets, so any page could otherwise read live data. A browser's `Origin` must match the `Host` that the backend sees, or be in `WS_ALLOWED_ORIGINS`. A client with no `Origin` isn't a web page, and isn't refused: anyone who can reach the API can already read it (see #36). The development server keeps the page's `Host`, and the frontend's proxy now passes it with its port. **`/ws/run` has the same gap, from an earlier change.** It is left as it is. #36 doesn't mention it yet, and it should be taken up there.
 
 ## Risks and limits
 

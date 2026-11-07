@@ -127,7 +127,7 @@ class _Parser:
             if self.text.startswith(op, self.at):
                 self.at += len(op)
                 self.blanks()
-                return Comparison(path, op, self.value())
+                return Comparison(path, op, self.patterns() if op in ("~=", "!~=") else self.value())
         return Comparison(path, "exists")
 
     def path(self) -> Path:
@@ -168,14 +168,31 @@ class _Parser:
                 self.fail("unterminated text value")
             self.at += 1
             return "".join(out)
+        raw = self.bare()
+        if raw in ("true", "false"):
+            return raw == "true"
+        return float(raw) if _NUMBER.fullmatch(raw) else raw
+
+    def bare(self) -> str:
+        """An unquoted value, as written."""
         match = _BARE_VALUE.match(self.text, self.at)
         if not match or not match.group().strip():
             self.fail("expected a value")
         self.at = match.end()
-        raw = match.group().strip()
-        if raw in ("true", "false"):
-            return raw == "true"
-        return float(raw) if _NUMBER.fullmatch(raw) else raw
+        return match.group().strip()
+
+    def pattern(self) -> str:
+        """A pattern is text as written: `20` is not the number 20.0, and `true` is not the value True."""
+        self.blanks()
+        return self.single() if self.peek() == '"' else self.bare()
+
+    def patterns(self) -> str | ValueList:
+        first = self.pattern()
+        items = [first]
+        while self.peek() == ",":
+            self.at += 1
+            items.append(self.pattern())
+        return first if len(items) == 1 else ValueList(tuple(items))
 
     def value(self) -> Any:
         first = self.single()
@@ -224,7 +241,12 @@ def _check_patterns(tree: Any) -> None:
         for term in tree.terms:
             _check_patterns(term)
     elif tree.op in ("~=", "!~="):
-        compile_pattern(str(tree.value), "The pattern")
+        for pattern in _patterns_of(tree.value):
+            compile_pattern(pattern, "The pattern")
+
+
+def _patterns_of(value: str | ValueList) -> tuple[str, ...]:
+    return value.items if isinstance(value, ValueList) else (value,)
 
 
 def broker_can_evaluate(tree: Any) -> bool:
@@ -306,7 +328,8 @@ def _holds(a: Any, op: str, b: Any) -> bool:
     if op == "!=":
         return not _equal(a, b)
     if op in ("~=", "!~="):
-        found = compile_pattern(str(b), "The pattern").search(_text(a)) is not None
+        text = _text(a)
+        found = any(compile_pattern(pattern, "The pattern").search(text) for pattern in _patterns_of(b))
         return found == (op == "~=")
     same_kind = (_number(a) and _number(b)) or (isinstance(a, str) and isinstance(b, str))
     if not same_kind:

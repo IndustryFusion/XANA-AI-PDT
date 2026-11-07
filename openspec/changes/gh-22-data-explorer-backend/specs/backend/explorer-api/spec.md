@@ -52,6 +52,10 @@ The backend SHALL offer entities by type, ID, ID pattern, query expression and l
 - **WHEN** an expression or an ID pattern holds a pattern with nested repetition, on a long value
 - **THEN** it takes time linear in the value, and other requests are not held up. A pattern that can't run in linear time is refused as `invalid`.
 
+#### Scenario: Patterns are the text as written
+- **WHEN** a pattern for `~=` or `!~=` is unquoted, such as `serial~=20` or `serial!~=true`, or is a list such as `serial~="M","Z"`
+- **THEN** the text as written is the pattern, a list matches when any of its patterns does, and the mock and backend sources agree
+
 ### Requirement: Edit attributes and entities
 The backend SHALL update and add attributes, and delete attributes, sub-attributes and entities in the context broker. Whatever the operator did not change SHALL stay.
 
@@ -112,7 +116,11 @@ The backend SHALL create or merge a list of entities and report the result per e
 
 #### Scenario: Internal addresses in a broker's reason
 - **WHEN** the broker's reason for rejecting an entity holds an address
-- **THEN** the address is left out of what the caller gets
+- **THEN** the address is left out of what the caller gets, with or without a scheme, such as `scorpio.svc.cluster.local:9090 [/10.0.0.5]`
+
+#### Scenario: A document that can't be carried
+- **WHEN** a document is nested too deeply, or holds a lone surrogate
+- **THEN** the request is refused as `invalid`, without a server error
 
 ### Requirement: Import from a URL
 The backend SHALL fetch an import document from a public http or https URL, and SHALL refuse internal addresses. A refusal SHALL NOT reveal what the address resolved to.
