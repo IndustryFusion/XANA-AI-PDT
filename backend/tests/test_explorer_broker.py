@@ -307,13 +307,26 @@ def test_addresses_in_a_brokers_reasons_are_taken_out(client, broker):
     assert "[address]" in rows[0]["reason"]
 
 
-@pytest.mark.parametrize("identifier", ["..", ".", "%2e%2e"])
-def test_dots_cannot_climb_out_of_the_entities_path(client, broker, identifier):
-    answer = client.delete("/api/ngsi/entities/urn:x/attrs", params={"name": identifier.replace("%2e", ".")})
-    assert answer.status_code in (404, 422)
-    with pytest.raises(Refused):
-        asyncio.run(client.app.state.broker.entity(identifier.replace("%2e", ".")))
-    assert not any(r.url.raw_path.startswith(b"/ngsi-ld/v1/entities/..") for r in broker.requests)
+@pytest.mark.parametrize("identifier", ["..", ".", " .. "])
+def test_dots_cannot_climb_out_of_the_entities_path(broker, identifier):
+    client_ = ContextBroker(
+        make_settings(ngsi_url="http://b.test"), lambda: None, transport=httpx.MockTransport(broker)
+    )
+    for call in (
+        client_.entity(identifier),
+        client_.delete_entity(identifier),
+        client_.append_attributes(identifier, {"a": {"type": "Property", "value": 1}}),
+    ):
+        with pytest.raises(Refused) as caught:
+            asyncio.run(call)
+        assert caught.value.kind == "invalid"
+    assert broker.requests == []
+
+
+def test_dots_as_an_attribute_are_refused(client, broker):
+    broker.entities[MACHINE][".."] = {"type": "Property", "value": 1}
+    assert client.delete(f"{ENTITY}/attrs", params={"name": ".."}).status_code == 422
+    assert all(r.method == "GET" for r in broker.requests)
 
 
 async def test_concurrent_adds_of_one_attribute_give_one_winner_and_one_conflict():

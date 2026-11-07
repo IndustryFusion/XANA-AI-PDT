@@ -179,6 +179,7 @@ class LiveUpdates:
         self._swept = False
         self._connected = False
         self._stopping = False
+        self._wake = asyncio.Event()
         self._last_received: float | None = None
         self._expected_by: float | None = None
         self._state = "waiting_for_sign_in" if sign_in_enabled else "connecting"
@@ -189,6 +190,7 @@ class LiveUpdates:
     def start(self) -> None:
         """Starts, unless running. Waits for nothing: it may be called on every sign-in."""
         self._stopping = False
+        self._wake.clear()
         if self._task is None or self._task.done():
             self._task = asyncio.create_task(self._run())
 
@@ -199,6 +201,7 @@ class LiveUpdates:
         after the delete. If it takes too long it is cancelled, and the delete is repeated once.
         """
         self._stopping = True
+        self._wake.set()
         task, self._task = self._task, None
         finished = True
         if task is not None:
@@ -230,7 +233,9 @@ class LiveUpdates:
             except Exception as error:  # noqa: BLE001 - this loop must outlive any failure
                 log.warning("Live updates: a check failed (%s).", type(error).__name__)
                 self._set_state("subscription_failed", "Live updates could not be set up.")
-            await asyncio.sleep(self._tick_s)
+            # Not a plain sleep: a stop shouldn't have to wait for the next check.
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(self._wake.wait(), self._tick_s)
 
     async def _tick(self) -> None:
         token = self._token()
