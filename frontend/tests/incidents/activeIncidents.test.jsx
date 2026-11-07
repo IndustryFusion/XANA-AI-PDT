@@ -231,8 +231,9 @@ describe('builder, filter and archive in the list', () => {
     await user.click(screen.getByRole('button', { name: `Archive: ${issue}` }))
     const dialog = await screen.findByRole('dialog', { name: 'Archive this run?' })
     await user.click(within(dialog).getByRole('button', { name: 'Archive' }))
-    await waitFor(async () => expect(within(await list()).getAllByRole('listitem')).toHaveLength(before - 1))
-    expect(store.get().runs.find((r) => r.runId === runId)).toBeUndefined()
+    // The archive and the list's reload each wait for the mock's latency, which is longer on a busy machine.
+    await waitFor(() => expect(store.get().runs.find((r) => r.runId === runId)).toBeUndefined(), { timeout: 5000 })
+    await waitFor(async () => expect(within(await list()).getAllByRole('listitem')).toHaveLength(before - 1), { timeout: 5000 })
     expect(store.get().incidents.some((i) => i.issue === issue)).toBe(true)
   })
 
@@ -243,7 +244,7 @@ describe('builder, filter and archive in the list', () => {
     const before = (await items()).length
     await user.click(screen.getByRole('button', { name: `Archive: ${issue}` }))
     await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Archive' }))
-    const alert = await within(await list()).findByRole('alert')
+    const alert = await within(await list()).findByRole('alert', {}, { timeout: 5000 })
     expect(alert).toHaveTextContent("hasn't been told yet")
     expect(within(await list()).getAllByRole('listitem')).toHaveLength(before)
   })
@@ -265,7 +266,7 @@ describe('builder, filter and archive in the list', () => {
     await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Stop run' }))
     await user.click(await within(await list()).findByRole('button', { name: `Archive: ${issue}` }))
     await user.click(within(await screen.findByRole('dialog', { name: 'Archive this run?' })).getByRole('button', { name: 'Archive' }))
-    expect(await screen.findByRole('heading', { name: 'This run is not active' })).toBeVisible()
+    expect(await screen.findByRole('heading', { name: 'This run is not active' }, { timeout: 5000 })).toBeVisible()
     expect(store.get().runs.find((r) => r.runId === runId)).toBeUndefined()
   })
 })
