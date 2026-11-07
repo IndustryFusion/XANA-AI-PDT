@@ -25,6 +25,7 @@ SPARQL over HTTP has no parameters, so what comes from outside is placed in a qu
 
 from __future__ import annotations
 
+import asyncio
 import functools
 import json
 import re
@@ -43,7 +44,8 @@ PREFIX ngsi-ld: <https://uri.etsi.org/ngsi-ld/>
 """
 MAX_ROWS = 1000
 MAX_BYTES = 5 * 1024 * 1024
-MAX_QUERY = 100_000
+# Parsing takes up to about half a millisecond a character, whatever thread does it: this keeps it to about 2 seconds.
+MAX_QUERY = 4000
 READ_FORMS = {"SelectQuery", "AskQuery", "ConstructQuery", "DescribeQuery"}
 GRAPH_ANSWERS = ("text/turtle", "application/n-triples", "application/ld+json", "application/rdf+xml")
 SERVICE = "The ontology service"
@@ -106,13 +108,37 @@ def _holds_service(node: Any) -> bool:
     return False
 
 
+def _refused_text(query: str) -> str | None:
+    """A check of the raw text, before any parser sees it.
+
+    This parser and Fuseki's don't read every text alike. A comment ended by a carriage return is one
+    example, and a code point escape another: what this parser takes for a comment or a string, Fuseki
+    can take for a `SERVICE` call. No parser here can settle what Fuseki will read, so the word itself isn't
+    allowed anywhere, nor can anything be written in a way that only a later step decodes. A query that
+    merely holds the word is refused too, which is the price of this.
+    """
+    folded = query.casefold()
+    if "service" in folded:
+        return (
+            "The query is not allowed: it holds the word service, which is refused anywhere, also in a comment, "
+            "a name or a text, as a call to another service can't otherwise be ruled out. Rewrite it without the word."
+        )
+    if "\\u" in folded or "&#" in query:
+        return "The query is not allowed: it holds a code point escape or character entity. Write the character itself."
+    return None
+
+
 def refusal_of(query: str) -> str | None:
-    """Why a query must not be sent, or None. Decides on the parsed query: what can't be parsed isn't sent."""
+    """Why a query must not be sent, or None: its raw text first, and then the parsed query."""
     if len(query) > MAX_QUERY:
         return f"The query is not allowed: it is longer than {MAX_QUERY} characters."
+    if problem := _refused_text(query):
+        return problem
     try:
         parsed = parseQuery(query)
-    except (ParseBaseException, ValueError, TypeError, RecursionError):
+    except RecursionError:
+        return "The query is not allowed: it is too complex."
+    except (ParseBaseException, ValueError, TypeError):
         return "The query is not allowed: it could not be parsed, or it would change data."
     if parsed[1].name not in READ_FORMS:
         return "The query is not allowed: only SELECT, ASK, CONSTRUCT and DESCRIBE are."
@@ -158,13 +184,16 @@ class FusekiOntologySource:
         self._token = token
         self._timeout = timeout_s
         self._transport = transport
+        self._parsing = asyncio.Semaphore(1)
 
     # The three read functions --------------------------------------------------------------
 
     @_as_data(_error)
     async def query(self, sparql: str) -> dict[str, Any]:
         """A read-only SPARQL query. `{"ok": True, "rows", "truncated"}` or `{"ok": False, "error"}`."""
-        problem = refusal_of(sparql)
+        # Off the event loop, as parsing takes a while, and one at a time, as the time is spent all the same.
+        async with self._parsing:
+            problem = await asyncio.to_thread(refusal_of, sparql)
         if problem:
             return {"ok": False, "error": problem}
         return await self._send(sparql)
