@@ -89,6 +89,7 @@ class RunState:
             "started_at": self.started_at.isoformat(),
             "updated_at": self.updated_at.isoformat(),
             "escalation_ref": self.escalation["ref"] if self.escalation else None,
+            "machine_builder": _builder(self.escalation),
             "source": self.source,
         }
 
@@ -158,3 +159,11 @@ def outcome_state(outcome: Outcome, rejected: tuple[dict[str, Any], ...]) -> tup
                 "incident_logged": True,
             }
     return FAILED, {"error": outcome.error or "The run failed.", "node": outcome.node}
+
+
+def _builder(escalation: dict[str, Any] | None) -> dict[str, Any] | None:
+    """The machine builder an escalated run went to: its company ID and name."""
+    recipient = (escalation or {}).get("recipient")
+    if not isinstance(recipient, dict) or not recipient.get("id"):
+        return None
+    return {"id": recipient["id"], "name": recipient.get("name") or None}

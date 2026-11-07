@@ -69,7 +69,7 @@ The optional knowledge base has no backend: with its build setting on, its opera
 
 | Operation | Input | Result | Errors |
 |---|---|---|---|
-| `listActiveRuns()` | — | `RunSummary[]`: `{ runId, incidentId \| null, machineId, issue, status, startedAt, updatedAt, escalationRef \| null, source }`, newest first; `source` is `operator`, `ngsi` (a machine event) or `alert` | `unavailable` |
+| `listActiveRuns()` | — | `RunSummary[]`: `{ runId, incidentId \| null, machineId, issue, status, startedAt, updatedAt, escalationRef \| null, source, machineBuilder \| null }`, newest first; `source` is `operator`, `ngsi` (a machine event) or `alert`; `machineBuilder` is `{ id, name \| null }` for an escalated run. The backend archives finished runs by itself after `AUTO_ARCHIVE_AFTER_S` without a change, so a run can leave the list without an operator | `unavailable` |
 | `startRun({ machineId, issue })` | machine entity ID (or its short name) and issue text | `{ runId }` | `invalid`, `unavailable` |
 | `getRun(runId)` | run ID | `Run` (below) | `not_found` |
 | `subscribeRun(runId, onEvent)` | run ID, callback | `unsubscribe()`; events below | via `error` event |
@@ -86,7 +86,7 @@ The optional knowledge base has no backend: with its build setting on, its opera
 | `recordMachineBuilderClose(runId, { outcome, reason })` | close outcome and reason | `{ status }` | `conflict`, `invalid` |
 | `reopenRun(runId)` | run ID | `{ status }` | `conflict` (not reopenable) |
 | `stopRun(runId)` | run ID | `{ status }` | `conflict` |
-| `archiveRun(runId)` | run ID of a finished run | nothing; the run becomes an incident | `not_found`, `conflict` (run still open) |
+| `archiveRun(runId)` | run ID of a finished run | nothing; the run becomes an incident | `not_found` (also when archived meanwhile), `conflict` (run still open, or its close hasn't reached the machine builder) |
 
 Operations on a run in a state that does not allow them reject with `conflict`.
 

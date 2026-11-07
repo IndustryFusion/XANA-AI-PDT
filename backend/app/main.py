@@ -201,6 +201,7 @@ def create_app(
         migrator,
         max_concurrent_rounds=settings.max_concurrent_rounds,
         model_problem=health.model_problem,
+        auto_archive_after_s=settings.auto_archive_after_s,
         escalator=escalator,
     )
     ontology = FusekiOntologySource(

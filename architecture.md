@@ -416,7 +416,7 @@ agent_traces (
 )
 ```
 
-`runs` is the persistence backing for every run that is not archived; the UI lists finished runs until the operator archives them. Each step and status change is written in one transaction before it is published to watchers, so a watcher never sees an event that would be missing after a restart. At startup the backend restores all rows. A run in `running` drops the steps of its current round and runs that round again; if the round was the `act` after a confirmation, only `act` runs again (storing is idempotent by run).
+`runs` is the persistence backing for every run that is not archived; the UI lists finished runs until the operator archives them, or until they are archived automatically after `AUTO_ARCHIVE_AFTER_S` seconds without a change (3600 by default, `0` off; never with a close still to go out). Each step and status change is written in one transaction before it is published to watchers, so a watcher never sees an event that would be missing after a restart. At startup the backend restores all rows. A run in `running` drops the steps of its current round and runs that round again; if the round was the `act` after a confirmation, only `act` runs again (storing is idempotent by run).
 
 `incidents` serves two purposes. `act` stores a confirmed diagnosis through `PostgresIncidentMemory`, the workflow's `IncidentMemory`; `similar()` returns confirmed rows of the same machine first, then of the same machine type, newest first. Archiving writes the history record (outcome, decision, resolution, close time and full trace) and removes the `runs` row in one transaction; the history lists rows with `archived_at` set.
 
@@ -474,6 +474,7 @@ LANGFUSE_HOST=
 # Agent behaviour
 DECISION_CONFIDENCE_THRESHOLD=0.9   # runs below this ask for clarification
 MAX_CONCURRENT_ROUNDS=2             # analysis rounds at the same time; others wait
+AUTO_ARCHIVE_AFTER_S=3600           # finished runs archived after this long unchanged; 0 off
 DATA_SHARING_POLICY=minimal          # minimal | adjacent | timeseries
 
 # Data sources (IFF cluster DNS in production)
