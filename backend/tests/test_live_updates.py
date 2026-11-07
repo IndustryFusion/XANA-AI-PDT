@@ -287,6 +287,18 @@ async def test_lost_broker_returns_by_itself_and_keeps_the_subscription(world):
     assert (await asyncio.wait_for(watcher.queue.get(), 1))["entity_id"] == "urn:m:1"
 
 
+async def test_a_stop_does_not_wait_for_the_next_check():
+    made = World()
+    made.live.start()
+    await made.settled()
+    made.live._tick_s = 30
+    await asyncio.sleep(0.05)
+    started = time.perf_counter()
+    await made.live.stop()
+    assert time.perf_counter() - started < 1
+    assert made.broker.subscriptions == {}
+
+
 async def test_stop_deletes_the_subscription(world):
     world.live.start()
     await world.settled()

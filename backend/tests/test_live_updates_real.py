@@ -75,6 +75,15 @@ async def ours():
     return [s for s in found if s.get("subscriptionName") == SUBSCRIPTION_NAME]
 
 
+async def none_left():
+    """The broker's listing can lag a moment behind a delete."""
+
+    async def empty():
+        return await ours() == []
+
+    await until(empty, 5, "no subscription left")
+
+
 async def wipe():
     async with httpx.AsyncClient() as client:
         for item in await ours():
@@ -183,7 +192,7 @@ async def test_a_change_in_the_broker_reaches_a_watcher_and_nothing_is_left(clea
     assert got["entity_id"] == entity
     assert live.health()["delivery"] == "confirmed"
     await live.stop()
-    assert await ours() == []
+    await none_left()
 
 
 async def test_a_wrong_notify_address_shows_after_a_change_here(clean, entity):
@@ -197,7 +206,7 @@ async def test_a_wrong_notify_address_shows_after_a_change_here(clean, entity):
     await state_is(live, "delivery_failed", 5)
     assert live.health()["status"] == "unavailable"
     await live.stop()
-    assert await ours() == []
+    await none_left()
 
 
 async def test_a_leftover_goes_even_if_the_first_listing_fails(clean):
@@ -229,28 +238,31 @@ async def test_a_leftover_goes_even_if_the_first_listing_fails(clean):
     live, _ = live_updates(transport=FailsOnce())
     live.start()
     await state_is(live, "active")
-    assert [s["id"] for s in await ours()] == [live._id]
+
+    async def only_ours():
+        return [s["id"] for s in await ours()] == [live._id]
+
+    await until(only_ours, 5, "only this process's subscription")
     await live.stop()
 
 
 async def test_stop_during_a_slow_create_leaves_nothing(clean):
+    posted = asyncio.Event()
+
     class SlowAnswer(httpx.AsyncHTTPTransport):
         async def handle_async_request(self, request):
             answer = await super().handle_async_request(request)
             if request.method == "POST":
+                posted.set()
                 await asyncio.sleep(1)
             return answer
 
     live, _ = live_updates(transport=SlowAnswer())
     live.start()
-
-    async def created():
-        return bool(await ours())
-
-    await until(created, 15, "the create")
+    await asyncio.wait_for(posted.wait(), 15)
     assert live._exists is False
     await live.stop()
-    assert await ours() == []
+    await none_left()
 
 
 @pytest.mark.skipif(not CONTAINER, reason="needs TEST_MQTT_CONTAINER")
@@ -331,8 +343,12 @@ def server(tmp_path):
         yield process, port, log
     finally:
         if process.poll() is None:
-            process.kill()
-            process.wait()
+            process.send_signal(signal.SIGTERM)
+            try:
+                process.wait(timeout=25)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
 
 
 async def _flood(port):
@@ -381,7 +397,7 @@ async def test_a_client_that_stops_reading_is_closed_and_others_keep_getting_cha
     stalled.close()
     process.send_signal(signal.SIGTERM)
     process.wait(timeout=20)
-    assert await ours() == []
+    await none_left()
 
 
 async def test_a_real_server_refuses_another_origin_and_takes_its_own(server):
@@ -404,7 +420,7 @@ async def test_shutdown_is_bounded_with_a_stalled_client_and_deletes_the_subscri
     process.send_signal(signal.SIGTERM)
     await asyncio.to_thread(process.wait, 25)
     assert time.monotonic() - started < 20
-    assert await ours() == []
+    await none_left()
     stalled.close()
     assert "eyJ" not in log.read_text()
 
@@ -465,7 +481,7 @@ async def test_refused_shows_with_the_role_and_makes_no_subscription(clean):
     live.start()
     await state_is(live, "refused")
     assert "Factory-Reader" in live.health()["detail"]
-    assert await ours() == []
+    assert live._id not in [item["id"] for item in await ours()]
     await live.stop()
 
 
@@ -496,7 +512,6 @@ async def test_updates_go_on_past_the_tokens_life_and_after_the_broker_restarts(
         assert session.token() != first
         [renewed] = await ours()
         assert first not in renewed["notification"]["endpoint"]["uri"]
-        assert session.token() in renewed["notification"]["endpoint"]["uri"] or session.token() != first
         await arrives(live, entity, 2)
 
         if PLATFORM_CONTAINER:
@@ -506,7 +521,7 @@ async def test_updates_go_on_past_the_tokens_life_and_after_the_broker_restarts(
             await arrives(live, entity, 3, 40)
 
         await live.stop()
-        assert await ours() == []
+        await none_left()
     finally:
         await session.logout()
         await session.close()

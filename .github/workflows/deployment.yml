@@ -126,6 +126,8 @@ jobs:
           kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.12.1/deploy/static/provider/kind/deploy.yaml
           kubectl -n ingress-nginx wait --for=condition=complete job --all --timeout=180s
           kubectl -n ingress-nginx wait --for=condition=ready pod -l app.kubernetes.io/component=controller --timeout=300s
+          # Ready isn't enough: its admission webhook can take longer, and then an install fails.
+          until kubectl create ingress webhook-check --rule='check.invalid/*=check:80' --dry-run=server -o name; do sleep 5; done
       - name: Install the stand-in services
         run: |
           kubectl create namespace iff

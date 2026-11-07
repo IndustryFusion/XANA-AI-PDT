@@ -129,7 +129,12 @@ jobs:
         run: |
           pip install -e ./agent -e ".[dev]"
           timeout 180 sh -c 'until curl -sf http://127.0.0.1:8081/realms/iff > /dev/null; do sleep 3; done'
+          timeout 180 sh -c 'until curl -sf http://127.0.0.1:8081/realms/iff > /dev/null; do sleep 3; done'
+          # These tests count the subscriptions in the broker, so the running backend mustn't hold one.
+          docker compose -f compose.yaml stop backend
           pytest tests/test_explorer_real.py tests/test_live_updates_real.py tests/test_ontology_real.py
+          docker compose -f compose.yaml start backend
+          timeout 120 sh -c 'until curl -sf http://127.0.0.1:8000/healthz > /dev/null; do sleep 2; done'
 
       - uses: actions/setup-node@v4
         with:
