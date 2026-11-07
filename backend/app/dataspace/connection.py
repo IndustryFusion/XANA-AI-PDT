@@ -141,7 +141,7 @@ class GatewayConnection:
             "detail": self._detail(stored),
             "renewal_failures": self._failures,
             "client_id": None if state == "not_configured" else self.client_in_use(),
-            "connecting": self._retrying and state != "connected",
+            "connecting": self._retrying and (state != "connected" or self._stopped),
         }
 
     def client_in_use(self) -> str | None:
@@ -167,6 +167,11 @@ class GatewayConnection:
 
     def _detail(self, stored: StoredCredential | None) -> str | None:
         if self._stopped:
+            if self._retrying or (self._starting is not None and not self._starting.done()):
+                return (
+                    f"Renewing the dataspace token failed {self._failures} times in a row, so renewal stopped "
+                    f"({self._last_problem}). Connecting again is tried every minute."
+                )
             return (
                 f"Renewing the dataspace token failed {self._failures} times in a row ({self._last_problem}), "
                 "so it is no longer tried. Connect again."
@@ -192,11 +197,21 @@ class GatewayConnection:
 
     # ── Connecting ───────────────────────────────────────────────────────────
 
-    async def connect(self, secret: str | None = None, *, unless_connected: bool = False) -> dict[str, Any]:
+    async def connect(
+        self, secret: str | None = None, *, unless_connected: bool = False, only_if_wanted: bool = False
+    ) -> dict[str, Any]:
+        """Connects. `unless_connected` keeps a working connection; `only_if_wanted` connects only while the
+        operator hasn't disconnected, checked here under the lock, as a disconnect may have landed meanwhile."""
         secret = secret or None
         async with self._changing:
-            if unless_connected and self.token():
+            if unless_connected and self.token() and not self._stopped:
                 return await self.status()
+            if only_if_wanted:
+                wanted = await self._stored_or_none()
+                if wanted is None:
+                    raise unavailable("The memory database is not reachable.")
+                if not wanted.connect_wanted:
+                    return await self.status()
             if not self.configured:
                 raise conflict("No dataspace connection is configured.")
             client_id = self.client_id()
@@ -282,15 +297,15 @@ class GatewayConnection:
 
     async def connect_if_wanted(self) -> bool:
         """Connects unless already connected, or the operator disconnected, or there's no secret. Raises a refusal."""
-        if self.token() or not self.configured:
+        if (self.token() and not self._stopped) or not self.configured:
             return bool(self.token())
         stored = await self._stored_or_none()
         if stored is None:
             raise unavailable("The memory database is not reachable.")
         if not stored.connect_wanted or not (self._env_secret() or stored.secret):
             return False
-        await self.connect(unless_connected=True)
-        return True
+        await self.connect(unless_connected=True, only_if_wanted=True)
+        return self.token() is not None and not self._stopped
 
     def start(self) -> None:
         """Connects in the background. While the dataspace can't be reached, it tries again every check."""
@@ -360,6 +375,9 @@ class GatewayConnection:
             log.warning("Renewing the dataspace token failed (%d): %s", self._failures, refused.message)
             if self._failures >= MAX_RENEW_FAILURES:
                 self._stopped = True
+                # Renewal stops here. Connecting again goes on as at startup, every minute while the
+                # dataspace can't be reached, so the inbox resumes by itself once it can.
+                self.start()
             return
         self._failures, self._last_problem = 0, None
 

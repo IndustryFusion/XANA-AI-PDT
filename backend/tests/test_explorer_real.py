@@ -676,3 +676,24 @@ def test_real_reimport_without_an_attribute_removes_it(api, entity):
     assert api.post("/api/ngsi/import", json=[again]).json()[0]["result"] == "updated"
     stored = api.get(path(entity)).json()
     assert f"{IRI}state" not in stored and stored[f"{IRI}temp"]["value"] == 42
+
+
+@needs_broker
+def test_real_has_attribute_with_the_largest_page(api):
+    """A thousand IDs in one address are too long for the broker (HTTP 414); they are read in chunks."""
+    kind = f"{IRI}many_{uuid.uuid4().hex[:8]}"
+    body = [
+        {"id": f"urn:test:many:{uuid.uuid4().hex}", "type": kind, f"{IRI}mark": {"type": "Property", "value": n}}
+        for n in range(1000)
+    ]
+    try:
+        for start in range(0, len(body), 200):
+            assert {r["result"] for r in api.post("/api/ngsi/import", json=body[start : start + 200]).json()} == {
+                "created"
+            }
+        answer = api.get("/api/ngsi/entities", params={"type": kind, "has_attr": f"{IRI}mark", "limit": 1000})
+        assert answer.status_code == 200, answer.text[:300]
+        theirs = direct({"type": kind, "attrs": f"{IRI}mark", "limit": 1000, "orderBy": "id"})
+        assert [e["id"] for e in answer.json()] == [e["id"] for e in theirs] and len(theirs) == 1000
+    finally:
+        api.post("/api/ngsi/delete-by-types", json={"types": [kind]})

@@ -21,7 +21,7 @@
 
 ## 4. Verification with real services
 
-- [x] 4.1 With a short delay, a completed, a failed and a stopped run are archived and appear in the history with their full record; verify with the backend from source on the local environment
+- [ ] 4.1 With a short delay, a completed, a failed and a stopped run are archived and appear in the history with their full record; verify with the backend from source on the local environment
 - [x] 4.2 A run waiting for the machine builder and a run with a pending close are not archived; verify on a real dataspace
 - [x] 4.3 Restart part way through the delay; verify the run is archived on time
 - [x] 4.4 List with builder, filter and row archive in a browser; verify against the backend
