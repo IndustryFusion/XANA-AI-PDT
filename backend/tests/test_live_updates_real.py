@@ -279,7 +279,9 @@ async def test_losing_the_broker_shows_and_updates_resume(clean, entity):
     finally:
         subprocess.run(["docker", "start", CONTAINER], check=True, capture_output=True)  # noqa: S603, S607
     await state_is(live, "active", 60)
-    await arrives(live, entity, 2, 40)
+    # The MQTT broker can come back on another address. Scorpio's client then waits out its 60 s
+    # connect timeout on the old one, and drops what it should deliver until that has ended.
+    await arrives(live, entity, 2, 90)
     await live.stop()
 
 
