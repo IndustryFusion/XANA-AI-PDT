@@ -101,6 +101,18 @@ The worker SHALL go on after any failure, and lose no event while the process li
 - **WHEN** the language model isn't available
 - **THEN** the run starts, and fails visibly with its source
 
+#### Scenario: Data the database can't store
+- **WHEN** an event holds a NUL or a lone surrogate, in its machine, issue or values
+- **THEN** those are left out, and if the database still refuses it, it is logged and the next event is handled
+
+#### Scenario: A triggered run just failed
+- **WHEN** a triggered run of a machine failed within the last 5 minutes, and another event for it arrives
+- **THEN** no run starts
+
+#### Scenario: A short name with the broker down
+- **WHEN** an event's short name can't be resolved, and an open run's identifier ends in that name
+- **THEN** no run starts
+
 #### Scenario: Unknown name
 - **WHEN** an event names a machine that can't be resolved
 - **THEN** it is logged and dropped, and the next event is handled
@@ -146,7 +158,11 @@ The backend SHALL keep one subscription with the ID `urn:ngsi-ld:Subscription:Xa
 
 #### Scenario: Not configured
 - **WHEN** `CALLBACK_BASE_URL` isn't set
-- **THEN** no subscription is made, and the state is `not_configured`
+- **THEN** no subscription is made, the state is `not_configured`, and the check says that one made earlier goes on delivering until deleted
+
+#### Scenario: In a tenant
+- **WHEN** `NGSI_TENANT` is set
+- **THEN** the subscription is made, the backend starts, and the state says that the broker delivers nothing there unless the same context is subscribed in its default tenant
 
 ### Requirement: Service identity
 With `KEYCLOAK_SERVICE_CLIENT_ID` and `KEYCLOAK_SERVICE_CLIENT_SECRET`, the backend SHALL hold a token of its own, and use it only for the subscription and for triggered runs.

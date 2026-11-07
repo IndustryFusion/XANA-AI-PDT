@@ -147,8 +147,16 @@ class Escalator:
 
     # ── The data ─────────────────────────────────────────────────────────────
 
-    async def files(self, run: RunState, sharing: Sharing) -> list[tuple[str, bytes]]:
-        """The files of what is allowed, read anew. A source failing raises a refusal: nothing goes out partly."""
+    async def files(
+        self, run: RunState, sharing: Sharing, related_signals: bool | None = None
+    ) -> list[tuple[str, bytes]]:
+        """The files of what is allowed, read anew. A source failing raises a refusal: nothing goes out partly.
+
+        History holds related entities' signals if those entities may go too, in this sending by default,
+        or as `related_signals` says.
+        """
+        if related_signals is None:
+            related_signals = ADJACENTS in sharing.allowed
         try:
             entity = await self._context.get(run.machine_id)
             if entity is None:
@@ -159,7 +167,7 @@ class Escalator:
             if ADJACENTS in sharing.allowed:
                 contents[ADJACENTS] = await self._related(entity)
             if HISTORY in sharing.allowed:
-                contents[HISTORY] = await self._signal_history(entity, ADJACENTS in sharing.allowed)
+                contents[HISTORY] = await self._signal_history(entity, related_signals)
         except Refused:
             raise
         except SourceUnavailable as error:

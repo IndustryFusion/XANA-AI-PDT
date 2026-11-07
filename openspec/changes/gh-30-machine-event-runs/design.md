@@ -15,7 +15,7 @@ Against the broker image of the local environment:
 - With `application/ld+json`, the body needs `@context`. Without one, `Machine` expands under the default context, so it matches nothing on data with full IRIs. So the subscription names `NGSI_CONTEXT_URL` when set, and the core context otherwise.
 - **On data with full IRIs, `status` can't be named by a context.** Under a context mapping it to `https://…/status`, the broker keeps the core context's own term for it, while the other three and `Machine` expand as the context says, so a change of `status` notifies nothing. In full, it works. That is why `MACHINE_WATCH_TYPE` and `MACHINE_WATCH_ATTRIBUTES` exist, with the issue's values as defaults. Each takes a short name or a full IRI. Notifications are read by the last part of a name.
 
-**Open: on CI, the same broker image fails on each notification under a context from a listener,** with a JSON-LD error in its log and no notification, while the same test passes on a local environment, repeatedly. The cause isn't known. So that test doesn't run in CI, and notifications under `NGSI_CONTEXT_URL` have to be confirmed where they will be used.
+**A subscription in a tenant delivers nothing.** The broker stores a subscription's context as `urn:<hash>`, and reads it again at notification time from the default tenant's `contexts` table only. For a subscription in another tenant that is a 404, and the notification is dropped (`LdContextNotAvailable`), while the subscription reads `timesSent: 0` and status `ok`. Reproduced on a fresh broker: 0 of 3 changes delivered in a tenant, and all 3 once a subscription with the same context existed in the default tenant, as that leaves the row there. That makes it easy to miss, and depends on what else was subscribed. So with `NGSI_TENANT`, the subscription is still made, and the `machine_events` check is `degraded` and says that no event will arrive. The backend still starts. The default tenant with `NGSI_CONTEXT_URL` works, on a fresh subscription and after a `PATCH`.
 
 **Not verified: the real platform,** as none can be reached from here. If the platform's machines aren't of the configured type, or the attributes have other IRIs, nothing will match, and the subscription still reads as active. The platform's own type and attribute names decide the values to set.
 
@@ -75,7 +75,10 @@ Checked by the worker, one event at a time, on the same state as the screens: an
 | Queue full | `503`, so the sender can tell. The queue holds 1000 events |
 | Memory database down | The worker holds the event and tries again every 5 s, so nothing is lost while the process lives. The queue fills behind it |
 | Language model down | The run starts, and fails visibly with its source. Unlike an operator, nobody is there to read a refusal |
+| A triggered run just failed | For 5 minutes, an event for that machine starts nothing, so that a failing model gives one failed run per machine, not one per alert |
 | Unknown short name | Logged and dropped |
+| Short name with the broker down | It stays as given, and an open run whose identifier ends in it counts as that machine's |
+| Data the database refuses | NUL and lone surrogates are taken out first. If it still refuses, logged and dropped; only a lost connection is tried again |
 | Anything unexpected | Logged and dropped; the worker goes on |
 | Backend stops | **What is in the queue is lost.** The issue asks for a queue, and the broker doesn't retry. Keeping events in the database would add a store for a window of milliseconds |
 
@@ -83,7 +86,7 @@ Checked by the worker, one event at a time, on the same state as the screens: an
 
 A loop every 15 s. No identity: `waiting_for_identity`, and it tries again. Otherwise `POST`; a `409` becomes a `PATCH`, so a restart creates no duplicate and takes up a new address or secret. After that it reads the subscription every 60 s: gone means create it again, `notification.status` of `failed` shows as a degraded check.
 
-Unlike the live updates subscription, this one has no expiry and isn't deleted at shutdown: events should go on being sent, and the next start finds it.
+Unlike the live updates subscription, this one has no expiry and isn't deleted at shutdown: events should go on being sent, and the next start finds it. For the same reason it isn't deleted when `CALLBACK_BASE_URL` is unset, and the check says that it goes on delivering until deleted in the broker.
 
 | State | Check |
 |---|---|
@@ -92,10 +95,11 @@ Unlike the live updates subscription, this one has no expiry and isn't deleted a
 | `active` | `ok` |
 | `delivery_failing` | `degraded` |
 | `failed` | `error` |
+| `no_delivery_in_tenant` | `degraded` |
 
 ### Alerta's side
 
-A small plugin in `backend/alerta/xana_events/`, loaded by Alerta's plugin mechanism. It sends each received alert to `XANA_EVENTS_URL` with the secret, with a 3 second limit, and never fails the alert: a stopped backend doesn't affect Alerta. The local environment loads it with `--profile alerts`.
+A small plugin in `backend/alerta/plugin/`, loaded by Alerta's plugin mechanism. It sends each received alert to `XANA_EVENTS_URL` with the secret, with a 3 second limit, and never fails the alert: a stopped backend doesn't affect Alerta. The local environment loads it with `--profile alerts`.
 
 **What the platform lacks:** its Alerta chart installs plugins from one fixed repository by name, and has `PLUGINS = ['blackout']`. Using this plugin there needs an image or a chart change on the platform, which this change doesn't make.
 

@@ -35,7 +35,7 @@ import psycopg
 from app.config import Settings
 from app.dataspace.gateway import GatewayClient
 from app.errors import Refused
-from app.events.subscription import ACTIVE, DELIVERY_FAILING, NOT_CONFIGURED, WAITING, MachineWatch
+from app.events.subscription import ACTIVE, DELIVERY_FAILING, NOT_CONFIGURED, TENANT_LIMIT, WAITING, MachineWatch
 from app.ifric import RegistryClient
 from app.memory.migrate import Migrator
 from app.ngsi.live import MQTT_USER, NOT_AUTHORISED
@@ -49,7 +49,10 @@ Probe = Callable[[], Awaitable[tuple[Status, str]]]
 UNCONFIRMED = "could not be confirmed, so it is assumed to be available"
 NO_DATASPACE = "No dataspace is configured"
 NO_REGISTRY = "No IFRIC registry is configured"
-NO_EVENTS = "Machine events aren't configured: CALLBACK_BASE_URL is not set"
+NO_EVENTS = (
+    "Machine events aren't configured: CALLBACK_BASE_URL is not set. A subscription made earlier stays in the "
+    "context broker, and goes on delivering, until it is deleted there"
+)
 ANY_TRIPLE = "ASK { { ?s ?p ?o } UNION { GRAPH ?g { ?s ?p ?o } } }"
 NO_MODEL_LIST = (404, 405, 501)  # an OpenAI-compatible server need not offer a model list
 
@@ -369,7 +372,9 @@ class HealthService:
             return "ok", NO_EVENTS
         if watch.state == ACTIVE:
             return "ok", watch.detail
-        return ("degraded" if watch.state in (WAITING, DELIVERY_FAILING) else "error"), watch.detail
+        return (
+            "degraded" if watch.state in (WAITING, DELIVERY_FAILING, TENANT_LIMIT) else "error"
+        ), watch.detail
 
     def _label(self) -> str:
         return (self._s.llm_provider_name or "Ollama") if self._s.llm_provider == "ollama" else self._s.llm_label

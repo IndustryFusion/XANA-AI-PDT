@@ -6,8 +6,12 @@
 The health report SHALL have a `machine_events` check, with the subscription's state in its detail.
 
 #### Scenario: States
-- **WHEN** the state is `active`, `waiting_for_identity`, `delivery_failing` or `failed`
-- **THEN** the check is `ok`, `degraded`, `degraded` or `error`
+- **WHEN** the state is `active`, `waiting_for_identity`, `delivery_failing`, `no_delivery_in_tenant` or `failed`
+- **THEN** the check is `ok`, `degraded`, `degraded`, `degraded` or `error`
+
+#### Scenario: A service identity that fails
+- **WHEN** the check is waiting for an identity, and the service identity failed
+- **THEN** the detail says why, naming no secret
 
 #### Scenario: Not configured
 - **WHEN** the state is `not_configured`

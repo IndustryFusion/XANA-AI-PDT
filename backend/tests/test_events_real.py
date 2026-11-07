@@ -244,64 +244,70 @@ class _Listener(BaseHTTPRequestHandler):
 
 
 @pytest.mark.skipif(not CALLBACK_HOST, reason="needs TEST_FUSEKI_CALLBACK_HOST")
-async def test_on_data_with_full_iris_the_subscription_matches_under_a_context():
+async def test_on_data_with_full_iris_the_subscription_delivers_under_a_context():
+    """In the default tenant, as the broker delivers nothing in another. On a new subscription, and after an update.
+
+    It takes over the subscription's ID, so it runs after the others that need the backend's.
+    """
     base = "https://platform.example.org/v0.1/"
-    # Names only: the broker adds the core context itself, and a context naming it there has it fetched from outside.
+    # Names only: the broker adds the core context itself.
     names = ("Machine", "status", "errorCode", "alarmLevel", "faultCode")
     _Listener.context = {"@context": {name: f"{base}{name}" for name in names}}
     _Listener.received = []
     server = ThreadingHTTPServer(("0.0.0.0", 0), _Listener)  # noqa: S104
     threading.Thread(target=server.serve_forever, daemon=True).start()
     address = f"http://{CALLBACK_HOST}:{server.server_address[1]}"
-    tenant = f"xanaevents{uuid.uuid4().hex[:8]}"
     settings = make_settings(
         ngsi_url=BROKER,
-        ngsi_tenant=tenant,
         ngsi_context_url=f"{address}/context.jsonld",
         callback_base_url=address,
         event_webhook_secret="iri-test-secret",
         # `status` in full: as a short name it means the core context's term, whatever another context says.
-        machine_watch_type="Machine",
         machine_watch_attributes=f"{base}status,errorCode,alarmLevel,faultCode",
     )
-    headers = {"Content-Type": "application/json", "NGSILD-Tenant": tenant}
     machine = f"urn:ngsi-ld:Machine:iri-{uuid.uuid4().hex[:8]}"
-    try:
-        watch = MachineWatch(settings, lambda: None, False)
+
+    async def delivered():
         async with httpx.AsyncClient(timeout=20) as client:
+            value = f"fault-{uuid.uuid4().hex[:6]}"
+            body = {f"{base}status": {"type": "Property", "value": value}}
+            changed = await client.patch(f"{ENTITIES}/{machine}/attrs", json=body, headers=JSON)
+            assert changed.status_code == 204
+        await asyncio.sleep(1)
+        return _Listener.received
+
+    def status_of(notification):
+        [reported] = notification["data"]
+        assert reported["id"] == machine
+        [name] = [name for name in reported if name.rsplit("/", 1)[-1] == "status"]
+        return reported[name]["value"]
+
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            await client.delete(f"{SUBSCRIPTIONS}/{SUBSCRIPTION_ID}")
             entity = {
                 "id": machine,
                 "type": f"{base}Machine",
                 f"{base}status": {"type": "Property", "value": "running"},
             }
-            assert (await client.post(ENTITIES, json=entity, headers=headers)).status_code == 201
-            await watch.check()
-            assert watch.state == ACTIVE, watch.detail
-            await watch.check()  # a second start's way: nothing to do
-
-        # Written until it comes through: a slower broker takes a moment to set up a new tenant and subscription.
-        async def delivered():
-            async with httpx.AsyncClient(timeout=20) as client:
-                value = f"fault-{uuid.uuid4().hex[:6]}"
-                body = {f"{base}status": {"type": "Property", "value": value}}
-                changed = await client.patch(f"{ENTITIES}/{machine}/attrs", json=body, headers=headers)
-                assert changed.status_code == 204
-            await asyncio.sleep(2)
-            return _Listener.received
-
-        await until(delivered, 90, "a notification")
+            assert (await client.post(ENTITIES, json=entity, headers=JSON)).status_code == 201
+        created = MachineWatch(settings, lambda: None, False)
+        await created.check()
+        assert created.state == ACTIVE, created.detail
+        await until(delivered, 30, "a notification on a new subscription")
         authorization, notification = _Listener.received[0]
         assert authorization == "Bearer iri-test-secret"
-        [reported] = notification["data"]
-        assert reported["id"] == machine
-        names = [name for name in reported if name.rsplit("/", 1)[-1] == "status"]
-        assert names, reported
-        assert reported[names[0]]["value"].startswith("fault")
+        assert status_of(notification).startswith(("fault", "running"))
+
+        _Listener.received = []
+        updated = MachineWatch(settings, lambda: None, False)
+        await updated.check()  # a second start: it exists, so this is an update
+        assert updated.state == ACTIVE, updated.detail
+        await until(delivered, 30, "a notification after an update")
     finally:
         async with httpx.AsyncClient(timeout=10) as client:
-            tenant_only = {"NGSILD-Tenant": tenant}
-            await client.delete(f"{SUBSCRIPTIONS}/{SUBSCRIPTION_ID}", headers=tenant_only)
-            await client.delete(f"{ENTITIES}/{machine}", headers=tenant_only)
+            await client.delete(f"{SUBSCRIPTIONS}/{SUBSCRIPTION_ID}")
+            await client.delete(f"{ENTITIES}/{machine}")
         server.shutdown()
         server.server_close()
 

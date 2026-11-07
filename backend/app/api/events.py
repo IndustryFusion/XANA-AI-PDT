@@ -41,15 +41,18 @@ def _check_secret(request: Request) -> None:
 async def _body(request: Request) -> Any:
     try:
         return await request.json()
-    except ValueError:
-        raise invalid("The body isn't JSON.") from None
+    except (ValueError, RecursionError):
+        raise invalid("The body isn't JSON that can be read.") from None
 
 
 @router.post("/ngsi", status_code=202)
 async def ngsi(request: Request) -> dict[str, int]:
     """A notification of the context broker."""
     _check_secret(request)
-    events, ignored = ngsi_events(await _body(request), request.app.state.settings.watched_attributes)
+    try:
+        events, ignored = ngsi_events(await _body(request), request.app.state.settings.watched_attributes)
+    except RecursionError:
+        raise invalid("The body is too deep to read.") from None
     request.app.state.events.add(events)
     return {"accepted": len(events), "ignored": ignored}
 

@@ -156,7 +156,9 @@ def create_app(
         """For what runs without an operator asking. Never for what someone asks through `/api`."""
         return service_identity.token() or session.token()
 
-    machine_watch = MachineWatch(settings, triggered_token, session.enabled)
+    machine_watch = MachineWatch(
+        settings, triggered_token, session.enabled, identity_problem=lambda: service_identity.problem
+    )
     health = health or HealthService(
         settings,
         migrator,

@@ -37,7 +37,11 @@ Only an operator's request sends. The `busy` mark of `gh-28-escalate-to-builder`
 
 ### Stopping
 
-`close(withdrawn)` is sent. If it can't be, the run stops anyway, showing that, and the poller repeats it until it is accepted: a duplicate `close` is safe under the protocol.
+`close(withdrawn)` is sent. If it can't be, the run stops anyway, showing that, and the poller repeats it until it is accepted: a duplicate `close` is safe under the protocol. One the receiver didn't get is repeated too, after 60 seconds and then twice as long each time, up to an hour, with one close in the conversation, however often it had to go.
+
+### What a grant of history delivers
+
+The machine's own signals, and related entities' only if `twin:adjacents` is allowed for this builder, by tier and access. On platform data signals are mostly on sensors, so a grant of history alone, at a tier or access without related entities, can hold none. **The policy check says how many signals went, and `0 signals` when none did.** No state or confirmation is added for this. Which default is right when related entities aren't allowed is for a maintainer: send nothing and say so, ask for `twin:adjacents` too, or include sensors' signals anyway.
 
 ### The agent
 

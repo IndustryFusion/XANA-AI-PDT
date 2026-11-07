@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.errors import Refused, invalid, unavailable
+from app.runs.conversation import clean
 from app.runs.machines import MachineResolver
 from app.runs.manager import MAX_ISSUE, RunManager
 from app.runs.model import ALERT, NGSI
@@ -37,6 +38,7 @@ MAX_VALUE = 200
 # What Alerta reports without there being anything to diagnose.
 QUIET_SEVERITIES = {"ok", "normal", "up", "cleared", "informational", "debug", "trace"}
 QUIET_STATUSES = {"closed", "expired", "shelved", "blackout"}
+_NOT_THE_VALUE = ("type", "observedAt", "datasetId", "createdAt", "modifiedAt", "unitCode", "instanceId")
 _VALUE_KEYS = ("value", "hasValue", "object", "hasObject", "vocab", "hasVocab", "json", "hasJSON", "@value", "@id")
 
 
@@ -63,7 +65,7 @@ def _attribute_value(attribute: Any) -> Any:
         for key in _VALUE_KEYS:
             if key in members:
                 return _attribute_value(members[key])
-        return None
+        return {key: value for key, value in members.items() if key not in _NOT_THE_VALUE} or None
     return attribute
 
 
@@ -98,8 +100,9 @@ def ngsi_events(body: Any, watched: list[str]) -> tuple[list[Event], int]:
         if not values:
             ignored += 1
             continue
+        machine, values = clean(machine), clean(values)
         shown = ", ".join(f"{name}={str(value)[:MAX_VALUE]}" for name, value in values.items())
-        events.append(Event(machine, f"Machine event: {shown}"[:MAX_ISSUE], NGSI, values))
+        events.append(Event(machine, clean(f"Machine event: {shown}")[:MAX_ISSUE], NGSI, values))
     return events, ignored
 
 
@@ -111,7 +114,7 @@ def alert_event(body: Any) -> Event | None:
         machine, issue = _machine(body.get("machine_id")), body.get("issue")
         if machine is None or not isinstance(issue, str) or not issue.strip():
             raise invalid("Name the machine and the issue.")
-        return Event(machine, issue.strip()[:MAX_ISSUE], ALERT)
+        return Event(clean(machine), clean(issue.strip())[:MAX_ISSUE], ALERT)
     machine = _machine(body.get("resource"))
     if machine is None:
         raise invalid("An alert names its machine in `resource`.")
@@ -119,7 +122,7 @@ def alert_event(body: Any) -> Event | None:
         return None
     what = str(body.get("event") or "unnamed")
     text = str(body.get("text") or "")
-    return Event(machine, f"Alert {what}: {text}".rstrip(": ")[:MAX_ISSUE], ALERT)
+    return Event(clean(machine), clean(f"Alert {what}: {text}".rstrip(": "))[:MAX_ISSUE], ALERT)
 
 
 class EventWorker:

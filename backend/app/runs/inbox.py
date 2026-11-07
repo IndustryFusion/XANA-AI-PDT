@@ -77,4 +77,6 @@ class InboxPoller:
                         done += 1
                 except (Refused, StoreUnavailable) as problem:
                     log.warning("A message waits for the next poll: %s", problem)
+                except Exception as error:  # noqa: BLE001 - one message must not hold up the others
+                    log.warning("Message %s stays unacknowledged: %s", message.get("message_id"), type(error).__name__)
             return done

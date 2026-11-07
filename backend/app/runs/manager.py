@@ -30,12 +30,12 @@ import uuid
 from collections import Counter
 from collections.abc import Awaitable, Callable, Coroutine
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
 from app.errors import Refused, conflict, invalid, not_found, unavailable
 from app.memory.migrate import MigrationError, Migrator
-from app.memory.store import IncidentStore, RunStore, StoreUnavailable
+from app.memory.store import IncidentStore, RunStore, StoreRefused, StoreUnavailable
 from app.runs.conversation import ConversationDesk
 from app.runs.escalation import DELIVERY, FINAL_STATUSES, Escalator, NotPossible, Plan, incident_message
 from app.runs.files import Attachment, check_files
@@ -61,6 +61,9 @@ log = logging.getLogger(__name__)
 MAX_ISSUE = 2000
 MAX_TEXT = 4000
 OUTBOX_POLL_S = 5
+CLOSE_RETRY_S = 60
+CLOSE_RETRY_MAX_S = 3600
+TRIGGERED_RETRY_AFTER_S = 300
 NO_ESCALATION = "No dataspace is configured for this installation."
 NOT_REOPENABLE = "Only runs with a machine-builder conversation can be reopened."
 
@@ -259,19 +262,34 @@ class RunManager:
             known = await self._store.watched_values(machine_id) if watched is not None else None
             changed = watched is None or watched != known
             run_id = None
-            if changed and not self._has_open_run(machine_id):
+            if changed and not self._has_open_run(machine_id) and not self._failed_lately(machine_id):
                 # No check of the language model: nobody is there to read a refusal, so a failed run shows it.
                 run_id = await self._create(machine_id, issue, source)
             if watched is not None and changed:
                 await self._store.remember_watched_values(machine_id, watched)
+        except StoreRefused as error:
+            raise invalid(str(error)) from None
         except StoreUnavailable as error:
             raise unavailable(str(error)) from None
         return run_id
 
     def _has_open_run(self, machine_id: str) -> bool:
-        if self._starting[machine_id] > 0:
+        if any(_same_machine(starting, machine_id) for starting in self._starting):
             return True
-        return any(r.state.machine_id == machine_id and r.state.status in OPEN for r in self._runs.values())
+        return any(
+            _same_machine(r.state.machine_id, machine_id) and r.state.status in OPEN for r in self._runs.values()
+        )
+
+    def _failed_lately(self, machine_id: str) -> bool:
+        """A triggered run failed for this machine a moment ago: another would fail too, and only add to the list."""
+        since = self._now() - timedelta(seconds=TRIGGERED_RETRY_AFTER_S)
+        return any(
+            r.state.status == FAILED
+            and r.state.source != OPERATOR
+            and r.state.updated_at > since
+            and _same_machine(r.state.machine_id, machine_id)
+            for r in self._runs.values()
+        )
 
     async def _create(self, machine_id: str, issue: str, source: str = OPERATOR) -> str:
         now = self._now()
@@ -279,6 +297,8 @@ class RunManager:
         self._starting[machine_id] += 1
         try:
             state = await self._store.save(state)
+        except StoreRefused:
+            raise
         except StoreUnavailable as error:
             raise unavailable(f"{error} The run was not started.") from None
         finally:
@@ -548,15 +568,25 @@ class RunManager:
                     if answer.get("error_message"):
                         entry["error"] = answer["error_message"]
                     changed = True
-                    if entry["status"] == "failed" and self._is_close(rec, entry["message_id"]):
+                    if entry["status"] == "failed" and (entry.get("close") or self._is_close(rec, entry["message_id"])):
                         closes_failed.append(entry.get("error") or "The machine builder didn't receive the close.")
                 outbox.append(entry)
             if changed:
                 fields: dict[str, Any] = {}
                 if closes_failed and rec.state.status == STOPPED:
                     data = rec.state.data | {"close_pending": True, "close_problem": closes_failed[-1]}
-                    fields["data"] = data
+                    fields["data"] = data | self.close_backoff(rec.state.data)
                 await self._change(rec, outbox=tuple(outbox), **fields)
+
+    def close_backoff(self, data: dict[str, Any]) -> dict[str, Any]:
+        """When to try a failed close again: later each time, as a receiver that is down stays so for a while."""
+        attempts = int(data.get("close_attempts") or 0) + 1
+        wait = min(CLOSE_RETRY_S * 2 ** (attempts - 1), CLOSE_RETRY_MAX_S)
+        return {"close_attempts": attempts, "close_retry_at": (self._now() + timedelta(seconds=wait)).isoformat()}
+
+    def close_is_due(self, data: dict[str, Any]) -> bool:
+        due = data.get("close_retry_at")
+        return not due or datetime.fromisoformat(due) <= self._now()
 
     @staticmethod
     def _is_close(rec: RunRecord, message_id: str) -> bool:
@@ -737,6 +767,13 @@ _NAMES = {
     "archive": "archiving",
     "escalate": "escalating",
 }
+
+
+def _same_machine(one: str, other: str) -> bool:
+    """Also a short name that couldn't be resolved, and the identifier it ends."""
+    if one == other:
+        return True
+    return (":" not in other and one.endswith(f":{other}")) or (":" not in one and other.endswith(f":{one}"))
 
 
 def _operator_text(text: str) -> str:
