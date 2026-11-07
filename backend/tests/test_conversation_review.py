@@ -22,11 +22,12 @@ from datetime import UTC, datetime, timedelta
 import httpx
 import pytest
 
-from app.runs.conversation import _decision, last_state
+from app.runs.conversation import _decision, last_state, requested_attributes
 from tests.dataspace_support import BUILDER
 from tests.runs_support import MACHINE, rows, running, to_confirmation
 from tests.space_support import connect
 from tests.test_conversation import make, scene
+from xana_agent.sources.base import Observation
 
 pytestmark = pytest.mark.db
 
@@ -758,44 +759,81 @@ async def test_a_builders_close_before_ours_isnt_taken_for_ours(url):
 # ── What a grant of history delivers (final review B1) ───────────────────────
 
 
-async def history_grant(app, space, client, adjacents):
+SENSOR = "urn:ngsi-ld:Sensor:press-01-oil-temperature"
+
+
+async def history_grant(app, space, client, adjacents, **request):
     await connect(client)
     for item in space.access_here[BUILDER]:
         if item["capability"] == "twin:history":
             item["status"] = "on-request"
         if item["capability"] == "twin:adjacents":
             item["status"] = adjacents
+    at = datetime.now(UTC) - timedelta(minutes=5)
+    app.state.history.text_values = [
+        Observation(entity_id=MACHINE, attribute="status", at=at, value="error", value_type="string"),
+        Observation(entity_id=SENSOR, attribute="status", at=at, value="stuck", value_type="string"),
+    ]
     run_id = await to_confirmation(client, MACHINE)
     assert (await client.post(f"/api/agent/escalate/{run_id}")).status_code == 200
-    request = space.deliver("request", space.sent[0]["conversation_id"], capability="twin:history")
+    request = space.deliver("request", space.sent[0]["conversation_id"], capability="twin:history", **request)
     await app.state.inbox.poll_once()
     body = {"approved": True, "request_id": request}
     assert (await client.post(f"/api/agent/approve-data-request/{run_id}", json=body)).status_code == 200
     run = (await client.get(f"/api/agent/status/{run_id}")).json()
     check = [step for step in run["steps"] if step["node"] == "policy_check"][-1]["output"]
-    return [m for m in space.sent if m.get("kind") == "files"][-1]["files"]["signal-history.json"], check
+    return [m for m in space.sent if m.get("kind") == "files"][-1], check
 
 
-async def test_a_grant_of_history_holds_related_signals_if_those_entities_may_go(url):
-    app, space = make(url, tier="timeseries")
-    async with running(app) as client:
-        history, check = await history_grant(app, space, client, "approved")
-    assert {signal["entity_id"] for signal in history} > {MACHINE}, "a related sensor's signals, not only its own"
-    assert check["signals"] == len(history)
-    assert f"{len(history)} signals" in check["decision"]
-    assert list(check["files"]) == ["signal-history.json"]
-
-
-@pytest.mark.parametrize(("tier", "adjacents"), [("timeseries", "on-request"), ("minimal", "approved")])
-async def test_otherwise_the_machines_own_and_the_operator_is_told_what_went(url, tier, adjacents):
+# Whatever the tier and the access to related entities: the grant decides (maintainer's decision).
+@pytest.mark.parametrize(("tier", "adjacents"), [("minimal", "on-request"), ("timeseries", "denied")])
+async def test_a_grant_of_history_alone_sends_the_machine_related_entities_and_its_own_signals(url, tier, adjacents):
     app, space = make(url, tier=tier)
     async with running(app) as client:
-        history, check = await history_grant(app, space, client, adjacents)
-    assert {signal["entity_id"] for signal in history} <= {MACHINE}
-    assert check["signals"] == len(history)
-    if not history:
-        assert "0 signals" in check["decision"]
-        assert "and sent" not in check["decision"]
+        bundle, check = await history_grant(app, space, client, adjacents)
+    assert set(bundle["files"]) == {"machine.json", "related-entities.json", "signal-history.json"}
+    assert bundle["capability"] == "twin:history"
+    assert bundle["files"]["machine.json"]["entity"]["id"] == MACHINE
+    related = bundle["files"]["related-entities.json"]
+    assert SENSOR in {item["entity"]["id"] for item in related}
+    history = bundle["files"]["signal-history.json"]
+    assert {signal["entity_id"] for signal in history} == {MACHINE}, "its sensors' signals don't go"
+    assert {signal["attribute"] for signal in history} == {"spindleSpeed", "status"}
+    status = next(signal for signal in history if signal["attribute"] == "status")
+    assert [v["value"] for v in status["values"]] == ["error"]
+    assert check["files"] == ["machine.json", "related-entities.json", "signal-history.json"]
+    assert len(check["sent"]) == 3
+    assert check["signals"] == 2 and "2 signals" in check["decision"]
+
+
+async def test_a_grant_of_history_holds_only_the_attributes_the_request_names(url):
+    app, space = make(url, tier="timeseries")
+    async with running(app) as client:
+        bundle, check = await history_grant(app, space, client, "approved", payload={"attributes": ["status"]})
+    history = bundle["files"]["signal-history.json"]
+    assert [(signal["entity_id"], signal["attribute"]) for signal in history] == [(MACHINE, "status")]
+    assert check["signals"] == 1 and check["decision"].endswith("1 signal.")
+
+
+async def test_a_grant_of_history_with_none_of_the_machines_own_says_0_signals(url):
+    app, space = make(url, tier="timeseries")
+    async with running(app) as client:
+        bundle, check = await history_grant(app, space, client, "approved", payload={"attributes": ["noSuchThing"]})
+    assert bundle["files"]["signal-history.json"] == []
+    assert check["signals"] == 0
+    assert "0 signals" in check["decision"] and "within the 24 hours queried" in check["decision"]
+    assert "and sent" not in check["decision"]
+
+
+def test_the_attributes_a_request_names():
+    def of(payload):
+        return requested_attributes({"payload": payload})
+
+    assert of({"attributes": ["status", " errorCode ", "", 3]}) == ["status", "errorCode"]
+    assert of({"attributes": "status"}) == ["status"]
+    assert of({"attributes": []}) is None
+    assert of({"text": "all of it"}) is None
+    assert of("not an object") is None
 
 
 def test_saying_plainly_that_a_file_holds_nothing():
