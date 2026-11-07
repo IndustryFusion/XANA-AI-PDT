@@ -265,6 +265,7 @@ def matrix(api):
             "shifts": {"type": "ListProperty", "valueList": ["early", "late"]},
             "label": {"type": "LanguageProperty", "languageMap": {"en": "Press", "de": "Presse"}},
             f"{IRI}state": {"type": "Property", "value": "ON"},
+            "serial": {"type": "Property", "value": "M20-A"},
         },
         {
             "id": ids["idle"],
@@ -272,6 +273,7 @@ def matrix(api):
             "status": {"type": "Property", "value": "idle"},
             "temp": {"type": "Property", "value": 99},
             f"{IRI}state": {"type": "Property", "value": "OFF"},
+            "serial": {"type": "Property", "value": "Z-true-1"},
         },
         {"id": ids["bare"], "type": kind},
     ]
@@ -294,6 +296,14 @@ def matrix(api):
         ('status~="^run"', {"run"}),
         ('status~="run.*"', {"run"}),
         ('status!~="^run"', {"idle"}),
+        ("serial~=20", {"run"}),
+        ("serial!~=20", {"idle"}),
+        ("serial~=true", {"idle"}),
+        ("serial!~=true", {"run"}),
+        ('serial~="M","Z"', {"run", "idle"}),
+        ('serial!~="M","Z"', set()),
+        ("serial~=M,nothing", {"run"}),
+        ("temp~=12.5", {"run"}),
         ("temp>50", {"idle"}),
         ("temp>=99", {"idle"}),
         ("temp<50", {"run"}),
@@ -327,6 +337,25 @@ def test_every_documented_operator_on_a_real_broker(api, matrix, expression, exp
 def test_malformed_expressions_are_client_errors_on_a_real_broker(api, matrix, bad):
     answer = api.get("/api/ngsi/entities", params={"type": matrix[0], "q": bad})
     assert answer.status_code == 422, answer.text
+
+
+@needs_broker
+@pytest.mark.parametrize("depth", [600, 3000])
+def test_deep_nesting_is_a_client_error_on_a_real_broker(api, depth):
+    deep: list = []
+    for _ in range(depth):
+        deep = [deep]
+    answer = api.post(
+        "/api/ngsi/import", json=[{"id": "urn:test:deep", "type": "T", "a": {"type": "Property", "value": deep}}]
+    )
+    assert answer.status_code == 422, answer.text[:200]
+
+
+@needs_broker
+def test_a_lone_surrogate_is_a_client_error_on_a_real_broker(api):
+    body = b'[{"id": "urn:test:lone", "type": "T", "a": {"type": "Property", "value": "\\ud800"}}]'
+    answer = api.post("/api/ngsi/import", content=body, headers={"Content-Type": "application/json"})
+    assert answer.status_code == 422, answer.text[:200]
 
 
 @needs_broker

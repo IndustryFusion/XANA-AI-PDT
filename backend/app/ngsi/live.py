@@ -434,9 +434,12 @@ class LiveUpdates:
 
     def deliver(self, payload: bytes) -> None:
         """Never waits. A watcher that has fallen behind is marked, and its stream closes."""
+        changes = parse_notification(payload)
+        if not changes:
+            return  # no notification, so it says nothing about delivery
         self._last_received = self._clock()
         self._expected_by = None
-        for change in parse_notification(payload):
+        for change in changes:
             for watcher in list(self._watchers):
                 if watcher.overflowed or not watcher.wants(change["entity_id"], change["entity_type"]):
                     continue

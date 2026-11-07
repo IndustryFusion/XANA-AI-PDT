@@ -26,7 +26,7 @@ from starlette.websockets import WebSocketDisconnect
 
 from app.api import auth, errors, ngsi
 from app.auth import KeycloakSession
-from app.main import configure_logging
+from app.main import configure_logging, create_app
 from app.ngsi import live as live_module
 from app.ngsi.broker import ContextBroker
 from app.ngsi.live import QUEUE_SIZE, RENEW_BEFORE_S, SUBSCRIPTION_NAME, LiveUpdates, Refusal, parse_notification
@@ -456,6 +456,68 @@ async def test_a_change_that_arrives_in_time_is_no_failure(world):
     world.clock.now += 100
     await asyncio.sleep(0.05)
     assert world.live.health()["status"] == "ok"
+
+
+@pytest.mark.parametrize(
+    ("body", "armed"),
+    [
+        ({"success": [], "errors": [{"entityId": "x", "error": {}}]}, False),
+        ({"success": ["urn:a"], "errors": [{"entityId": "x", "error": {}}]}, True),
+        ({"updated": [], "notUpdated": [{"attributeName": "a"}]}, False),
+        ({"updated": ["a"], "notUpdated": [{"attributeName": "b"}]}, True),
+        ([], False),
+    ],
+)
+async def test_a_partial_answer_expects_a_delivery_only_if_something_changed(body, armed):
+    made = World()
+    seen = []
+    client = ContextBroker(
+        made.settings, lambda: None, transport=httpx.MockTransport(lambda r: httpx.Response(207, json=body))
+    )
+    client.on_write = lambda: seen.append(1)
+    await client.send("POST", "/entityOperations/upsert", body=[])
+    assert bool(seen) is armed
+
+
+async def test_a_partial_answer_that_is_not_json_expects_nothing():
+    made = World()
+    seen = []
+    client = ContextBroker(
+        made.settings, lambda: None, transport=httpx.MockTransport(lambda r: httpx.Response(207, text="<html>"))
+    )
+    client.on_write = lambda: seen.append(1)
+    await client.send("POST", "/entityOperations/upsert", body=[])
+    assert seen == []
+
+
+def test_a_write_through_the_application_expects_a_delivery():
+    """The wiring in `create_app`: without it, a failed delivery could never be noticed."""
+    app = create_app(make_settings(llm_provider="scripted"))
+    app.state.broker._transport = httpx.MockTransport(
+        lambda r: httpx.Response(
+            207 if r.url.path.endswith("upsert") else 200, json={"success": ["urn:a"], "errors": []}
+        )
+    )
+    live = app.state.live
+    live._exists = live._connected = True
+    assert live._expected_by is None
+    client = TestClient(app)  # no startup: nothing else moves the state
+    answer = client.post("/api/ngsi/import", json=[{"id": "urn:a", "type": "T"}])
+    assert answer.status_code < 500, answer.text
+    assert live._expected_by is not None
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [b"not json", b"{}", b'{"body": {}}', b'{"body": {"data": []}}', b'{"body": {"data": [{"no": "id"}]}}', b"[1]"],
+)
+def test_only_a_valid_notification_counts_as_delivery(payload):
+    live = World().live
+    live._expected_by = 123.0
+    live.deliver(payload)
+    assert live._expected_by == 123.0 and live.health()["delivery"] != "confirmed"
+    live.deliver(b'{"body": {"data": [{"id": "urn:a", "type": "T"}]}}')
+    assert live._expected_by is None and live._last_received is not None
 
 
 def test_only_writes_that_the_broker_notifies_expect_a_delivery():
