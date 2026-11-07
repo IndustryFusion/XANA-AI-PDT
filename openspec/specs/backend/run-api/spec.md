@@ -137,3 +137,91 @@ Before starting a new analysis round for an operator's request, the backend SHAL
 #### Scenario: Model not needed
 - **WHEN** a client confirms a resolution while the model is unavailable
 - **THEN** the confirmation proceeds, because it does not call the model
+
+### Requirement: Escalation statuses
+A run SHALL be able to be `awaiting_machine_builder`, `awaiting_operator_approval`, `awaiting_recommendation_review` and `mb_closed`, with the operations each allows.
+
+#### Scenario: Waiting for the builder
+- **WHEN** a run is `awaiting_machine_builder`
+- **THEN** stopping is possible, and clarifying, confirming, archiving and escalating are refused as `conflict`
+
+#### Scenario: Restart while waiting
+- **WHEN** the backend restarts while a run is `awaiting_machine_builder`
+- **THEN** the run has the same status, reference, recipient, data sent and delivery state, nothing is sent again, and no round starts
+
+#### Scenario: Run shape
+- **WHEN** an escalated run is read or streamed
+- **THEN** it has `escalation_ref`, `escalation` with `ref`, `recipient`, `tier`, `data` and `sent_at`, and `outbox`, and data `escalation_ref` and `builder`
+
+#### Scenario: Unknown run
+- **WHEN** a route is called for an unknown run
+- **THEN** it is refused as `not_found`
+
+### Requirement: Stop and reopen with a conversation
+Stopping and reopening SHALL act on the conversation.
+
+#### Scenario: Stop
+- **WHEN** a run with an open conversation is stopped
+- **THEN** `close(withdrawn)` is sent, and the run is reopenable
+
+#### Scenario: Stop while only the machine builder can close
+- **WHEN** a close is refused and the conversation isn't closed
+- **THEN** the run stops, says so, and the close stays pending until it can go. Only a closed conversation counts as done
+
+#### Scenario: Archive with a close pending
+- **WHEN** a run with a close pending is archived, or the machine builder's side didn't receive the close
+- **THEN** archiving is refused as `conflict`, and the close is repeated
+
+#### Scenario: A close that keeps failing
+- **WHEN** a close keeps failing to reach the machine builder
+- **THEN** it is tried again after 60 seconds, then twice as long each time, up to an hour, and the conversation shows one close
+
+#### Scenario: Stop after a half-finished escalation
+- **WHEN** a run whose files went out and whose request failed is stopped
+- **THEN** `close(withdrawn)` is sent, and it can't be reopened
+
+#### Scenario: Stop with the gateway failing
+- **WHEN** the close can't be sent
+- **THEN** the run stops, says so, and the close is sent when it can be
+
+#### Scenario: Reopen a run
+- **WHEN** a stopped or `mb_closed` run with a conversation is reopened
+- **THEN** `reopen` is sent, and it waits for the machine builder
+
+#### Scenario: Not reopenable
+- **WHEN** the conversation was closed as `escalated` or `superseded`, or the run has none
+- **THEN** reopening is refused as `conflict`, and nothing is sent
+
+#### Scenario: A builder's reopen of a completed run
+- **WHEN** the machine builder reopens the conversation of a completed run
+- **THEN** the run waits for the machine builder
+
+#### Scenario: Reopen an incident with something waiting
+- **WHEN** an incident is reopened with a request or recommendation unanswered
+- **THEN** the new run waits for that, and what was sent earlier isn't shown as new
+
+#### Scenario: Reopen an incident
+- **WHEN** an archived incident with a conversation is reopened
+- **THEN** a new run continues its conversation, with its messages, waiting for the machine builder
+
+### Requirement: A run's source
+Every run SHALL say where it came from, as `source`: `operator`, `ngsi` or `alert`, in the list, the run and the stream, and behave alike in every other way.
+
+#### Scenario: Started by an operator
+- **WHEN** a run is started through `POST /api/agent/run`, or by reopening an incident
+- **THEN** its `source` is `operator`
+
+#### Scenario: Triggered
+- **WHEN** a run starts from an event
+- **THEN** its `source` names the kind of event, and it has a machine ID, a snapshot and the same operations as any other
+
+#### Scenario: An existing run
+- **WHEN** a run stored before this change is read
+- **THEN** its `source` is `operator`
+
+### Requirement: Finished runs stay until archived
+A finished run SHALL stay in the list of runs until an operator archives it. There is no automatic archive.
+
+#### Scenario: Time passes
+- **WHEN** a run has finished, however long ago, and also after a restart
+- **THEN** it is listed, with its status, until an operator archives it

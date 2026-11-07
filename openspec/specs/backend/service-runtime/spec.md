@@ -204,3 +204,71 @@ The health report SHALL include an `ifric` check, for which `401` and `403` are 
 #### Scenario: Not configured
 - **WHEN** `IFRIC_URL` is not set
 - **THEN** the check is `ok`, saying so, and doesn't count towards the overall state
+
+### Requirement: Machine events in the health report
+The health report SHALL have a `machine_events` check, with the subscription's state in its detail.
+
+#### Scenario: States
+- **WHEN** the state is `active`, `waiting_for_identity`, `delivery_failing`, `no_delivery_in_tenant` or `failed`
+- **THEN** the check is `ok`, `degraded`, `degraded`, `degraded` or `error`
+
+#### Scenario: A service identity that fails
+- **WHEN** the check is waiting for an identity, and the service identity failed
+- **THEN** the detail says why, naming no secret
+
+#### Scenario: Not configured
+- **WHEN** the state is `not_configured`
+- **THEN** the check is `ok`, says so, and doesn't count towards the overall result
+
+### Requirement: The new secrets stay secret
+`EVENT_WEBHOOK_SECRET`, `KEYCLOAK_SERVICE_CLIENT_SECRET` and the service identity's token SHALL be in no response, log or error message.
+
+#### Scenario: Refused by the broker
+- **WHEN** the broker's answer quotes the subscription
+- **THEN** neither the log nor the health report holds the secret
+
+#### Scenario: Settings incomplete
+- **WHEN** `CALLBACK_BASE_URL` is set without `EVENT_WEBHOOK_SECRET`, or only one of the service client's two settings is set
+- **THEN** the backend stops, with a message naming the variable, never a value
+
+### Requirement: Every connection in the health report
+The health report SHALL hold checks for `memory`, `timeseries`, `broker`, `llm`, `alerta`, `mqtt`, `pgrest`, `gateway`, `dataspace_connector`, `ifric`, `fuseki` and `machine_events`, each with its probe address, with any password masked, and a hint of what to look at.
+
+#### Scenario: One service stops
+- **WHEN** any one service stops
+- **THEN** only its own check is `error`, the report still answers, and the rest of the app keeps working
+
+#### Scenario: What depends on a stopped service
+- **WHEN** the context broker stops
+- **THEN** the `broker` check is `error`, and `machine_events`, which follows from it, is `degraded`
+
+#### Scenario: Refused
+- **WHEN** a service answers 401 or 403
+- **THEN** its check is `error`, and says it was refused
+
+#### Scenario: An empty ontology
+- **WHEN** Fuseki answers, and the dataset holds nothing
+- **THEN** the check is `degraded`, and says so
+
+#### Scenario: MQTT with nobody signed in
+- **WHEN** sign-in is on, and nobody is signed in
+- **THEN** the MQTT check is `degraded` if the broker can be reached, as credentials can't be checked
+
+#### Scenario: Refused MQTT credentials
+- **WHEN** the MQTT broker refuses the credentials
+- **THEN** the check is `error`
+
+#### Scenario: No secret
+- **WHEN** an address holds a password, in its query too under a name with password, token, key or secret, or a service needs a key
+- **THEN** neither is in the report
+
+### Requirement: Service settings
+`GET /api/config` SHALL give the service addresses in use, read-only, and no route SHALL take the address of a service the backend calls.
+
+#### Scenario: Read
+- **WHEN** a client asks for the settings
+- **THEN** each has a key, a label and the address in use, with any password masked, and is marked as not editable
+
+#### Scenario: A change
+- **WHEN** a client sends anything to `/api/config` with another method
+- **THEN** it is refused, and nothing changes

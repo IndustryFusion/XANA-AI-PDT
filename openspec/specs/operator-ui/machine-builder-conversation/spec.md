@@ -61,11 +61,11 @@ The operator SHALL be able to ask the incident agent free-text questions about t
 - **THEN** the question and the agent's answer appear in the thread, and nothing is sent to the machine builder
 
 ### Requirement: Policy-gated data requests
-When the machine builder requests data, the conversation SHALL show whether the request is within the configured data-sharing tier; requests beyond the tier SHALL wait for the operator's approval.
+When the machine builder requests data, the conversation SHALL show whether the request is within the configured data-sharing tier, and every request SHALL wait for the operator's decision.
 
 #### Scenario: Request within the tier
 - **WHEN** the machine builder requests data within the tier
-- **THEN** the data is sent automatically and a policy-check entry shows what was sent
+- **THEN** the run moves to `awaiting_operator_approval`, the request shows as within the tier, and nothing is sent until the operator approves
 
 #### Scenario: Request beyond the tier
 - **WHEN** the machine builder requests data beyond the tier

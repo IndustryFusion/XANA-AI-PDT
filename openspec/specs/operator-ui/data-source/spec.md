@@ -207,3 +207,55 @@ The backend data source SHALL serve `dataspace.resolveNames`, `dataspace.resolve
 #### Scenario: Factory without an owner
 - **WHEN** the factory has no owner or location
 - **THEN** the user pane and Dataspace screen leave them out
+
+### Requirement: Escalation from the backend
+The backend data source SHALL serve `escalationPreflight`, `escalate` and `getOutboxStatus` from the backend, in the documented shapes.
+
+#### Scenario: Escalate on real data
+- **WHEN** an operator escalates a run on the backend data source
+- **THEN** the dialog shows the real recipient and data, and after confirming the waiting panel shows the reference and delivery state
+
+#### Scenario: Slow send
+- **WHEN** a send takes longer than other requests may
+- **THEN** the source goes on waiting for it
+
+#### Scenario: A failed send
+- **WHEN** escalating fails
+- **THEN** the dialog says why, and the run's panel goes on working
+
+### Requirement: The conversation from the backend
+The backend data source SHALL serve `sendConversationAct`, `askAgent`, `refreshConversationStatus`, `recordMachineBuilderClose`, `approveDataRequest` and `replyToRecommendation` from the backend, and nothing of runs from the mock.
+
+#### Scenario: Slow answers
+- **WHEN** the agent or a send takes longer than other requests may
+- **THEN** the source goes on waiting for it
+
+#### Scenario: A free-text request
+- **WHEN** a message is a free-text request
+- **THEN** grant and deny aren't offered for it
+
+### Requirement: Source in the interface
+`RunSummary` and `IncidentSummary` SHALL have `source`, on the mock and backend sources alike.
+
+#### Scenario: Shapes
+- **WHEN** the shape tests run on recorded backend answers and on the mock
+- **THEN** `source` is one of `operator`, `ngsi` and `alert`
+
+### Requirement: No mock data on a backend build
+The backend source SHALL serve every operation of the interface itself, and SHALL NOT use the mock source.
+
+#### Scenario: Every operation
+- **WHEN** the interface's operations are compared with what the backend source serves, without the optional knowledge base
+- **THEN** all are served
+
+#### Scenario: No way to the mock
+- **WHEN** a test reads the backend source's files
+- **THEN** none imports the mock source, and its operations differ from the mock's
+
+#### Scenario: The optional knowledge base
+- **WHEN** a backend build has the knowledge base turned on
+- **THEN** its operations reject as `unavailable`, and show no sample documents
+
+#### Scenario: Development controls
+- **WHEN** a backend build runs in development
+- **THEN** there are no mock data controls
