@@ -33,3 +33,9 @@
 
 - [x] 6.1 Run backend and frontend tests, lint and `openspec validate --all --strict`; verify locally and in CI
 - [x] 6.2 Check each scenario in the delta specs and report per scenario in the Pull Request
+
+## 7. Review follow-ups
+
+- [ ] 7.1 Show that a search stopped early, on both sources; verify the API and the screen
+- [ ] 7.2 Answer a page past the end, and refuse what can't be an ID; verify on a real Alerta
+- [ ] 7.3 Make the browser test of the note prove that it reached the history; verify in a browser

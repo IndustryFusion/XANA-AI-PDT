@@ -17,12 +17,20 @@ The backend SHALL offer alerts, their counts, one alert, actions, environments a
 - **WHEN** a search text holds a colon, quotes or regular expression characters
 - **THEN** alerts containing that text in their ID, resource, event, text, value or service are returned, and the request does not fail
 
+#### Scenario: Search that stopped early
+- **WHEN** a search text is given, and more alerts match the other filters than the backend reads
+- **THEN** the answer says so and how many it read, the total and the counts cover only those, and the Alerts screen says this
+
+#### Scenario: Page past the end
+- **WHEN** a page after the last is asked for
+- **THEN** the answer is successful, with no alerts and the total
+
 #### Scenario: Detail
 - **WHEN** one alert is requested
 - **THEN** it is returned with its history, oldest first
 
 #### Scenario: Unknown alert
-- **WHEN** the alert does not exist
+- **WHEN** the alert does not exist, or what is named can't be an alert's ID
 - **THEN** the request is refused as `not_found`
 
 ### Requirement: Alert actions by operators

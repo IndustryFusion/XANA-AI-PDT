@@ -24,7 +24,7 @@ The backend answers in the interface's terms: one page with `total` and `bySever
 
 ### 2. Free text is filtered in the backend
 
-With a search text, the backend reads up to 1000 alerts matching the other filters, keeps those containing the text in ID, resource, event, text, value or service, ignoring case, and pages the result. It says so when the cap was reached. **Alternative:** build regular expressions in `q`: this keeps the query language, its failure modes and a column name taken from input.
+With a search text, the backend reads up to 1000 alerts matching the other filters, keeps those containing the text in ID, resource, event, text, value or service, ignoring case, and pages the result. When the cap was reached, `searchLimited` and `searched` say so, and the Alerts screen says that the numbers count only those. It reads in the chosen order, so what it misses is the least severe or the oldest. **Alternative:** build regular expressions in `q`: this keeps the query language, its failure modes and a column name taken from input.
 
 ### 3. A wrong `ALERTA_URL` stops the backend
 
