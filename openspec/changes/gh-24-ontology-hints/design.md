@@ -13,7 +13,7 @@ From the platform's chart, Makefile, tests and API notes, and a real Fuseki.
 | Shape form | `sh:targetClass`, `sh:property` with `sh:path <attribute>`, and an inner `sh:property` with `sh:path ngsi-ld:hasValue` or `hasObject`, holding `sh:in`, `sh:minInclusive`, `sh:maxExclusive`, `sh:datatype` or `sh:class`. | The query follows this form. |
 | Classes | `knowledge.ttl` holds `rdfs:subClassOf` and individuals, such as `ontology:executingState a ontology:MachineState`. | Shapes on a parent class apply, and `sh:class` lists its individuals as allowed values. |
 | Updates | `/sparql` refuses update requests (415). | The read function also refuses them, with a clear message. |
-| `SERVICE` | **Fuseki attempts a `SERVICE` call to any URL in a query**, which would let a query reach internal addresses. | The read function refuses `SERVICE`. |
+| `SERVICE` | **Fuseki attempts a `SERVICE` call to any URL in a query**, which would let a query reach internal addresses. | The read function refuses `SERVICE`: see "Why the raw text is checked". |
 
 ## Decisions
 
@@ -45,3 +45,13 @@ From `FUSEKI_GRAPH_BASE`, checked at startup to be an IRI that is safe to place 
 
 - **Fuseki version.** The platform builds its own image on Fuseki 6.1.0, which isn't published where it could be pulled. The local environment uses the public `stain/jena-fuseki:5.1.0` image, which asks for its admin password to write, so the sample loader takes it from `FUSEKI_ADMIN_PASSWORD`. Tests pass on both.
 - **Hints are advice.** The explorer doesn't refuse a value outside them. The platform's rules report those as alerts.
+
+## Why the raw text is checked
+
+A check of the parsed query alone isn't enough, as the parser here and Fuseki's disagree. `SELECT * WHERE { # x\rSERVICE <...> ...` is a comment to rdflib and a call to Jena, and rdflib expands `\u0022` before parsing, so what it reads as a string Jena reads as a call. Both made a real Fuseki call out. A check with one parser can't close a difference between two parsers.
+
+So a check of the raw text comes first: the word `service` anywhere, in any case, and any `\u`, `\U` or `&#`, are refused. The parse stays after it, for updates and what can't be parsed. **A query that merely holds the word is refused too**, such as `ex:service` or a text saying "service". The message says so, and how to go on. That is accepted: a false refusal costs a rewrite, and a false pass reaches an internal address.
+
+Alternatives: sending every query through a parser of Fuseki's own kind, which isn't in this stack; blocking Fuseki's way out at the network, which is the deployment's to do and worth doing as well.
+
+`MAX_QUERY` is 4000 characters. Parsing costs up to about half a millisecond a character for the worst query measured (40 seconds at 99 KB), and running it in a thread stops the event loop from waiting, not the time being spent. So the limit bounds the time, to about 2 seconds, and queries are parsed one at a time.

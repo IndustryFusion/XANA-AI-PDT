@@ -15,6 +15,7 @@
 #
 """Hints and read functions against a real Fuseki (TEST_FUSEKI_URL), loaded under their own graph base."""
 
+import asyncio
 import os
 import uuid
 
@@ -148,6 +149,64 @@ async def test_a_plain_query_reads_and_refused_ones_change_nothing(source, base)
     assert await source.query(count) == before
     assert (await source.query(f"SELECT * WHERE {{ SERVICE <{URL}/iff/sparql> {{ ?s ?p ?o }} }}"))["ok"] is False
     assert (await source.query("SELECT nonsense {{{"))["ok"] is False
+
+
+CALLBACK = os.environ.get("TEST_FUSEKI_CALLBACK_HOST")
+needs_callback = pytest.mark.skipif(not CALLBACK, reason="TEST_FUSEKI_CALLBACK_HOST not set")
+
+
+class Listener:
+    """Counts what reaches it: a real Fuseki calling out, if the text gets through."""
+
+    def __init__(self) -> None:
+        self.paths: list[str] = []
+        self.server: asyncio.AbstractServer | None = None
+
+    async def handle(self, reader, writer) -> None:
+        line = await reader.readline()
+        self.paths.append(line.decode(errors="replace"))
+        writer.write(b"HTTP/1.1 500 No\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+        await writer.drain()
+        writer.close()
+
+    async def __aenter__(self):
+        self.server = await asyncio.start_server(self.handle, "0.0.0.0", 0)  # noqa: S104 - reached from the container
+        self.port = self.server.sockets[0].getsockname()[1]
+        return self
+
+    async def __aexit__(self, *exc) -> None:
+        self.server.close()
+
+
+def proofs(address: str) -> dict[str, str]:
+    """Queries this parser once took for harmless, and Fuseki reads as a call to `address`."""
+    return {
+        "carriage return ends a comment": f"SELECT * WHERE {{ # x\rSERVICE <{address}/cr> {{ ?a ?b ?c }}\n}}",
+        "escaped quote": (
+            f'SELECT * WHERE {{ VALUES ?v {{ "x\\u0022 " }} SERVICE <{address}/uq> {{ ?a ?b ?c }} # " }}\n}}'
+        ),
+        "lower case": f"select * where {{ # x\rservice <{address}/lc> {{ ?a ?b ?c }}\n}}",
+        "mixed case": f"SELECT * WHERE {{ # x\rSeRvIcE <{address}/mc> {{ ?a ?b ?c }}\n}}",
+    }
+
+
+@needs_callback
+async def test_a_real_store_calls_out_for_these_queries_and_the_query_function_never_lets_it(source):
+    async with Listener() as listener:
+        address = f"http://{CALLBACK}:{listener.port}"
+        for name, query in proofs(address).items():
+            answer = await source.query(query)
+            assert answer["ok"] is False and "not allowed" in answer["error"], name
+        await asyncio.sleep(1)
+        assert listener.paths == []
+        # The same text sent past the check: a real store does call out, so this test could fail.
+        await source._send(proofs(address)["carriage return ends a comment"])
+        await source._send(proofs(address)["escaped quote"])
+        for _ in range(50):
+            if len(listener.paths) >= 2:
+                break
+            await asyncio.sleep(0.1)
+        assert "/cr" in listener.paths[0] and "/uq" in listener.paths[1]
 
 
 def _client(source_):
