@@ -17,6 +17,10 @@ Stopping and reopening SHALL act on the conversation.
 - **WHEN** a run with a close pending is archived, or the machine builder's side didn't receive the close
 - **THEN** archiving is refused as `conflict`, and the close is repeated
 
+#### Scenario: A close that keeps failing
+- **WHEN** a close keeps failing to reach the machine builder
+- **THEN** it is tried again after 60 seconds, then twice as long each time, up to an hour, and the conversation shows one close
+
 #### Scenario: Stop after a half-finished escalation
 - **WHEN** a run whose files went out and whose request failed is stopped
 - **THEN** `close(withdrawn)` is sent, and it can't be reopened

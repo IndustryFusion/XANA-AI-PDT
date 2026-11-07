@@ -103,6 +103,22 @@ Nothing SHALL be sent to a peer except by an operator's request.
 - **WHEN** a decision or an answer names a request or recommendation that is no longer the one waiting
 - **THEN** it is refused as `conflict`, and nothing is sent
 
+#### Scenario: A grant of history
+- **WHEN** a grant of `twin:history` goes out
+- **THEN** its file holds the machine's own signals, and related entities' only if `twin:adjacents` is allowed for this builder, by tier and access, and the policy check gives the number of signals, saying `0 signals` when there are none
+
+#### Scenario: Declined after the grant went out
+- **WHEN** the grant went out and its data failed, and the operator declines
+- **THEN** it is refused as `conflict`, and approving again sends the data
+
+#### Scenario: A half-finished escalation reopened by the builder
+- **WHEN** a run whose escalation never finished receives a request or recommendation, and the operator approves or answers
+- **THEN** it is refused as `conflict`, and nothing is sent
+
+#### Scenario: A message that can't be handled
+- **WHEN** handling one received message fails in any way
+- **THEN** it stays unacknowledged, and the following messages are handled
+
 #### Scenario: Declined after a failed grant
 - **WHEN** a grant's message failed after this backend had approved the access, and the operator declines
 - **THEN** that approval is reset. Access approved before it stays
