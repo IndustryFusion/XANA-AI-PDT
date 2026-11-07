@@ -1,9 +1,9 @@
 {
   "method": "GET",
-  "path": "/api/alerta/alert/d979e2a8-d6c6-4ce1-99ce-689ea631fbda",
+  "path": "/api/alerta/alert/577d8ca5-d657-4349-be55-d5a8308d3957",
   "status": 200,
   "body": {
-    "id": "d979e2a8-d6c6-4ce1-99ce-689ea631fbda",
+    "id": "577d8ca5-d657-4349-be55-d5a8308d3957",
     "resource": "urn:ngsi-ld:Machine:laser-cutter-02",
     "event": "ClassConstraintComponent(partOf)",
     "text": "Model validation for relationship partOf failed for urn:ngsi-ld:Machine:laser-cutter-02.",
@@ -15,15 +15,15 @@
     ],
     "group": "Misc",
     "value": null,
-    "origin": "uwsgi/39d198aaaf8b",
+    "origin": "uwsgi/2ced0feeb5de",
     "type": "exceptionAlert",
-    "createTime": "2026-11-06T22:27:29.725Z",
-    "lastReceiveTime": "2026-11-06T22:27:29.742Z",
+    "createTime": "2026-11-07T00:55:44.979Z",
+    "lastReceiveTime": "2026-11-07T00:55:44.999Z",
     "duplicateCount": 0,
     "attributes": {},
     "history": [
       {
-        "at": "2026-11-06T22:27:29.725Z",
+        "at": "2026-11-07T00:55:44.979Z",
         "type": "new",
         "status": "open",
         "severity": "critical",

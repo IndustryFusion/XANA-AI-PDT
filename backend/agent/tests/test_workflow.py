@@ -620,9 +620,11 @@ async def test_alerts_reach_the_hypothesize_prompt():
 
 async def test_duplicates_are_listed_once():
     shared = _alert("same")
-    entities = sample_entities()
-    other = next(e["id"] for e in entities if e["id"] != MACHINE_ID)
-    output, _ = await _observed(FakeAlerts({MACHINE_ID: [shared], other: [shared]}))
+    by_node, _steps, _outcome = await run(workflow(alerts=None))
+    other = next(e for e in by_node["observe"].output["entities"] if e != MACHINE_ID)
+    alerts = FakeAlerts({MACHINE_ID: [shared], other: [shared]})
+    output, _ = await _observed(alerts)
+    assert other in alerts.asked
     assert [a["id"] for a in output["alerts"]] == ["same"]
 
 

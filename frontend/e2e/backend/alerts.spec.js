@@ -46,15 +46,20 @@ async function openAlert(page) {
   return id
 }
 
-test('acknowledge with a note, and see it in the history', async ({ page }) => {
+test('acknowledge with a note, and the note reaches the alert and its history', async ({ page }) => {
   const id = await openAlert(page)
   const note = `seen ${tag()}`
   await page.goto(`/alerts/${id}`)
-  await page.getByRole('button', { name: /^Acknowledge/ }).first().click()
-  await page.getByRole('dialog').getByRole('textbox').fill(note)
-  await page.getByRole('dialog').getByRole('button', { name: /Acknowledge/ }).click()
-  await expect(page.getByText(note).first()).toBeVisible()
-  expect((await (await page.request.get(`/api/alerta/alert/${id}`)).json()).status).toBe('ack')
+  const detail = page.getByRole('article', { name: `Alert ${id}` })
+  await detail.getByRole('button', { name: /^Acknowledge/ }).click()
+  const dialog = page.getByRole('dialog')
+  await dialog.getByRole('textbox').fill(note)
+  await dialog.getByRole('button', { name: 'Acknowledge', exact: true }).click()
+  await expect(dialog).toHaveCount(0)
+  await expect(detail).toContainText(note)
+  const stored = await (await page.request.get(`/api/alerta/alert/${id}`)).json()
+  expect(stored.status).toBe('ack')
+  expect(stored.history.filter((h) => h.text === note).map((h) => h.status)).toEqual(['ack'])
   await page.request.put(`/api/alerta/alert/${id}/action`, { data: { action: 'unack' } })
 })
 

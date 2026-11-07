@@ -4,8 +4,9 @@
   "status": 200,
   "body": {
     "status": "unavailable",
-    "state": "stopped",
-    "detail": "Live updates are stopped.",
-    "expires_at": null
+    "state": "waiting_for_sign_in",
+    "detail": "Live updates start after sign-in.",
+    "expires_at": null,
+    "delivery": "none"
   }
 }

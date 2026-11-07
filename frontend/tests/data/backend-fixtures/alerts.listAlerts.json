@@ -5,7 +5,7 @@
   "body": {
     "alerts": [
       {
-        "id": "d979e2a8-d6c6-4ce1-99ce-689ea631fbda",
+        "id": "577d8ca5-d657-4349-be55-d5a8308d3957",
         "resource": "urn:ngsi-ld:Machine:laser-cutter-02",
         "event": "ClassConstraintComponent(partOf)",
         "text": "Model validation for relationship partOf failed for urn:ngsi-ld:Machine:laser-cutter-02.",
@@ -17,35 +17,15 @@
         ],
         "group": "Misc",
         "value": null,
-        "origin": "uwsgi/39d198aaaf8b",
+        "origin": "uwsgi/2ced0feeb5de",
         "type": "exceptionAlert",
-        "createTime": "2026-11-06T22:27:29.725Z",
-        "lastReceiveTime": "2026-11-06T22:27:29.742Z",
+        "createTime": "2026-11-07T00:55:44.979Z",
+        "lastReceiveTime": "2026-11-07T00:55:44.999Z",
         "duplicateCount": 0,
         "attributes": {}
       },
       {
-        "id": "e9485b63-07a7-4f98-af15-fc9403aa30dc",
-        "resource": "urn:b",
-        "event": "e2",
-        "text": "t",
-        "severity": "critical",
-        "status": "open",
-        "environment": "Development",
-        "service": [
-          "S"
-        ],
-        "group": "Misc",
-        "value": null,
-        "origin": "uwsgi/39d198aaaf8b",
-        "type": "exceptionAlert",
-        "createTime": "2026-11-06T22:23:06.737Z",
-        "lastReceiveTime": "2026-11-06T22:23:06.755Z",
-        "duplicateCount": 0,
-        "attributes": {}
-      },
-      {
-        "id": "c51624e4-5c94-4a57-b57c-ee4828a63d09",
+        "id": "50086029-28a5-41d9-8cac-725fc2feedf9",
         "resource": "urn:ngsi-ld:Machine:press-brake-01",
         "event": "MinCountConstraintComponent(status)",
         "text": "Model validation for property status failed for urn:ngsi-ld:Machine:press-brake-01.",
@@ -57,15 +37,15 @@
         ],
         "group": "Misc",
         "value": null,
-        "origin": "uwsgi/39d198aaaf8b",
+        "origin": "uwsgi/2ced0feeb5de",
         "type": "exceptionAlert",
-        "createTime": "2026-11-06T22:27:29.773Z",
-        "lastReceiveTime": "2026-11-06T22:27:29.790Z",
+        "createTime": "2026-11-07T00:55:45.060Z",
+        "lastReceiveTime": "2026-11-07T00:55:45.080Z",
         "duplicateCount": 0,
         "attributes": {}
       },
       {
-        "id": "6a29ec4d-da28-46d0-8816-2511283b376e",
+        "id": "3d01ffbb-2be3-45c9-a325-342129876500",
         "resource": "urn:ngsi-ld:Machine:laser-cutter-01",
         "event": "Property value out of range",
         "text": "Model validation for attribute temperature failed for urn:ngsi-ld:Machine:laser-cutter-01.",
@@ -77,39 +57,19 @@
         ],
         "group": "Misc",
         "value": null,
-        "origin": "uwsgi/39d198aaaf8b",
+        "origin": "uwsgi/2ced0feeb5de",
         "type": "exceptionAlert",
-        "createTime": "2026-11-06T22:27:29.666Z",
-        "lastReceiveTime": "2026-11-06T22:27:29.685Z",
-        "duplicateCount": 0,
-        "attributes": {}
-      },
-      {
-        "id": "d3a08ed9-f852-49b6-a889-0742211d6f45",
-        "resource": "urn:c",
-        "event": "e3",
-        "text": "t",
-        "severity": "warning",
-        "status": "open",
-        "environment": "Production",
-        "service": [
-          "O"
-        ],
-        "group": "Misc",
-        "value": null,
-        "origin": "uwsgi/39d198aaaf8b",
-        "type": "exceptionAlert",
-        "createTime": "2026-11-06T22:23:07.836Z",
-        "lastReceiveTime": "2026-11-06T22:23:07.855Z",
+        "createTime": "2026-11-07T00:55:44.893Z",
+        "lastReceiveTime": "2026-11-07T00:55:44.913Z",
         "duplicateCount": 0,
         "attributes": {}
       }
     ],
-    "total": 5,
+    "total": 3,
     "bySeverity": {
-      "critical": 2,
+      "critical": 1,
       "major": 1,
-      "warning": 2
+      "warning": 1
     },
     "page": 1,
     "pageSize": 50

@@ -100,10 +100,13 @@ export function createAlertsArea(store) {
       const statuses = list(status) ?? ACTIVE_ALERT_STATUSES
       const severities = list(severity)
       const q = String(text ?? '').trim().toLowerCase()
-      const base = store.get().alerts
+      const cap = q ? currentControls().searchCap : null
+      const candidates = store.get().alerts
         .filter((a) => statuses.includes(a.status))
         .filter((a) => !environment || a.environment === environment)
         .filter((a) => !service || a.service.includes(service))
+      const capped = cap != null && candidates.length > cap
+      const base = (capped ? candidates.slice(0, cap) : candidates)
         .filter((a) => !q || [a.id, a.resource, a.event, a.text, a.value, ...a.service].some((v) => v && String(v).toLowerCase().includes(q)))
       const bySeverity = {}
       for (const a of base) bySeverity[a.severity] = (bySeverity[a.severity] ?? 0) + 1
@@ -112,7 +115,7 @@ export function createAlertsArea(store) {
         .sort((a, b) => (sort === 'time' ? 0 : rank(a.severity) - rank(b.severity)) || b.createTime.localeCompare(a.createTime))
       const size = Math.max(1, Number(pageSize) || PAGE_SIZE)
       const start = (Math.max(1, Number(page) || 1) - 1) * size
-      return { alerts: structuredClone(filtered.slice(start, start + size).map(summary)), total: filtered.length, bySeverity, page: Number(page) || 1, pageSize: size }
+      return { alerts: structuredClone(filtered.slice(start, start + size).map(summary)), total: filtered.length, bySeverity, page: Number(page) || 1, pageSize: size, ...(q ? { searchLimited: capped, searched: capped ? cap : candidates.length } : {}) }
     }),
 
     countAlerts: withControls(({ status = ACTIVE_ALERT_STATUSES } = {}) => {

@@ -220,6 +220,12 @@ export default function Alerts() {
         {result.data && <p className="muted">{result.data.total} {result.data.total === 1 ? 'alert matches' : 'alerts match'} the filter</p>}
       </div>
 
+      {result.data?.searchLimited && (
+        <p className="muted" role="status">
+          Only the first {result.data.searched} alerts of this filter were searched, so there may be more matches, and the numbers here count only those. Narrow the status, environment or service.
+        </p>
+      )}
+
       <SeveritySummary counts={counts} selected={filters.severity} onSelect={(severity) => changeFilters({ ...filters, severity })} />
       <Filters filters={filters} onChange={changeFilters} refreshMs={refreshMs} options={refreshOptions(configuredRefresh)} onRefreshMs={changeRefresh} onRefresh={refresh} />
 

@@ -4,73 +4,53 @@
   "status": 200,
   "body": [
     {
-      "run_id": "183c23b7-fcd5-488c-8bf7-b21330dc0cb1",
-      "incident_id": 25,
+      "run_id": "0badaa29-2f46-4fb7-9b51-4b383d38e967",
+      "incident_id": 9,
       "machine_id": "urn:ngsi-ld:Machine:laser-cutter-01",
       "issue": "Cut edges show burrs since this morning",
       "status": "awaiting_input",
-      "started_at": "2026-11-06T22:27:34.605299+00:00",
-      "updated_at": "2026-11-06T22:27:35.340158+00:00",
+      "started_at": "2026-11-07T00:56:26.456262+00:00",
+      "updated_at": "2026-11-07T00:56:27.177878+00:00",
       "escalation_ref": null
     },
     {
-      "run_id": "41c85c0c-5f01-439c-9d90-e9a3e7fa673b",
-      "incident_id": 23,
+      "run_id": "669a0853-0377-417d-be49-78cf219e33da",
+      "incident_id": 7,
       "machine_id": "urn:ngsi-ld:Machine:laser-cutter-01",
-      "issue": "Gas pressure warning (mw5jg0g1)",
+      "issue": "Gas pressure warning (mw5oow47)",
       "status": "awaiting_input",
-      "started_at": "2026-11-06T22:20:36.462010+00:00",
-      "updated_at": "2026-11-06T22:20:36.884351+00:00",
+      "started_at": "2026-11-07T00:47:28.630017+00:00",
+      "updated_at": "2026-11-07T00:47:29.152656+00:00",
       "escalation_ref": null
     },
     {
-      "run_id": "af4fae3b-2d3d-41d7-829b-9b27d9828615",
-      "incident_id": 22,
-      "machine_id": "urn:ngsi-ld:Machine:laser-cutter-01",
-      "issue": "Cut quality dropped (mw5jfwny)",
-      "status": "awaiting_confirmation",
-      "started_at": "2026-11-06T22:20:32.139075+00:00",
-      "updated_at": "2026-11-06T22:20:34.859528+00:00",
-      "escalation_ref": null
-    },
-    {
-      "run_id": "6908d1fe-3ba7-4a71-9c3c-edf8166fbd13",
-      "incident_id": 13,
-      "machine_id": "urn:ngsi-ld:Machine:laser-cutter-01",
-      "issue": "Gas pressure warning (mw5j1z4c)",
-      "status": "awaiting_input",
-      "started_at": "2026-11-06T22:09:41.344893+00:00",
-      "updated_at": "2026-11-06T22:09:41.792408+00:00",
-      "escalation_ref": null
-    },
-    {
-      "run_id": "d9b23ebb-bdc1-4a10-a1d0-92d82136a0a3",
-      "incident_id": 12,
-      "machine_id": "urn:ngsi-ld:Machine:laser-cutter-01",
-      "issue": "Cut quality dropped (mw5j1vxo)",
-      "status": "awaiting_confirmation",
-      "started_at": "2026-11-06T22:09:37.244436+00:00",
-      "updated_at": "2026-11-06T22:09:39.876685+00:00",
-      "escalation_ref": null
-    },
-    {
-      "run_id": "d38094cf-7b73-475a-8240-f0578c1d9b43",
+      "run_id": "0681e793-e14c-4ce3-b076-884c5a095545",
       "incident_id": 6,
       "machine_id": "urn:ngsi-ld:Machine:laser-cutter-01",
-      "issue": "Gas pressure warning (mw5in1bs)",
-      "status": "awaiting_input",
-      "started_at": "2026-11-06T21:58:04.506002+00:00",
-      "updated_at": "2026-11-06T21:58:04.977740+00:00",
+      "issue": "Cut quality dropped (mw5oosh2)",
+      "status": "awaiting_confirmation",
+      "started_at": "2026-11-07T00:47:24.051504+00:00",
+      "updated_at": "2026-11-07T00:47:27.542378+00:00",
       "escalation_ref": null
     },
     {
-      "run_id": "3bf87337-0231-4075-af84-8eb3396435e7",
-      "incident_id": 5,
+      "run_id": "5321f6d7-84a3-42a5-a321-af8a1961b1ef",
+      "incident_id": 3,
       "machine_id": "urn:ngsi-ld:Machine:laser-cutter-01",
-      "issue": "Cut quality dropped (mw5imyk6)",
+      "issue": "Gas pressure warning (mw5o3tc5)",
+      "status": "awaiting_input",
+      "started_at": "2026-11-07T00:31:05.192243+00:00",
+      "updated_at": "2026-11-07T00:31:05.649119+00:00",
+      "escalation_ref": null
+    },
+    {
+      "run_id": "e51f6e05-3bac-4d45-90d6-8f7472bab61f",
+      "incident_id": 2,
+      "machine_id": "urn:ngsi-ld:Machine:laser-cutter-01",
+      "issue": "Cut quality dropped (mw5o3q44)",
       "status": "awaiting_confirmation",
-      "started_at": "2026-11-06T21:58:00.781557+00:00",
-      "updated_at": "2026-11-06T21:58:03.399363+00:00",
+      "started_at": "2026-11-07T00:31:01.102269+00:00",
+      "updated_at": "2026-11-07T00:31:03.974405+00:00",
       "escalation_ref": null
     }
   ]

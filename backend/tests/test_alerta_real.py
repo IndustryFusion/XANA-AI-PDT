@@ -121,6 +121,18 @@ def test_search_text_that_breaks_alertas_query_language_is_fine_here(api, text):
     assert httpx.get(f"{URL}/alerts", params={"q": "urn:other:2"}, headers=AUTH).status_code == 500
 
 
+def test_a_page_past_the_end_on_a_real_alerta(api, resource):
+    raise_alert(resource)
+    answer = api.get("/api/alerta/alerts", params={"page": 99999, "page_size": 5})
+    assert answer.status_code == 200, answer.text
+    assert answer.json()["alerts"] == []
+    assert answer.json()["total"] >= 1
+
+
+def test_dots_are_not_an_alert_on_a_real_alerta(api):
+    assert api.get("/api/alerta/alert/%2e%2e").status_code == 404
+
+
 def test_search_finds_a_full_entity_id(api, resource):
     raise_alert(resource)
     answer = api.get("/api/alerta/alerts", params={"text": resource}).json()

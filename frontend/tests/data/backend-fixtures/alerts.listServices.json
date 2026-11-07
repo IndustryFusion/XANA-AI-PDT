@@ -3,8 +3,6 @@
   "path": "/api/alerta/services",
   "status": 200,
   "body": [
-    "O",
-    "S",
     "SHACL Validator"
   ]
 }

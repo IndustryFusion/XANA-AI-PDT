@@ -22,6 +22,7 @@ taken for a column, so an entity ID gives a server error.
 
 from __future__ import annotations
 
+import re
 from collections import Counter
 from typing import Any
 from urllib.parse import quote
@@ -38,6 +39,8 @@ DEFAULT_STATUSES = ("open", "ack")
 ACTIONS = ("ack", "unack", "shelve", "unshelve", "close", "open")
 MAX_SEARCHED = 1000
 MAX_PAGE_SIZE = 1000
+_ALERT_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.\-]*")
+PAGE_OUT_OF_RANGE = 416
 SEARCHED_FIELDS = ("id", "resource", "event", "text", "value")
 SORTS = {"severity": ("severity", "lastReceiveTime"), "time": ("createTime",)}
 SUMMARY_FIELDS = (
@@ -164,9 +167,15 @@ class AlertaClient:
         if text and text.strip():
             return await self._searched(status, severity, environment, service, text.strip(), order, page, page_size)
         paging = [("page", page), ("page-size", page_size)]
-        answer = await self._call(
-            "GET", "/alerts", params=[*_filters(status, severity, environment, service), *order, *paging]
-        )
+        filters = _filters(status, severity, environment, service)
+        try:
+            answer = await self._call("GET", "/alerts", params=[*filters, *order, *paging])
+        except Refused as refused:
+            if refused.http_status != PAGE_OUT_OF_RANGE:
+                raise
+            # Past the last page there is nothing to show, and that is no failure.
+            answer = await self._call("GET", "/alerts/count", params=filters)
+            answer = {"alerts": [], "total": answer.get("total", 0)}
         counts = await self._call("GET", "/alerts/count", params=_filters(status, None, environment, service))
         return {
             "alerts": [_summary(alert) for alert in answer.get("alerts", [])],
@@ -201,6 +210,7 @@ class AlertaClient:
             "page": page,
             "pageSize": page_size,
             "searchLimited": answer.get("total", 0) > MAX_SEARCHED,
+            "searched": min(answer.get("total", 0), MAX_SEARCHED),
         }
 
     async def count(self, status: list[str] | None = None) -> dict[str, Any]:
@@ -208,15 +218,17 @@ class AlertaClient:
         return {"total": answer.get("total", 0), "bySeverity": answer.get("severityCounts", {})}
 
     async def alert(self, alert_id: str) -> dict[str, Any]:
-        answer = await self._call("GET", f"/alert/{quote(alert_id, safe='')}")
-        return _detail(answer.get("alert") or {})
+        answer = await self._call("GET", f"/alert/{_segment(alert_id)}")
+        if not isinstance(answer.get("alert"), dict):
+            raise bad_gateway(f"{SERVICE} sent an unexpected answer; check that ALERTA_URL ends in /api.")
+        return _detail(answer["alert"])
 
     async def apply_action(self, alert_id: str, action: str, text: str | None = None) -> dict[str, Any]:
         # Alerta takes any other word with a 200, and only records it as a note.
         if action not in ACTIONS:
             raise invalid(f"{action} is not an action. Use one of: {', '.join(ACTIONS)}.")
         body = {"action": action, "text": text or ""}
-        await self._call("PUT", f"/alert/{quote(alert_id, safe='')}/action", body=body)
+        await self._call("PUT", f"/alert/{_segment(alert_id)}/action", body=body)
         return await self.alert(alert_id)
 
     async def environments(self) -> list[str]:
@@ -228,8 +240,17 @@ class AlertaClient:
         return sorted({item.get("service") for item in answer.get("services", []) if item.get("service")})
 
 
+def _segment(alert_id: str) -> str:
+    """An ID as a path segment. `..` and the like are no ID, and would address another route."""
+    if not _ALERT_ID.fullmatch(alert_id):
+        raise not_found("There is no such alert.")
+    return quote(alert_id, safe="")
+
+
 def _refusal(response: httpx.Response) -> Refused:
     status = response.status_code
+    if status == PAGE_OUT_OF_RANGE:
+        return Refused("invalid", "There is no such page.", status=PAGE_OUT_OF_RANGE)
     try:
         reason = response.json().get("message")
     except (ValueError, AttributeError):

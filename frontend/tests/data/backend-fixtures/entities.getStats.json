@@ -3,8 +3,8 @@
   "path": "/api/ngsi/stats",
   "status": 200,
   "body": {
-    "entity_count": 43,
-    "type_count": 5,
+    "entity_count": 47,
+    "type_count": 7,
     "by_type": [
       {
         "type": "Component",
@@ -19,8 +19,16 @@
         "count": 8
       },
       {
+        "type": "Mq",
+        "count": 3
+      },
+      {
         "type": "ProductionLine",
         "count": 3
+      },
+      {
+        "type": "E2e",
+        "count": 1
       },
       {
         "type": "Factory",

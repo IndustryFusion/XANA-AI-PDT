@@ -177,6 +177,23 @@ def test_search_pages_and_counts_over_what_it_found():
     assert narrowed["bySeverity"] == {"major": 3, "critical": 2}
 
 
+def test_a_search_over_the_cap_says_so_and_below_it_does_not():
+    over = Alerta([alert(i) for i in range(1, 6)])
+    real = over.__call__
+
+    def many(request):
+        answer = real(request)
+        if request.url.path.endswith("/alerts"):
+            return httpx.Response(200, json={**json.loads(answer.content), "total": 1044})
+        return answer
+
+    limited = client_for(many).get("/api/alerta/alerts", params={"text": "text"}).json()
+    assert limited["searchLimited"] is True
+    assert limited["searched"] == 1000
+    plain = client_for(Alerta()).get("/api/alerta/alerts", params={"text": "text"}).json()
+    assert plain["searchLimited"] is False
+
+
 @pytest.mark.parametrize("query", [{"sort": "nonsense"}, {"page": 0}, {"page_size": 0}, {"page_size": 1001}])
 def test_bad_paging_or_sort_is_refused_before_alerta(query):
     fake = Alerta()
@@ -216,14 +233,40 @@ def test_unknown_alert_is_not_found():
     assert client_for(Alerta()).get("/api/alerta/alert/nope").status_code == 404
 
 
-def test_identifier_stays_one_path_segment():
+@pytest.mark.parametrize("identifier", ["a/../../admin", "..", ".", "a b", ""])
+def test_what_is_not_an_id_is_not_found_and_never_sent(identifier):
     fake = Alerta()
-    assert client_for(fake).get("/api/alerta/alert/a%2F..%2F..%2Fadmin").status_code == 404
-    assert fake.requests == []
     client = AlertaClient(make_settings(alerta_url="http://alerta.test/api"), transport=httpx.MockTransport(fake))
+    with pytest.raises(Refused) as caught:
+        asyncio.run(client.alert(identifier))
+    assert caught.value.kind == "not_found"
     with pytest.raises(Refused):
-        asyncio.run(client.alert("a/../../admin"))
-    assert fake.requests[0].url.raw_path == b"/api/alert/a%2F..%2F..%2Fadmin"
+        asyncio.run(client.apply_action(identifier, "ack"))
+    assert fake.requests == []
+
+
+def test_dots_in_a_route_are_not_found_with_no_hint_about_the_address():
+    answer = client_for(Alerta()).get("/api/alerta/alert/%2e%2e")
+    assert answer.status_code == 404
+    assert "ALERTA_URL" not in answer.text
+
+
+def test_an_answer_without_an_alert_is_502():
+    answer = client_for(lambda request: httpx.Response(200, json={"data": {}})).get("/api/alerta/alert/id-1")
+    assert answer.status_code == 502
+
+
+def test_a_page_past_the_end_is_empty_with_the_total():
+    def handler(request):
+        if request.url.path.endswith("/alerts"):
+            return httpx.Response(416, json={"message": "page out of range"})
+        return httpx.Response(200, json={"total": 3, "severityCounts": {"major": 3}})
+
+    answer = client_for(handler).get("/api/alerta/alerts", params={"page": 99999})
+    assert answer.status_code == 200
+    assert answer.json()["alerts"] == []
+    assert answer.json()["total"] == 3
+    assert answer.json()["page"] == 99999
 
 
 @pytest.mark.parametrize("action", ["ack", "unack", "shelve", "unshelve", "close", "open"])
