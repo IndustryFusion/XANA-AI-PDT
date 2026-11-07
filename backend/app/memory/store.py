@@ -83,12 +83,12 @@ class Database:
                 yield conn
         except PoolTimeout:
             raise StoreUnavailable("The memory database is not reachable.") from None
-        except psycopg.OperationalError as error:
-            log.warning("Memory database error: %s", self._redact(error))
-            raise StoreUnavailable("The memory database could not complete the request.") from None
         except psycopg.Error as error:
             log.warning("Memory database error: %s", self._redact(error))
-            raise StoreRefused("The memory database refused the request.") from None
+            # Only what is wrong with this data. Anything else may pass, such as a database that is read-only for now.
+            if isinstance(error, psycopg.DataError | psycopg.IntegrityError) or (error.sqlstate or "").startswith("54"):
+                raise StoreRefused("The memory database refused the request.") from None
+            raise StoreUnavailable("The memory database could not complete the request.") from None
 
 
 # ── Runs ─────────────────────────────────────────────────────────────────────

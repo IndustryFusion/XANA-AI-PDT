@@ -16,6 +16,7 @@
 """Machine events: who may call, what starts a run, what doesn't, and what happens when something fails."""
 
 import asyncio
+import contextlib
 import json
 import logging
 import threading
@@ -27,7 +28,7 @@ import psycopg
 import pytest
 
 from app.config import ConfigError, load_settings
-from app.errors import invalid
+from app.errors import Refused, invalid
 from app.events.identity import ServiceIdentity
 from app.events.subscription import (
     ACTIVE,
@@ -435,6 +436,12 @@ class FakeRuns:
         self.calls = []
         self.failures = []
 
+    async def ready(self):
+        return None
+
+    def failed_lately(self, machine):
+        return False
+
     async def start_triggered(self, machine, issue, source, watched):
         self.calls.append(machine)
         if self.failures:
@@ -624,7 +631,7 @@ async def test_a_database_error_tells_a_lost_connection_from_a_refusal(url):
     db = Database(url, 1)
     with pytest.raises(StoreRefused):
         async with db.transaction() as conn:
-            await conn.execute("SELECT 1 FROM no_such_table")
+            await conn.execute("SELECT 1 / 0")
     await db.close()
     gone = Database("postgresql://nobody@127.0.0.1:1/none", 0.2)
     with pytest.raises(StoreUnavailable) as raised:
@@ -634,23 +641,228 @@ async def test_a_database_error_tells_a_lost_connection_from_a_refusal(url):
     await gone.close()
 
 
+async def failed_triggered_run(app, client):
+    await client.post("/events/ngsi", json=notification(status(MACHINE, f"{FAIL} a")), headers=AUTH)
+    [first] = await runs_are(client, 1)
+    await until(client, first["run_id"], "failed")
+
+
+def later_by(app, seconds):
+    now = app.state.runs._now
+    app.state.runs._now = lambda: now() + timedelta(seconds=seconds)
+
+
 @pytest.mark.db
-async def test_after_a_failed_triggered_run_events_wait(url):
+async def test_after_a_failed_triggered_run_the_latest_event_waits_and_then_starts_once(url):
     app = event_app(url)
     async with running(app) as client:
+        await failed_triggered_run(app, client)
         for n in range(4):
-            await client.post("/events/alert", json={"machine_id": MACHINE, "issue": f"{FAIL} {n}"}, headers=AUTH)
-            await app.state.events.settled()
-            [first, *rest] = await open_runs(client)
-            await until(client, first["run_id"], "failed")
-        assert rest == []
+            await client.post("/events/alert", json={"machine_id": MACHINE, "issue": f"alert {n}"}, headers=AUTH)
+        assert len(await runs_are(client, 1)) == 1, "held back during the wait"
         await client.post("/events/alert", json={"machine_id": OTHER_MACHINE, "issue": "free"}, headers=AUTH)
         assert len(await runs_are(client, 2)) == 2, "another machine isn't held up"
 
-        now = app.state.runs._now
-        app.state.runs._now = lambda: now() + timedelta(seconds=301)
-        await client.post("/events/alert", json={"machine_id": MACHINE, "issue": "later"}, headers=AUTH)
-        assert len(await runs_are(client, 3)) == 3
+        later_by(app, 301)
+        found = await runs_are(client, 3)
+        assert "alert 3" in [r["issue"] for r in found], "with no further event"
+        await app.state.events.settled()
+        assert len(await open_runs(client)) == 3, "once"
+
+
+@pytest.mark.db
+async def test_a_fault_during_the_wait_isnt_taken_as_seen(url):
+    app = event_app(url)
+    async with running(app) as client:
+        await failed_triggered_run(app, client)
+        await client.post("/events/ngsi", json=notification(status(MACHINE, "new-fault")), headers=AUTH)
+        await runs_are(client, 1)
+        assert rows(url, "SELECT watched FROM machine_watched_values") != [({"status": "new-fault"},)]
+        later_by(app, 301)
+        found = await runs_are(client, 2)
+    assert "Machine event: status=new-fault" in [r["issue"] for r in found]
+    assert rows(url, "SELECT watched FROM machine_watched_values") == [({"status": "new-fault"},)]
+
+
+@pytest.mark.db
+async def test_an_alert_and_a_quiet_write_during_the_wait_dont_replace_each_other(url):
+    app = event_app(url)
+    async with running(app) as client:
+        await failed_triggered_run(app, client)
+        await client.post(
+            "/events/alert", json={"resource": MACHINE, "event": "Hot", "severity": "major"}, headers=AUTH
+        )
+        await client.post("/events/ngsi", json=notification(status(MACHINE, f"{FAIL} a")), headers=AUTH)
+        later_by(app, 301)
+        found = await runs_are(client, 2)
+    assert "Alert Hot" in [r["issue"] for r in found]
+
+
+@pytest.mark.db
+async def test_the_wait_ends_by_itself_without_any_further_event(url):
+    app = event_app(url)
+    async with running(app) as client:
+        await failed_triggered_run(app, client)
+        await client.post("/events/alert", json={"machine_id": MACHINE, "issue": "held"}, headers=AUTH)
+        await runs_are(client, 1)
+        later_by(app, 301)
+        with_worker_only = asyncio.get_running_loop().time() + 12
+        while len(await open_runs(client)) < 2:
+            assert asyncio.get_running_loop().time() < with_worker_only, "nothing looked at what was held"
+            await asyncio.sleep(0.2)
+
+
+@pytest.mark.db
+async def test_the_wait_holds_after_a_restart(url):
+    app = event_app(url)
+    async with running(app) as client:
+        await failed_triggered_run(app, client)
+    app = event_app(url)
+    async with running(app) as client:
+        await client.post("/events/alert", json={"machine_id": MACHINE, "issue": "first after the start"}, headers=AUTH)
+        await app.state.events.settled()
+        assert len(await open_runs(client)) == 1
+
+
+@pytest.mark.db
+async def test_a_short_name_held_back_by_a_longer_identifier_isnt_taken_as_seen(url):
+    app = event_app(url)
+    async with running(app) as client:
+        await client.post("/events/alert", json={"machine_id": MACHINE, "issue": "one"}, headers=AUTH)
+        await client.post("/events/ngsi", json=notification(status("press-01", "fault")), headers=AUTH)
+        [only] = await runs_are(client, 1)
+        assert rows(url, "SELECT watched FROM machine_watched_values") == []
+        await until(client, only["run_id"], "awaiting_input")
+        await client.post(f"/api/agent/stop/{only['run_id']}", json={})
+        await client.post("/events/ngsi", json=notification(status("press-01", "fault")), headers=AUTH)
+        assert len(await runs_are(client, 2)) == 2, "the same values, once nothing holds them back"
+
+
+@pytest.mark.db
+async def test_a_run_with_its_own_identifier_still_marks_values_as_seen(url):
+    async with running(event_app(url)) as client:
+        await client.post("/events/alert", json={"machine_id": MACHINE, "issue": "one"}, headers=AUTH)
+        await client.post("/events/ngsi", json=notification(status(MACHINE, "fault")), headers=AUTH)
+        await runs_are(client, 1)
+    assert rows(url, "SELECT watched FROM machine_watched_values") == [({"status": "fault"},)]
+
+
+@pytest.mark.db
+@pytest.mark.parametrize(
+    ("state", "kind"),
+    [("25006", StoreUnavailable), ("53300", StoreUnavailable), ("42501", StoreUnavailable), ("54000", StoreRefused)],
+)
+async def test_only_what_is_wrong_with_the_data_is_refused(url, state, kind):
+    db = Database(url, 1)
+    with pytest.raises(StoreUnavailable) as raised:
+        async with db.transaction() as conn:
+            await conn.execute(f"DO $$ BEGIN RAISE EXCEPTION 'x' USING ERRCODE='{state}'; END $$")
+    await db.close()
+    assert type(raised.value) is kind
+
+
+@pytest.mark.db
+async def test_a_read_only_database_holds_an_event_until_it_can_write(url):
+    app = event_app(url)
+    async with running(app) as client:
+        await open_runs(client)
+        db = app.state.runs._store._db
+        transaction = db.transaction
+
+        @contextlib.asynccontextmanager
+        async def read_only():
+            async with transaction() as conn:
+                await conn.execute("SET TRANSACTION READ ONLY")
+                yield conn
+
+        db.transaction = read_only
+        app.state.events._retry_s = 0.01
+        await client.post("/events/alert", json={"machine_id": MACHINE, "issue": "real"}, headers=AUTH)
+        await asyncio.sleep(0.5)
+        assert await open_runs(client) == []
+        assert app.state.events._queue._unfinished_tasks == 1, "still held"
+        db.transaction = transaction
+        assert len(await runs_are(client, 1)) == 1
+
+
+@pytest.mark.db
+async def test_a_limit_error_doesnt_stick_the_worker(url):
+    app = event_app(url)
+    async with running(app) as client:
+        await open_runs(client)
+        save = app.state.runs._store.save
+        db = app.state.runs._store._db
+        failing = [True]
+
+        async def too_big(run, *rest):
+            if failing:
+                failing.pop()
+                async with db.transaction() as conn:
+                    await conn.execute("DO $$ BEGIN RAISE EXCEPTION 'x' USING ERRCODE='54000'; END $$")
+            return await save(run, *rest)
+
+        app.state.runs._store.save = too_big
+        await client.post("/events/alert", json={"machine_id": MACHINE, "issue": "too big"}, headers=AUTH)
+        await client.post("/events/alert", json={"machine_id": OTHER_MACHINE, "issue": "next"}, headers=AUTH)
+        [only] = await runs_are(client, 1)
+    assert only["machine_id"] == OTHER_MACHINE
+
+
+@pytest.mark.db
+async def test_a_body_over_the_limit_is_refused_before_anything_is_read_as_json(url):
+    async with running(event_app(url)) as client:
+        body = b'{"data":[{"id":"urn:m","status":"' + b"x" * (10 * 1024 * 1024) + b'"}]}'
+        for path in ("/events/ngsi", "/events/alert"):
+            answer = await client.post(path, content=body, headers=AUTH)
+            assert answer.status_code == 413
+            assert answer.json()["error"]["kind"] == "invalid"
+        assert (await client.post("/events/ngsi", content=body, headers={})).status_code == 401
+        assert await runs_are(client, 0) == []
+
+
+@pytest.mark.db
+async def test_an_operators_issue_the_database_cant_store_gives_no_server_error(url):
+    async with running(event_app(url)) as client:
+        started = await client.post("/api/agent/run", json={"machine_id": MACHINE, "issue": "bad\x00issue"})
+        assert started.status_code == 202
+        [only] = await open_runs(client)
+        assert only["issue"] == "badissue"
+        for body in ({"machine_id": MACHINE, "issue": "\x00"}, {"machine_id": "\x00", "issue": "x"}):
+            assert (await client.post("/api/agent/run", json=body)).status_code == 422
+
+
+@pytest.mark.db
+async def test_a_refused_operators_run_is_invalid_not_a_server_error(url):
+    app = event_app(url)
+    async with running(app) as client:
+        await open_runs(client)
+
+        async def refused(run, *rest):
+            raise StoreRefused("The memory database refused the request.")
+
+        app.state.runs._store.save = refused
+        answer = await client.post("/api/agent/run", json={"machine_id": MACHINE, "issue": "x"})
+    assert answer.status_code == 422
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"machine_id": "\x00", "issue": "x"},
+        {"machine_id": "urn:m", "issue": "\x00"},
+        {"machine_id": "urn:m", "issue": " \x00 "},
+        {"resource": "\x00", "event": "E"},
+    ],
+)
+def test_nothing_left_after_cleaning_is_refused(body):
+    with pytest.raises(Refused) as refused:
+        alert_event(body)
+    assert refused.value.kind == "invalid"
+
+
+def test_a_machine_or_value_of_nul_alone_gives_no_event():
+    assert ngsi_events(notification(status("\x00\x00", "fault")), WATCHED) == ([], 1)
+    assert ngsi_events(notification(status("urn:m", "\x00")), WATCHED) == ([], 1)
 
 
 @pytest.mark.db

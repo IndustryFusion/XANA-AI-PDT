@@ -20,7 +20,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from app.errors import Refused, invalid, unavailable
@@ -33,6 +33,7 @@ log = logging.getLogger(__name__)
 
 QUEUE_LIMIT = 1000
 RETRY_S = 5.0
+HELD_CHECK_S = 5.0
 MAX_MACHINE_ID = 500
 MAX_VALUE = 200
 # What Alerta reports without there being anything to diagnose.
@@ -75,7 +76,7 @@ def _watched_values(entity: dict[str, Any], watched: list[str]) -> dict[str, Any
     for name, attribute in entity.items():
         local = _local_name(name)
         if local in names:
-            value = _attribute_value(attribute)
+            value = clean(_attribute_value(attribute))
             if value not in (None, ""):
                 found[local] = value
     return {name: found[name] for name in names if name in found}
@@ -84,7 +85,7 @@ def _watched_values(entity: dict[str, Any], watched: list[str]) -> dict[str, Any
 def _machine(value: Any) -> str | None:
     if not isinstance(value, str):
         return None
-    value = value.strip()
+    value = clean(value).strip()
     return value if value and len(value) <= MAX_MACHINE_ID else None
 
 
@@ -100,7 +101,6 @@ def ngsi_events(body: Any, watched: list[str]) -> tuple[list[Event], int]:
         if not values:
             ignored += 1
             continue
-        machine, values = clean(machine), clean(values)
         shown = ", ".join(f"{name}={str(value)[:MAX_VALUE]}" for name, value in values.items())
         events.append(Event(machine, clean(f"Machine event: {shown}")[:MAX_ISSUE], NGSI, values))
     return events, ignored
@@ -112,9 +112,10 @@ def alert_event(body: Any) -> Event | None:
         raise invalid("An alert is a JSON object.")
     if "machine_id" in body:
         machine, issue = _machine(body.get("machine_id")), body.get("issue")
-        if machine is None or not isinstance(issue, str) or not issue.strip():
+        issue = clean(issue).strip() if isinstance(issue, str) else ""
+        if machine is None or not issue:
             raise invalid("Name the machine and the issue.")
-        return Event(clean(machine), clean(issue.strip())[:MAX_ISSUE], ALERT)
+        return Event(machine, issue[:MAX_ISSUE], ALERT)
     machine = _machine(body.get("resource"))
     if machine is None:
         raise invalid("An alert names its machine in `resource`.")
@@ -122,13 +123,15 @@ def alert_event(body: Any) -> Event | None:
         return None
     what = str(body.get("event") or "unnamed")
     text = str(body.get("text") or "")
-    return Event(clean(machine), clean(f"Alert {what}: {text}".rstrip(": "))[:MAX_ISSUE], ALERT)
+    return Event(machine, clean(f"Alert {what}: {text}".rstrip(": "))[:MAX_ISSUE], ALERT)
 
 
 class EventWorker:
     """One worker, one event at a time, so that the check for an open run can't race with itself.
 
     The queue is in memory: what it holds when the backend stops is lost. See the change's design.
+    So is what it holds back: the latest event per machine and source while a triggered run has just failed, started
+    when that wait ends. Its values aren't stored until then, so it still counts as new.
     """
 
     def __init__(
@@ -142,6 +145,7 @@ class EventWorker:
         self._machines = machines
         self._queue: asyncio.Queue[Event] = asyncio.Queue(limit)
         self._retry_s = retry_s
+        self._held: dict[tuple[str, str], Event] = {}
         self._task: asyncio.Task[None] | None = None
 
     def add(self, events: list[Event]) -> None:
@@ -157,8 +161,16 @@ class EventWorker:
         return self._queue.qsize()
 
     async def settled(self) -> None:
-        """Until everything queued so far has been handled."""
+        """Until everything queued so far, and what has waited long enough, has been handled."""
+        self._release_held()
         await self._queue.join()
+
+    def _release_held(self) -> None:
+        """Back in line, to be handled like any event. If the queue is full, it waits for the next look."""
+        for key, event in list(self._held.items()):
+            if not self._runs.failed_lately(event.machine_id) and not self._queue.full():
+                del self._held[key]
+                self._queue.put_nowait(event)
 
     def start(self) -> None:
         if self._task is None:
@@ -173,7 +185,11 @@ class EventWorker:
 
     async def _run(self) -> None:
         while True:
-            event = await self._queue.get()
+            self._release_held()
+            try:
+                event = await asyncio.wait_for(self._queue.get(), HELD_CHECK_S)
+            except TimeoutError:
+                continue
             try:
                 await self._handle(event)
             except asyncio.CancelledError:
@@ -191,6 +207,11 @@ class EventWorker:
             return
         while True:
             try:
+                await self._runs.ready()
+                if self._runs.failed_lately(machine):
+                    self._held[(machine, event.source)] = replace(event, machine_id=machine)
+                    log.info("Machine events: %s for %s waits, as a run of it has just failed.", event.source, machine)
+                    return
                 run_id = await self._runs.start_triggered(machine, event.issue, event.source, event.watched)
             except Refused as refused:
                 if refused.kind != "unavailable":

@@ -36,7 +36,7 @@ from typing import Any, Literal
 from app.errors import Refused, conflict, invalid, not_found, unavailable
 from app.memory.migrate import MigrationError, Migrator
 from app.memory.store import IncidentStore, RunStore, StoreRefused, StoreUnavailable
-from app.runs.conversation import ConversationDesk
+from app.runs.conversation import ConversationDesk, clean
 from app.runs.escalation import DELIVERY, FINAL_STATUSES, Escalator, NotPossible, Plan, incident_message
 from app.runs.files import Attachment, check_files
 from app.runs.machines import MachineResolver
@@ -238,7 +238,7 @@ class RunManager:
     # ── Operations ───────────────────────────────────────────────────────────
 
     async def start(self, machine_id: str, issue: str) -> str:
-        machine_id, issue = machine_id.strip(), issue.strip()
+        machine_id, issue = clean(machine_id).strip(), clean(issue).strip()
         if not machine_id:
             raise invalid("Enter the machine.")
         if not issue:
@@ -262,10 +262,12 @@ class RunManager:
             known = await self._store.watched_values(machine_id) if watched is not None else None
             changed = watched is None or watched != known
             run_id = None
-            if changed and not self._has_open_run(machine_id) and not self._failed_lately(machine_id):
+            has_open_run = self._has_open_run(machine_id)
+            if changed and not has_open_run:
                 # No check of the language model: nobody is there to read a refusal, so a failed run shows it.
                 run_id = await self._create(machine_id, issue, source)
-            if watched is not None and changed:
+            # A short name held back by a run under a longer identifier may be another machine's: not seen yet.
+            if watched is not None and changed and (not has_open_run or self._has_open_run(machine_id, exact=True)):
                 await self._store.remember_watched_values(machine_id, watched)
         except StoreRefused as error:
             raise invalid(str(error)) from None
@@ -273,14 +275,13 @@ class RunManager:
             raise unavailable(str(error)) from None
         return run_id
 
-    def _has_open_run(self, machine_id: str) -> bool:
-        if any(_same_machine(starting, machine_id) for starting in self._starting):
+    def _has_open_run(self, machine_id: str, exact: bool = False) -> bool:
+        same = str.__eq__ if exact else _same_machine
+        if any(same(starting, machine_id) for starting in self._starting):
             return True
-        return any(
-            _same_machine(r.state.machine_id, machine_id) and r.state.status in OPEN for r in self._runs.values()
-        )
+        return any(same(r.state.machine_id, machine_id) and r.state.status in OPEN for r in self._runs.values())
 
-    def _failed_lately(self, machine_id: str) -> bool:
+    def failed_lately(self, machine_id: str) -> bool:
         """A triggered run failed for this machine a moment ago: another would fail too, and only add to the list."""
         since = self._now() - timedelta(seconds=TRIGGERED_RETRY_AFTER_S)
         return any(
@@ -297,8 +298,8 @@ class RunManager:
         self._starting[machine_id] += 1
         try:
             state = await self._store.save(state)
-        except StoreRefused:
-            raise
+        except StoreRefused as error:
+            raise invalid(f"{error} The run was not started.") from None
         except StoreUnavailable as error:
             raise unavailable(f"{error} The run was not started.") from None
         finally:

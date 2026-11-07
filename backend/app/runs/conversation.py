@@ -165,8 +165,13 @@ def pending_recommendation(state: RunState) -> dict[str, Any] | None:
     return None
 
 
-def _grants(message: dict[str, Any], request_id: str) -> bool:
-    return message.get("act") == "grant" and message.get("in_reply_to") == request_id
+def _granted(state: RunState, request_id: str) -> bool:
+    """Whether a grant for this request went out and may have arrived. One whose delivery failed didn't."""
+    failed = {entry["message_id"] for entry in state.outbox if entry["status"] == "failed"}
+    return any(
+        m.get("act") == "grant" and m.get("in_reply_to") == request_id and m.get("message_id") not in failed
+        for m in messages_of(state)
+    )
 
 
 def _signal_count(files: list[tuple[str, bytes]]) -> int:
@@ -181,10 +186,10 @@ def _decision(capability: str, files: list[tuple[str, bytes]]) -> str:
     count = _signal_count(files)
     if count == 0:
         return (
-            "Approved by the operator. The history file sent holds 0 signals: this machine has no numeric signals "
-            "of its own, and those of related entities go only if related entities may go to this builder."
+            "Approved by the operator. The history file sent holds 0 signals: there were none in the 24 hours "
+            "queried. Those of related entities go only if related entities may go to this builder."
         )
-    return f"Approved by the operator and sent: {count} signals."
+    return f"Approved by the operator and sent: {count} signal{'' if count == 1 else 's'}."
 
 
 def _worth_reviewing(message: dict[str, Any]) -> bool:
@@ -626,7 +631,7 @@ class ConversationDesk:
                 self._require_escalation(rec.state)
                 await self._grant(rec, request, note)
             else:
-                if any(_grants(m, request["message_id"]) for m in messages_of(rec.state)):
+                if _granted(rec.state, request["message_id"]):
                     raise conflict("The grant has gone out, so this can't be declined. Approving sends the data.")
                 await self._withdraw_approval(rec, request)
                 step = await self._send(
@@ -650,7 +655,7 @@ class ConversationDesk:
         state = rec.state
         capability = request["capability"]
         receiver = self._receiver(state)
-        granted = any(_grants(m, request["message_id"]) for m in messages_of(state))
+        granted = _granted(state, request["message_id"])
         names: list[str] = []
         approved_here = False
         try:
@@ -669,7 +674,7 @@ class ConversationDesk:
                     authorization={"scope": "conversation", "expires_at": expires, "constraints": {}},
                 )
                 await self._store_sent(rec, step)
-                granted, approved_here = True, False
+                granted = True
             sharing = Sharing(state.escalation["tier"], (capability,), ())
             # A grant of history holds related entities' signals only if those entities may go to this builder.
             access = await self._gateway.access(consumer=receiver) if capability == HISTORY else []
@@ -969,7 +974,9 @@ class ConversationDesk:
                 await self._m.change(rec, data=done | problem, conversation_id=conversation_of(rec.state))
             return
         step["output"]["conv_state"] = "closed"
-        repeated = any(m.get("act") == "close" for m in messages_of(rec.state))
+        # A repeat only if this side's close is the latest: after a reopen, this is a new close.
+        latest = next((m for m in reversed(messages_of(rec.state)) if m.get("act") in ("close", "reopen")), {})
+        repeated = latest.get("act") == "close" and latest.get("sender") == "operator"
         if not repeated:
             await self._store_sent(rec, step, data=done, conversation_id=conversation_of(rec.state))
             return

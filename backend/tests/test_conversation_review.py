@@ -22,7 +22,7 @@ from datetime import UTC, datetime, timedelta
 import httpx
 import pytest
 
-from app.runs.conversation import _decision
+from app.runs.conversation import _decision, last_state
 from tests.dataspace_support import BUILDER
 from tests.runs_support import MACHINE, rows, running, to_confirmation
 from tests.space_support import connect
@@ -686,6 +686,75 @@ async def test_a_half_escalated_run_reopened_by_the_builder_refuses_an_answer_cl
     assert answer.status_code == 409
 
 
+async def grant_went_out_and_its_delivery_failed(app, space, client, s):
+    request = space.deliver("request", s.conversation, capability="twin:history")
+    await s.poll()
+    space.status_for["POST /outbox/files"] = 503
+    body = {"approved": True, "request_id": request}
+    assert (await client.post(f"/api/agent/approve-data-request/{s.run_id}", json=body)).status_code >= 400
+    space.status_for.clear()
+    grant = [m for m in space.sent if m.get("performative") == "grant"][-1]
+    space.message_status[grant["message_id"]] = "error"
+    space.fail_status[grant["message_id"]] = "receiver down"
+    await app.state.runs.check_outbox()
+    return body
+
+
+async def test_a_grant_that_never_arrived_can_be_declined_and_its_approval_goes_back(url):
+    app, space = make(url)
+    on_request(space)
+    async with running(app) as client:
+        s = await scene(client, app, space)
+        body = await grant_went_out_and_its_delivery_failed(app, space, client, s)
+        declined = await client.post(f"/api/agent/approve-data-request/{s.run_id}", json=body | {"approved": False})
+        assert declined.status_code == 200
+    assert space.sent[-1]["performative"] == "deny"
+    assert space.policies[-1]["action"] == "reset"
+
+
+async def test_a_grant_that_never_arrived_goes_again_on_approving(url):
+    app, space = make(url)
+    on_request(space)
+    async with running(app) as client:
+        s = await scene(client, app, space)
+        body = await grant_went_out_and_its_delivery_failed(app, space, client, s)
+        assert (await client.post(f"/api/agent/approve-data-request/{s.run_id}", json=body)).status_code == 200
+    assert len([m for m in space.sent if m.get("performative") == "grant"]) == 2
+    assert space.sent[-1]["kind"] == "files"
+
+
+async def test_a_second_stop_after_a_reopen_is_recorded_when_its_close_goes_out_later(url):
+    app, space = make(url)
+    async with running(app) as client:
+        s = await scene(client, app, space)
+        await client.post(f"/api/agent/stop/{s.run_id}", json={})
+        assert (await client.post(f"/api/agent/reopen/{s.run_id}")).status_code == 200
+        space.status_for["POST /outbox/messages"] = 503
+        await client.post(f"/api/agent/stop/{s.run_id}", json={})
+        space.status_for.clear()
+        await s.poll()
+        run = await s.run()
+        acts = [m["act"] for m in messages(run)]
+        assert acts[-2:] == ["reopen", "close"]
+        assert last_state(app.state.runs.record(s.run_id).state) == "closed"
+        assert (await client.post(f"/api/agent/archive/{s.run_id}")).status_code == 204
+    assert rows(url, "SELECT conversation_state FROM incidents") == [("closed",)]
+
+
+async def test_a_builders_close_before_ours_isnt_taken_for_ours(url):
+    app, space = make(url)
+    async with running(app) as client:
+        s = await scene(client, app, space)
+        await client.post(f"/api/agent/stop/{s.run_id}", json={})
+        space.deliver("reopen", s.conversation)
+        await s.poll()
+        space.status_for["POST /outbox/messages"] = 503
+        await client.post(f"/api/agent/stop/{s.run_id}", json={})
+        space.status_for.clear()
+        await s.poll()
+        assert [m["act"] for m in messages(await s.run())][-2:] == ["reopen", "close"]
+
+
 # ── What a grant of history delivers (final review B1) ───────────────────────
 
 
@@ -734,6 +803,8 @@ def test_saying_plainly_that_a_file_holds_nothing():
     assert "0 signals" in _decision("twin:history", empty)
     assert "and sent" not in _decision("twin:history", empty)
     assert _decision("twin:history", [("signal-history.json", b"[1, 2]")]).endswith("2 signals.")
+    assert _decision("twin:history", [("signal-history.json", b"[1]")]).endswith("1 signal.")
+    assert "24 hours" in _decision("twin:history", empty)
     assert _decision("twin:direct", [("machine.json", b"{}")]) == "Approved by the operator and sent."
 
 
