@@ -41,6 +41,7 @@ from websockets.asyncio.client import connect
 from websockets.exceptions import InvalidStatus
 
 from app.auth import KeycloakSession
+from app.errors import Refused
 from app.ngsi.broker import ContextBroker
 from app.ngsi.live import SUBSCRIPTION_NAME, LiveUpdates, Refusal, mqtt_messages
 from tests.conftest import make_settings
@@ -526,3 +527,23 @@ async def test_updates_go_on_past_the_tokens_life_and_after_the_broker_restarts(
         await session.logout()
         await session.close()
         httpx.put(realm, headers=headers, json={"accessTokenLifespan": before})
+
+
+async def test_an_upsert_rejecting_everything_expects_no_delivery_on_a_real_broker():
+    seen = []
+    _, broker = live_updates()
+    broker.on_write = lambda: seen.append(1)
+    bad = {"id": "not a uri", "type": "T"}
+    try:
+        answer = await broker.send("POST", "/entityOperations/upsert", body=[bad])
+        assert answer.status_code == 207, answer.text
+    except Refused as refused:
+        assert refused.kind == "invalid"
+    assert seen == []
+    good = {"id": f"urn:test:upsert:{uuid.uuid4().hex}", "type": "UpsertCheck", "a": {"type": "Property", "value": 1}}
+    try:
+        answer = await broker.send("POST", "/entityOperations/upsert", body=[bad, good])
+        assert answer.status_code == 207 and answer.json()["success"] == [good["id"]], answer.text
+        assert seen == [1]
+    finally:
+        await broker.send("DELETE", f"/entities/{good['id']}")

@@ -24,7 +24,8 @@ from fastapi.testclient import TestClient
 
 from app.errors import Refused
 from app.ngsi import query as q
-from app.ngsi.broker import ContextBroker
+from app.ngsi.broker import ContextBroker, check_document
+from app.ngsi.failures import scrubbed
 from tests.conftest import make_settings
 from tests.explorer_support import IRI, MACHINE, TOKEN, Broker, app_with
 
@@ -692,3 +693,72 @@ def test_body_is_json_of_what_the_broker_got(client, broker):
     client.patch(f"{ENTITY}/attrs", json={attrs(): {"value": 43}})
     sent = json.loads(next(r for r in broker.requests if r.method == "PATCH").content)
     assert sent[attrs()]["type"] == "Property"
+
+
+@pytest.mark.parametrize(
+    ("expression", "value", "found"),
+    [
+        ("serial~=20", "M20-A", True),
+        ("serial!~=20", "M20-A", False),
+        ("serial~=20.0", "M20-A", False),
+        ("serial~=true", "not-true-1", True),
+        ("serial!~=true", "M20-A", True),
+        ("serial~=True", "not-true-1", False),
+        ('serial~="M","Z"', "Z-1", True),
+        ('serial~="M","Z"', "A-1", False),
+        ('serial!~="M","Z"', "Z-1", False),
+        ('serial!~="M","Z"', "A-1", True),
+        ("serial~=M,Z", "Z-1", True),
+        ("serial~=1..5", "11115", True),
+    ],
+)
+def test_patterns_are_the_text_as_written(expression, value, found):
+    entity = {"id": "urn:e", "type": "T", "serial": {"type": "Property", "value": value}}
+    assert q.matches(entity, q.parse(expression)) is found
+
+
+@pytest.mark.parametrize("bad", ['a~="M","("', 'a!~="(",M'])
+def test_every_pattern_of_a_list_is_checked(bad):
+    with pytest.raises(Refused) as caught:
+        q.parse(bad)
+    assert caught.value.kind == "invalid"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "fails at scorpio.svc.cluster.local:9090 [/10.0.0.5]",
+        "Connection to kafka:9092 refused",
+        "host 10.1.2.3 down",
+        "postgres.iff.svc is gone",
+        "http://a.b:1/c failed",
+    ],
+)
+def test_addresses_leave_a_reason(text):
+    result = scrubbed(text)
+    for piece in ("scorpio", "10.0.0.5", "kafka", "9092", "10.1.2.3", "postgres.iff", "a.b:1"):
+        assert piece not in result
+
+
+@pytest.mark.parametrize(
+    "text", ["The attribute urn:ngsi-ld:Machine:12345 is bad", "Value 1.5 is too big", "a.b is not valid"]
+)
+def test_a_reason_without_an_address_stays(text):
+    assert scrubbed(text) == text
+
+
+def test_a_long_reason_takes_no_long_time():
+    started = time.perf_counter()
+    scrubbed("a" * 400_000 + " " + "b." * 200_000)
+    assert time.perf_counter() - started < 1
+
+
+def test_deep_or_broken_documents_are_refused_without_recursion():
+    deep: list = []
+    for _ in range(50_000):
+        deep = [deep]
+    for bad in (deep, {"a": "\ud800"}, {"\ud800": 1}, ["x", ["\udfff"]]):
+        with pytest.raises(Refused) as caught:
+            check_document(bad)
+        assert caught.value.kind == "invalid"
+    check_document({"a": [{"b": "fine"}]})
