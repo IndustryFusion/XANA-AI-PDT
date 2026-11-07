@@ -244,7 +244,8 @@ describe('builder, filter and archive in the list', () => {
 
   test('a finished run is archived from its row after confirming, and is in the history', async () => {
     const user = userEvent.setup()
-    arrange((s) => { s.runs[0].status = 'failed'; s.runs[0].data = { ...s.runs[0].data, error: 'x' } })
+    // Its queued scenario events are dropped, or the mock would move the run on from the state set here.
+    arrange((s) => { s.runs[0].status = 'failed'; s.runs[0].queue = []; s.runs[0].data = { ...s.runs[0].data, error: 'x' } })
     const runId = store.get().runs[0].runId
     const issue = store.get().runs[0].issue
     const before = (await items()).length
@@ -259,7 +260,7 @@ describe('builder, filter and archive in the list', () => {
 
   test('a refused archive leaves the row and shows why', async () => {
     const user = userEvent.setup()
-    arrange((s) => { s.runs[0].status = 'stopped'; s.runs[0].data = { ...s.runs[0].data, closePending: true } })
+    arrange((s) => { s.runs[0].status = 'stopped'; s.runs[0].queue = []; s.runs[0].data = { ...s.runs[0].data, closePending: true } })
     const issue = store.get().runs[0].issue
     const before = (await items()).length
     await user.click(screen.getByRole('button', { name: `Archive: ${issue}` }))
