@@ -90,10 +90,17 @@ class Broker:
             found = [e for e in found if e["id"] in params["id"].split(",")]
         if "q" in params and "((" in params["q"]:
             return httpx.Response(500, json={"title": "Internal error"})
+        if "attrs" in params:  # as the broker: only those attributes, and only entities with one of them
+            names = params["attrs"].split(",")
+            found = [
+                {k: v for k, v in e.items() if k in ("id", "type") or k in names}
+                for e in found
+                if any(name in e for name in names)
+            ]
         total = len(found)
         offset = int(params.get("offset", 0))
         limit = int(params.get("limit", 20))
-        reported = 0 if limit == 0 else total
+        reported = 0 if limit == 0 or offset >= total > 0 else total  # as measured: 0 past the end
         return httpx.Response(200, json=found[offset : offset + limit], headers={"NGSILD-Results-Count": str(reported)})
 
     def _upsert(self, request: httpx.Request) -> httpx.Response:
@@ -109,8 +116,10 @@ class Broker:
                 if entity["id"] not in self.entities:
                     created.append(entity["id"])
                     self.entities[entity["id"]] = dict(entity)
-                else:
+                elif request.url.params.get("options") == "update":
                     self.entities[entity["id"]].update(entity)
+                else:  # the broker's default: replace
+                    self.entities[entity["id"]] = dict(entity)
         if errors_:
             return httpx.Response(207, json={"success": success, "errors": errors_})
         return httpx.Response(201, json=created) if created else httpx.Response(204)

@@ -21,7 +21,7 @@ import { paths } from '../../app/router'
  * and the time-shift moment live in the URL, so a link reproduces the view.
  */
 export const DEFAULT_LIMIT = 50
-export const QUERY_KEYS = ['type', 'id', 'idPattern', 'q', 'limit', 'at']
+export const QUERY_KEYS = ['type', 'id', 'idPattern', 'q', 'attrs', 'hasAttr', 'limit', 'offset', 'at']
 
 /** Query and moment from the route's query string. */
 export function readQuery(urlQuery) {
@@ -30,18 +30,25 @@ export function readQuery(urlQuery) {
     id: urlQuery.id ?? '',
     idPattern: urlQuery.idPattern ?? '',
     q: urlQuery.q ?? '',
+    attrs: urlQuery.attrs ?? '',
+    hasAttr: urlQuery.hasAttr ?? '',
     limit: urlQuery.limit ?? String(DEFAULT_LIMIT),
+    offset: urlQuery.offset ?? '0',
     at: urlQuery.at ?? '',
   }
 }
 
 /** Whether the query names anything to look for. */
-export const hasCriteria = (query) => !!(query.type || query.id || query.idPattern || query.q)
+export const hasCriteria = (query) => !!(query.type || query.id || query.idPattern || query.q || query.hasAttr)
 
-/** The query as the data interface expects it. */
-export function toRequest(query) {
+/** The query as the data interface expects it. Paging and attributes are for the present only. */
+export function toRequest(query, { past = false } = {}) {
   const request = { limit: Number(query.limit) }
   for (const key of ['type', 'id', 'idPattern', 'q']) if (query[key]) request[key] = query[key]
+  if (past) return request
+  if (Number(query.offset) > 0) request.offset = Number(query.offset)
+  if (query.attrs) request.attrs = query.attrs
+  if (query.hasAttr) request.hasAttr = query.hasAttr
   return request
 }
 
@@ -50,7 +57,7 @@ export function toSearch(query) {
   const params = new URLSearchParams()
   for (const key of QUERY_KEYS) {
     const value = query[key]
-    if (!value || (key === 'limit' && String(value) === String(DEFAULT_LIMIT))) continue
+    if (!value || (key === 'limit' && String(value) === String(DEFAULT_LIMIT)) || (key === 'offset' && Number(value) === 0)) continue
     params.set(key, value)
   }
   const text = params.toString()
