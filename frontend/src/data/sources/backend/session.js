@@ -15,7 +15,7 @@
 //
 
 /**
- * Sign-in served by the backend (`/api/auth`). The factory's details come from a later phase.
+ * Sign-in served by the backend (`/api/auth`), and the factory's details from the IFRIC registry (`/api/ifric/factory`).
  *
  * A stopped backend affects only the areas it serves, so if it has not answered since the UI
  * loaded, `getAuthConfig` says so with `backendUnreachable`: the app opens, each area shows its
@@ -50,4 +50,5 @@ export const session = {
   },
   signIn: ({ username, password } = {}) => request('session', 'POST', '/api/auth/connect', { body: { username, password } }),
   signOut: () => request('session', 'POST', '/api/auth/logout'),
+  getFactory: () => request('session', 'GET', '/api/ifric/factory'),
 }

@@ -31,6 +31,7 @@ import psycopg
 from app.config import Settings
 from app.dataspace.gateway import GatewayClient
 from app.errors import Refused
+from app.ifric import RegistryClient
 from app.memory.migrate import Migrator
 from app.redact import mask_url
 
@@ -41,6 +42,7 @@ Probe = Callable[[], Awaitable[tuple[Status, str]]]
 
 UNCONFIRMED = "could not be confirmed, so it is assumed to be available"
 NO_DATASPACE = "No dataspace is configured"
+NO_REGISTRY = "No IFRIC registry is configured"
 NO_MODEL_LIST = (404, 405, 501)  # an OpenAI-compatible server need not offer a model list
 
 LABELS = {
@@ -50,6 +52,7 @@ LABELS = {
     "llm": "Language model",
     "gateway": "Dataspace gateway",
     "connector": "Dataspace connector",
+    "ifric": "IFRIC registry",
 }
 
 
@@ -82,7 +85,9 @@ class HealthService:
         transport: httpx.AsyncBaseTransport | None = None,
         token: Callable[[], str | None] | None = None,
         gateway: GatewayClient | None = None,
+        registry: RegistryClient | None = None,
     ) -> None:
+        self._registry = registry
         self._token = token
         self._gateway = gateway
         self._s = settings
@@ -96,6 +101,7 @@ class HealthService:
             "llm": self._llm,
             "gateway": self._gateway_check,
             "connector": self._connector_check,
+            "ifric": self._ifric_check,
         }
         self._clock = clock
         self._cached: tuple[float, dict] | None = None
@@ -108,7 +114,7 @@ class HealthService:
                 return self._cached[1]
             checks = await asyncio.gather(*(self._run(cid, probe) for cid, probe in self._probes.items()))
             result = {
-                "overall": overall([c.status for c in checks if c.detail != NO_DATASPACE]),
+                "overall": overall([c.status for c in checks if c.detail not in (NO_DATASPACE, NO_REGISTRY)]),
                 "checked_at": datetime.now(UTC).isoformat(),
                 "checks": [asdict(c) for c in checks],
                 "models": self._models(checks),
@@ -206,6 +212,12 @@ class HealthService:
             return "degraded", "Not connected to the dataspace, so the path to the connector can't be checked"
         await self._gateway.request("GET", "/capabilities/requests", params={"status": "pending"})
         return "ok", "The participant's adapter answers; the connector behind it can't be checked from here"
+
+    async def _ifric_check(self) -> tuple[Status, str]:
+        if self._registry is None or not self._registry.configured:
+            return "ok", NO_REGISTRY
+        participant = self._gateway.connection.participant_id if self._gateway else None
+        return await self._registry.check(participant)
 
     def _label(self) -> str:
         return (self._s.llm_provider_name or "Ollama") if self._s.llm_provider == "ollama" else self._s.llm_label

@@ -216,7 +216,7 @@ describe('operations served by the backend', () => {
 describe('delegation to the mock', () => {
   test('the backend serves runs, incidents, entities and health; the mock serves everything else', () => {
     expect(backend.SERVED).toEqual({
-      session: ['getAuthConfig', 'getSession', 'signIn', 'signOut'],
+      session: ['getAuthConfig', 'getSession', 'signIn', 'signOut', 'getFactory'],
       runs: ['listActiveRuns', 'startRun', 'getRun', 'subscribeRun', 'clarify', 'confirmResolution', 'escalationPreflight', 'reopenRun', 'stopRun', 'archiveRun'],
       incidents: ['listIncidents', 'getIncident', 'reopenIncident'],
       entities: [
@@ -225,11 +225,9 @@ describe('delegation to the mock', () => {
         'getAttributeHistory', 'getAttributeStatus', 'listTypesAt', 'queryEntitiesAt', 'subscribeEntities', 'getLiveUpdateHealth', 'getValueHints',
       ],
       alerts: ['listAlerts', 'countAlerts', 'getAlert', 'applyAlertAction', 'listEnvironments', 'listServices', 'getAlertSettings'],
-      dataspace: ['getConnection', 'connect', 'disconnect', 'listPeers', 'getPeerCapabilities', 'listCapabilityRequests', 'decideCapabilityRequest', 'setCapabilityPolicy'],
+      dataspace: ['getConnection', 'connect', 'disconnect', 'listPeers', 'getPeerCapabilities', 'listCapabilityRequests', 'decideCapabilityRequest', 'setCapabilityPolicy', 'resolveNames', 'resolveBuilders'],
       system: ['getHealth'],
     })
-    expect(backend.dataspace.resolveNames).toBe(mock.dataspace.resolveNames)
-    expect(backend.session.getFactory).toBe(mock.session.getFactory)
     expect(backend.session.signIn).not.toBe(mock.session.signIn)
     expect(backend.info.signInHint).toBeUndefined()
     expect(backend.runs.escalate).toBe(mock.runs.escalate)
@@ -241,8 +239,8 @@ describe('delegation to the mock', () => {
   test('delegated operations work without a backend', async () => {
     mock.store.reset()
     fakeFetch({})
-    const names = await bindArea('dataspace', backend.dataspace).resolveNames([])
-    expect(names).toEqual({})
+    const settings = await bindArea('system', backend.system).getServiceSettings()
+    expect(settings.length).toBeGreaterThan(0)
     expect(fetch).not.toHaveBeenCalled()
   })
 })
@@ -274,6 +272,17 @@ describe('dataspace', () => {
     })
     await dataspace.decideCapabilityRequest('a/b', { approved: false, note: 'No' })
     expect(lastCall().body).toEqual({ action: 'deny', note: 'No' })
+  })
+
+  test('answers keyed by an identifier keep the identifier', async () => {
+    fakeFetch({
+      'POST /api/ifric/resolve': { status: 200, body: { urn_with_under_score: 'Name' } },
+      'POST /api/ifric/resolve-builders': { status: 200, body: { machine_1_a: 'Builder' } },
+    })
+    expect(await dataspace.resolveNames(['urn_with_under_score'])).toEqual({ urn_with_under_score: 'Name' })
+    expect(lastCall().body).toEqual({ ids: ['urn_with_under_score'] })
+    expect(await dataspace.resolveBuilders(['machine_1_a'])).toEqual({ machine_1_a: 'Builder' })
+    expect(lastCall().body).toEqual({ machine_ids: ['machine_1_a'] })
   })
 
   test('connecting without a secret sends none, and a refusal keeps its kind', async () => {

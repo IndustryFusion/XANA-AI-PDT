@@ -170,7 +170,7 @@ Fields are snake_case. A refused request answers `{"error": {"kind", "message"}}
 | `/api/ngsi/*` | — | Data Explorer: query, edit, import, history and time-shift, on `NGSI_URL` and `PGREST_URL` only, and live updates (`/api/ngsi/ws`) through a broker subscription with an MQTT endpoint. For operators; the workflow has no path to it |
 | `/api/alerta/*` | — | Alerts screen: list, count, detail, actions, environments, services, on `ALERTA_URL` only. Actions are for operators; the workflow only reads |
 | `/api/gateway/*` | — | The dataspace connection: `config`, `status`, `connect`, `disconnect`, `token-claims`, `peers`, `peers/{id}/capabilities`, `policies`, `capabilities/requests`, `capabilities/policy`. Answers never hold a token or secret |
-| `/api/ifric/*` | — | *Later phase.* IFRIC registry token management and factory identity |
+| `/api/ifric/*` | — | The IFRIC registry, with the dataspace token: `config`, `status`, `factory`, `resolve`, `resolve-builders`. For the backend only, and not an agent tool |
 | `/events/ngsi` | POST | *Later phase.* Webhook for Scorpio NGSI-LD notifications |
 | `/events/alert` | POST | *Later phase.* Webhook for external alert systems |
 
@@ -222,6 +222,8 @@ Step content uses the field names of the UI's data interface, in snake_case; the
 **Sign-in.** With `KEYCLOAK_URL` set, the backend signs in to Keycloak for the operator with the password grant, keeps the token fresh in memory, and sends it to the context broker. There is one session per backend process, and the backend's own API is not protected, so network access to it must be limited. With nobody signed in, broker requests carry no token. These are open decisions, recorded in the `gh-21-keycloak-sign-in` design.
 
 **Dataspace connection.** With `GATEWAY_URL`, the backend holds a `client_credentials` token of the dataspace realm, separate from the operator's, in memory. It is checked every 60 seconds and renewed with 120 seconds left, and renewal stops after 3 failures in a row, which the operator sees. The client secret is stored encrypted in `gateway_credentials`, with no plaintext fallback. The `gateway` and `connector` health checks read the gateway and, through it, the participant's adapter.
+
+**IFRIC registry.** Company names, machine builders and factory details, for the backend only. A machine's builder is asked for with its entity ID; machine names come from the context broker. Not found, a refusal and an outage are told apart: a name is left out or empty, a builder comes with a reason, and in the health report `401` and `403` are failures.
 
 **Read-only.** Sources only read: the context source sends GET requests, the history source runs read-only transactions. The validation plan is limited to the entities observed in the round, so text in the issue cannot widen what is read. Memory is written only by `act`.
 
@@ -431,7 +433,7 @@ In **production** (K8s), non-sensitive config comes from a Helm-rendered ConfigM
 
 For **local development**, copy `backend/.env.example` to `backend/.env` and fill in credentials. `backend/.env.example` lists every variable the backend reads, with its default; an invalid value stops the backend at startup with a message naming the variable (never its value). Secrets are never returned or logged; connection URLs are shown with the password masked.
 
-Key variable groups (IFRIC variables belong to a later phase):
+Key variable groups:
 
 ```
 # LLM
@@ -480,7 +482,7 @@ GATEWAY_CLIENT_SECRET=...            # secret; optional, the operator can enter 
 SETTINGS_ENCRYPTION_KEY=...          # secret; required with GATEWAY_URL
 
 # IFRIC Registry
-IFRIC_URL=https://dev-registry.ifric.org
+IFRIC_URL=http://ifric-registry:4007  # including its port; asked with the dataspace token
 FACTORY_ID=urn:ifric:...             # optional; PDT token claim is preferred
 
 # Auth (Keycloak for FO operator login)

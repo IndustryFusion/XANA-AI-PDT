@@ -1,0 +1,14 @@
+{
+  "method": "GET",
+  "path": "/api/ifric/factory",
+  "status": 200,
+  "body": {
+    "id": "urn:ifric:fac-1",
+    "name": "Plant One",
+    "owner": "Factory Owner AG",
+    "location": {
+      "city": "Berlin",
+      "country": "Germany"
+    }
+  }
+}

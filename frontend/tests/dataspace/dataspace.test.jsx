@@ -271,3 +271,25 @@ describe('data-sharing tier', () => {
     expect(tier).toHaveTextContent('cannot be changed here')
   })
 })
+
+describe('what the registry did not return', () => {
+  test('an empty name shows the identifier', async () => {
+    const { dataspace } = await import('../../src/data')
+    const id = store.get().dataspace.capabilityRequests[0].requesterId
+    const spy = vi.spyOn(dataspace, 'resolveNames').mockResolvedValue({ [id]: '' })
+    open()
+    const requests = await region('Capability requests')
+    await waitFor(() => expect(spy).toHaveBeenCalled())
+    await waitFor(() => expect(within(requests).getAllByText(id).length).toBeGreaterThan(1))
+    spy.mockRestore()
+  })
+
+  test('a factory without an owner or location leaves them out', async () => {
+    const { FactoryDetails } = await import('../../src/app/Header')
+    const { render } = await import('@testing-library/react')
+    render(<FactoryDetails result={{ status: 'success', data: { id: 'urn:f', name: 'Plant', owner: null, location: null } }} />)
+    expect(screen.getByText('Plant')).toBeVisible()
+    expect(screen.queryByText('Owner')).not.toBeInTheDocument()
+    expect(screen.queryByText('Location')).not.toBeInTheDocument()
+  })
+})

@@ -55,6 +55,9 @@ config:
   GATEWAY_CLIENT_ID: {{ . | quote }}
   {{- end }}
   DATA_SHARING_POLICY: {{ .Values.dataSharingPolicy | quote }}
+  {{- with .Values.ifricUrl }}
+  IFRIC_URL: {{ . | quote }}
+  {{- end }}
   ALERTA_URL: {{ .Values.alertaUrl | quote }}
   ALERTS_REFRESH_INTERVAL_S: {{ .Values.alertsRefreshIntervalS | quote }}
   FUSEKI_URL: {{ .Values.fusekiUrl | quote }}

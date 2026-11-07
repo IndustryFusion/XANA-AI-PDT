@@ -1,0 +1,8 @@
+{
+  "method": "POST",
+  "path": "/api/ifric/resolve",
+  "status": 200,
+  "body": {
+    "urn:example:xana-builder": "Machine Builder GmbH"
+  }
+}

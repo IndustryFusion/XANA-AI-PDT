@@ -46,6 +46,8 @@ gatewayKeycloakUrl: ""
 gatewayKeycloakRealm: dataspace
 gatewayClientId: ""
 dataSharingPolicy: minimal
+# The IFRIC registry, including its port. Empty means none.
+ifricUrl: ""
 # Machine ontology and shapes. The graph base is http://<Fuseki's external host>/<realm> on the platform.
 fusekiUrl: http://fuseki:3030
 fusekiDataset: iff

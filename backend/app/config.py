@@ -74,6 +74,7 @@ class Settings(BaseSettings):
     gateway_client_secret: SecretStr | None = None
     settings_encryption_key: SecretStr | None = None
     data_sharing_policy: Literal["minimal", "adjacent", "timeseries"] = "minimal"
+    ifric_url: str | None = None
 
     ngsi_url: str = "http://localhost:9090"
     ngsi_tenant: str | None = None
@@ -129,7 +130,7 @@ class Settings(BaseSettings):
             raise ValueError("must be an IRI without spaces, quotes or brackets; it goes into SPARQL queries")
         return value
 
-    @field_validator("pgrest_url", "fuseki_url", "mqtt_mgmt_url", "gateway_url", "gateway_keycloak_url")
+    @field_validator("pgrest_url", "fuseki_url", "mqtt_mgmt_url", "gateway_url", "gateway_keycloak_url", "ifric_url")
     @classmethod
     def _http_address(cls, value: str | None) -> str | None:
         return value and with_scheme(value, "http")
