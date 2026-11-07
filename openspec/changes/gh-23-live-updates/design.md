@@ -42,6 +42,12 @@ From the platform's charts and authentication service, and a real Scorpio (6.0.2
 
 One subscription, with a random topic per process. Each `/api/ngsi/ws` client states a type or IDs, and gets only those. Each client has a bounded queue. A client that falls behind is closed, so it can't hold others up or silently lose messages; it reconnects.
 
+**A client that stops reading** fills its socket, so a send never finishes and a close frame can't get out. Each send has a 10 second limit, after which the connection is reset. ASGI has no way to do this, so a small middleware keeps the transport in the scope. **Alternatives:** closing the transport waits for its queue to drain, which is never, and `TCP_USER_TIMEOUT` needs the listening socket to be made by hand. The server's graceful shutdown is limited to 10 seconds, so that a shutdown always reaches the part that deletes the subscription, within Kubernetes' 30 seconds.
+
+**Notifications hold the whole entity,** not what changed. The UI compares with what it shows. **Alternative:** comparing in the backend needs a copy of every entity.
+
+**After a lost stream,** the UI reads what it shows again, as changes during an outage aren't replayed.
+
 **Alternative:** one subscription per browser. Rejected: more state in the broker, and more to leave behind.
 
 ### 2. Rotation is noticed by watching the token
@@ -60,10 +66,10 @@ The endpoint is built only where it is sent, and is never stored, logged or retu
 
 ### 4. Nothing left behind
 
-- Sign-out deletes the subscription first, while the token still works. The route does this, so the session is unchanged.
+- Sign-out deletes the subscription first, while the token still works. The route does this, so the session is unchanged. A create under way is left to finish first, for up to 5 seconds. If it takes longer it is cancelled, and the delete is sent twice, in case it still reaches the broker late.
 - Shutdown deletes it.
 - If the session ends without a sign-out, or the process dies, the token is no longer renewed, and the subscription runs out by `expiresAt`, at most 24 hours later. It holds a token which has expired by then or soon after.
-- The first start after sign-in removes older subscriptions with the same name, left by an earlier process. **Limit:** two backends sharing one broker would remove each other's once at start; each then creates its own again within 60 seconds.
+- The first start after sign-in removes older subscriptions with the same name, left by an earlier process, and tries again until it has listed them. **Limit:** two backends sharing one broker would remove each other's once at start; each then creates its own again within 60 seconds.
 
 ### 5. MQTT client
 
@@ -71,12 +77,24 @@ The endpoint is built only where it is sent, and is never stored, logged or retu
 
 `MQTT_MGMT_URL` is used only for the broker's unauthenticated `/status`, to tell "the broker is up but refuses us" from "the broker is down" in the health detail.
 
-### 6. State
+### 6. State, and what health can know
 
-`/api/ngsi/subscription-health` gives `status` (`ok` or `unavailable`), `state` (`waiting_for_sign_in`, `connecting`, `active`, `broker_unavailable`, `refused`, `subscription_failed`, `stopped`), `detail` and `expires_at`. It never holds the endpoint. The UI's existing indicator and its resubscribe after `ok` apply as they are.
+`/api/ngsi/subscription-health` gives `status` (`ok` or `unavailable`), `state` (`waiting_for_sign_in`, `connecting`, `active`, `broker_unavailable`, `refused`, `subscription_failed`, `delivery_failed`, `stopped`), `detail`, `expires_at` and `delivery` (`confirmed`, `unconfirmed` or `none`). It never holds the endpoint. The UI's existing indicator and its resubscribe after `ok` apply as they are.
+
+**The path from Scorpio to EMQX can't be checked directly.** With an unreachable address, Scorpio logs an error while the subscription still says `status: ok`, `timesFailed: 0`, `timesSent: 0`. So `ok` means connected and subscribed. `delivery` says whether a change has arrived yet. A change written through this backend that doesn't arrive within 15 seconds gives `delivery_failed`, and the next change to arrive clears it. A wrong `MQTT_BROKER_NOTIFY_URL` therefore shows only at the first such change.
+
+**Alternatives:**
+- A probe entity changed every so often: it would be a real end-to-end check, but it writes to the factory's twin with the operator's token, and into its history.
+- A subscription with `timeInterval`: it sends whole entities at every interval.
+
+**A refused topic:** EMQX accepts the connection and refuses the topic in its SUBACK, when its check says so. That is reported as `refused`, as otherwise nothing would ever arrive.
+
+### 7. Which pages may open the stream
+
+Browsers don't apply the same-origin rule to WebSockets, so any page could otherwise read live data. A browser's `Origin` must match the `Host` that the backend sees, or be in `WS_ALLOWED_ORIGINS`. A client with no `Origin` isn't a web page, and isn't refused: anyone who can reach the API can already read it (see #36). The development server keeps the page's `Host`, and the frontend's proxy now passes it with its port. **`/ws/run` has the same gap, from an earlier change.** It is left as it is, and listed for #36.
 
 ## Risks and limits
 
 - **Open API.** Anyone who can reach the backend can read the stream while the shared session stands (see #36).
-- **The platform's authentication service was not run here.** It needs Kafka, Redis and more of the platform. Its `/auth` and `/acl` rules were read from its code, and a small stand-in with the same rules was used in front of a real EMQX and Keycloak. The PR states this.
+- **The platform's authentication service was not run here.** It needs Kafka, Redis and more of the platform. Its `/auth` and `/acl` rules were read from its code, and `backend/emqx/mqtt_auth.py` has the same rules, in front of a real EMQX and Keycloak (the `platform-mqtt` profile). `tests/test_live_updates_real.py` uses it. The PR states this.
 - **Changes during an outage are not replayed.** The explorer's values can be stale until reloaded or changed again.
