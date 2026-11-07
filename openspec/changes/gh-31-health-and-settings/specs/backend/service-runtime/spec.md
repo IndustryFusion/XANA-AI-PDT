@@ -9,6 +9,10 @@ The health report SHALL hold checks for `memory`, `timeseries`, `broker`, `llm`,
 - **WHEN** any one service stops
 - **THEN** only its own check is `error`, the report still answers, and the rest of the app keeps working
 
+#### Scenario: What depends on a stopped service
+- **WHEN** the context broker stops
+- **THEN** the `broker` check is `error`, and `machine_events`, which follows from it, is `degraded`
+
 #### Scenario: Refused
 - **WHEN** a service answers 401 or 403
 - **THEN** its check is `error`, and says it was refused
@@ -26,11 +30,11 @@ The health report SHALL hold checks for `memory`, `timeseries`, `broker`, `llm`,
 - **THEN** the check is `error`
 
 #### Scenario: No secret
-- **WHEN** an address holds a password, or a service needs a key
+- **WHEN** an address holds a password, in its query too under a name with password, token, key or secret, or a service needs a key
 - **THEN** neither is in the report
 
 ### Requirement: Service settings
-`GET /api/config` SHALL give the service addresses in use, read-only, and no route SHALL take an address for a backend call.
+`GET /api/config` SHALL give the service addresses in use, read-only, and no route SHALL take the address of a service the backend calls.
 
 #### Scenario: Read
 - **WHEN** a client asks for the settings

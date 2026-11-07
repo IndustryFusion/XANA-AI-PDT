@@ -37,6 +37,8 @@ Each check gains `probe` (the address, with a password masked) and `hint` (what 
 
 `mqtt` opens a real connection, as a TCP check can't tell a refused token. It takes a client ID of its own, and ends at once.
 
+`machine_events` with Scorpio stopped is `degraded`, not `error`, so that only Scorpio's own check is red.
+
 With nobody signed in on a platform that needs a token, `broker` and `pgrest` read as failed: a 401 is a failure, as the issue asks.
 
 ### Without the mock
