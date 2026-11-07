@@ -34,9 +34,14 @@ A send can take 2 minutes, and the lock also holds up watchers. So a run has an 
 |---|---|
 | `twin:direct` | `machine.json`: the entity read anew, with its active alerts |
 | `twin:adjacents` | `related-entities.json`: entities one relationship away, at most 20, with their active alerts |
-| `twin:history` | `signal-history.json`: 24 hours of hourly buckets of the numeric signals of the machine, and of the entities one relationship away only if `twin:adjacents` goes too, as those signals tell what those entities are. A platform keeps most signals on sensors, so with `twin:adjacents` withheld this can be thin. A maintainer can overrule this |
+| `twin:history` | `signal-history.json`: the machine's own stored values of the last 24 hours, numbers and text alike, one entry per attribute, at most the newest 500 values. Related entities' signals, such as those of its sensors, are not part of it. A builder's data request that names attributes gets only those (#29) |
 
 They go as one bundle, as the contract delivers files as one ZIP, naming the highest capability sent. The incident message holds the reference, machine ID, issue, the state of the diagnosis, the tier, and the names of the files; no data beyond those. A source failing fails the send rather than sending less than the operator saw.
+
+### What history holds: decided by a maintainer
+
+The maintainer decided that history holds the machine's own values only, of every type, for 24 hours, and that a grant of `twin:history` sends what the `timeseries` tier does: the machine's entity data, related entities and the history (#29). Escalation at a tier keeps the access check above: each capability goes only if its access is `auto` or `approved`, so at `timeseries` with `twin:adjacents` held back, the history still goes, with the machine's own values.
+Alternatives that were considered: hourly buckets of numeric signals only; adding related entities' signals when `twin:adjacents` goes too, which the first version did and which makes a history-only sending hold nothing where signals are kept on sensors; sending nothing and saying so; asking for `twin:adjacents` too.
 
 ### Outbox
 

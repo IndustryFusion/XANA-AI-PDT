@@ -15,12 +15,13 @@
 #
 import asyncio
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
 
 from app.dataspace.sharing import ADJACENTS, DIRECT, HISTORY, TIERS, Sharing, apply_policy
+from app.errors import Refused
 from app.memory.migrate import Migrator
 from app.runs.escalation import Escalator
 from app.runs.model import RunState
@@ -39,7 +40,7 @@ from tests.runs_support import (
     until,
 )
 from tests.space_support import Space, connect, space_app
-from xana_agent.sources.base import SourceUnavailable
+from xana_agent.sources.base import Observation, SourceUnavailable
 from xana_agent.testing import FakeContextSource, FakeHistorySource, sample_entities, sample_history
 
 pytestmark = pytest.mark.db
@@ -127,7 +128,7 @@ async def test_minimal_sends_only_the_entity(url):
     assert bundle["files"]["machine.json"]["active_alerts"][0]["id"] == f"alert-of-{MACHINE}"
     assert bundle["capability"] == DIRECT
     text = json.dumps(space.sent)
-    assert OTHER_MACHINE not in text and "buckets" not in text
+    assert OTHER_MACHINE not in text and '"observed_at"' not in text
     # The entity's own relationships name related entities; their content isn't sent.
     related = [e for e in sample_entities() if e["id"] != MACHINE]
     assert not any(json.dumps(e["id"]) + ', "type"' in text for e in related)
@@ -142,7 +143,7 @@ async def test_adjacent_adds_related_entities_and_no_history(url):
     assert bundle["capability"] == ADJACENTS
     related = bundle["files"]["related-entities.json"]
     assert related and all(item["entity"]["id"] != MACHINE for item in related)
-    assert "buckets" not in json.dumps(space.sent)
+    assert '"observed_at"' not in json.dumps(space.sent)
     assert [d["category"] for d in run["escalation"]["data"]] == [DIRECT, ADJACENTS]
 
 
@@ -152,29 +153,68 @@ async def test_timeseries_adds_history(url):
     assert set(bundle["files"]) == {"machine.json", "related-entities.json", "signal-history.json"}
     assert bundle["capability"] == HISTORY
     history = bundle["files"]["signal-history.json"]
-    assert history and history[0]["buckets"] and {"entity_id", "attribute", "buckets"} == set(history[0])
+    assert history and history[0]["values"] and {"entity_id", "attribute", "values"} == set(history[0])
+    assert {signal["entity_id"] for signal in history} == {MACHINE}
     assert [d["category"] for d in run["escalation"]["data"]] == [DIRECT, ADJACENTS, HISTORY]
 
 
-class RecordingHistory(FakeHistorySource):
-    asked_for: list[str] = []
-
-    async def recent(self, entity_ids, window):
-        self.asked_for = list(entity_ids)
-        return await super().recent(entity_ids, window)
+SENSOR = "urn:ngsi-ld:Sensor:press-01-oil-temperature"
 
 
-@pytest.mark.parametrize(
-    ("allowed", "with_related"), [((HISTORY,), False), ((DIRECT, HISTORY), False), ((DIRECT, ADJACENTS, HISTORY), True)]
-)
-async def test_history_holds_related_entities_only_if_those_may_go(allowed, with_related):
-    history = RecordingHistory(sample_history())
-    escalator = Escalator(None, None, FakeContextSource(sample_entities()), history, None, "timeseries", lambda: True)
+def history_with_text() -> FakeHistorySource:
+    """The sample series, with a text status on the machine and one on its sensor."""
+    history = FakeHistorySource(sample_history())
+    at = datetime.now(UTC) - timedelta(minutes=5)
+    history.text_values = [
+        Observation(entity_id=MACHINE, attribute="status", at=at, value="error", value_type="string"),
+        Observation(entity_id=SENSOR, attribute="status", at=at, value="stuck", value_type="string"),
+        Observation(entity_id=MACHINE, attribute="status", at=at - timedelta(hours=30), value="old"),
+    ]
+    return history
+
+
+async def history_file(sharing: tuple[str, ...], attributes=None) -> list[dict[str, Any]]:
+    escalator = Escalator(
+        None, None, FakeContextSource(sample_entities()), history_with_text(), None, "timeseries", lambda: True
+    )
     now = datetime.now(UTC)
     run = RunState("r", MACHINE, "issue", "awaiting_input", started_at=now, updated_at=now)
-    await escalator.files(run, Sharing("timeseries", tuple(dict.fromkeys((DIRECT, *allowed))), ()))
-    assert history.asked_for[0] == MACHINE
-    assert (len(history.asked_for) > 1) is with_related
+    files = dict(await escalator.files(run, Sharing("timeseries", sharing, ()), attributes))
+    return json.loads(files["signal-history.json"])
+
+
+@pytest.mark.parametrize("sharing", [(DIRECT, HISTORY), (DIRECT, ADJACENTS, HISTORY)])
+async def test_history_holds_the_machines_own_signals_of_every_type_and_no_sensors(sharing):
+    history = await history_file(sharing)
+    assert {signal["entity_id"] for signal in history} == {MACHINE}
+    by_attribute = {signal["attribute"]: signal["values"] for signal in history}
+    assert set(by_attribute) == {"spindleSpeed", "status"}
+    assert [v["value"] for v in by_attribute["status"]] == ["error"]  # the one outside 24 hours isn't
+    assert by_attribute["status"][0]["value_type"] == "string"
+    assert len(by_attribute["spindleSpeed"]) == 48
+    assert SENSOR not in json.dumps(history)
+
+
+async def test_history_holds_only_the_attributes_asked_for():
+    history = await history_file((DIRECT, ADJACENTS, HISTORY), ["status"])
+    assert [(s["entity_id"], s["attribute"]) for s in history] == [(MACHINE, "status")]
+
+
+async def test_history_needs_a_store_that_gives_the_values():
+    class NumbersOnly:
+        async def recent(self, entity_ids, window):
+            return []
+
+        async def metrics(self, entity_id, attribute, window, bucket):
+            return []
+
+    escalator = Escalator(
+        None, None, FakeContextSource(sample_entities()), NumbersOnly(), None, "timeseries", lambda: True
+    )
+    now = datetime.now(UTC)
+    run = RunState("r", MACHINE, "issue", "awaiting_input", started_at=now, updated_at=now)
+    with pytest.raises(Refused):
+        await escalator.files(run, Sharing("timeseries", (DIRECT, HISTORY), ()))
 
 
 async def test_a_retry_records_what_the_first_attempt_sent(url):

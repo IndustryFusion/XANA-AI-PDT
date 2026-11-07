@@ -25,6 +25,8 @@ from xana_agent.sources.base import (
     HistorySource,
     IncidentMemory,
     LifecycleEvent,
+    Observation,
+    ObservationSource,
     SignalHistory,
     SourceUnavailable,
 )
@@ -46,6 +48,8 @@ __all__ = [
     "IncidentMemory",
     "LifecycleEvent",
     "NgsiContextSource",
+    "Observation",
+    "ObservationSource",
     "SignalHistory",
     "SourceUnavailable",
     "TimescaleHistorySource",

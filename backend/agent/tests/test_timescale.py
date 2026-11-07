@@ -66,6 +66,30 @@ async def test_recent_reports_last_value_and_trend(history_database):
 
 
 @pytest.mark.db
+async def test_observations_are_the_entitys_own_values_of_every_type(history_database):
+    now = datetime.now(UTC)
+    _load(history_database, now)
+    source = TimescaleHistorySource(history_database)
+    machine = await source.observations("urn:ngsi-ld:Machine:press-01", timedelta(hours=24))
+    assert [(o.attribute, o.value, o.value_type) for o in machine] == [("status", "running", "string")]
+    sensor = await source.observations(SENSOR, timedelta(hours=24))
+    assert len(sensor) == 288  # neither the deleted value nor the one outside the window
+    assert float(sensor[0].value) == 70 and sensor[0].at >= sensor[-1].at
+    assert len(await source.observations(SENSOR, timedelta(hours=24), limit=10)) == 10
+
+
+@pytest.mark.db
+async def test_observations_keep_only_the_attributes_asked_for(history_database):
+    _load(history_database, datetime.now(UTC))
+    source = TimescaleHistorySource(history_database)
+    machine = "urn:ngsi-ld:Machine:press-01"
+    assert len(await source.observations(machine, timedelta(hours=24), ["status"])) == 1
+    assert len(await source.observations(machine, timedelta(hours=24), [STATUS])) == 1
+    assert await source.observations(machine, timedelta(hours=24), ["value"]) == []
+    assert await source.observations(machine, timedelta(hours=24), []) == []
+
+
+@pytest.mark.db
 async def test_metrics_are_bucketed(history_database):
     _load(history_database, datetime.now(UTC))
     source = TimescaleHistorySource(history_database)
