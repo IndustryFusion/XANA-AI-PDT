@@ -21,6 +21,10 @@ For attributes with recorded history the UI SHALL show the values over a selecta
 - **WHEN** the operator opens the history of an attribute whose latest recorded state is deleted
 - **THEN** the history says when it was deleted, and still shows its earlier values
 
+#### Scenario: Attribute without an observation time
+- **WHEN** the store holds rows for an attribute that states no observation time
+- **THEN** its history can be opened
+
 #### Scenario: History service unavailable
 - **WHEN** the history cannot be read
 - **THEN** the history says so with the reason, and the rest of the explorer keeps working

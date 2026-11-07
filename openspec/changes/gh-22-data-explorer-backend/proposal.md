@@ -10,7 +10,8 @@ The Data Explorer runs only on the UI's mock. Operators need to query, edit and 
 
 - Add backend routes under `/api/ngsi`, using the backend's own configuration only: `entities`, `types`, `stats`, `attributes`, editing through Scorpio, `delete-by-types`, `import`, `import/fetch`, `history`, `attr-status`, `timeshift/types` and `timeshift/entities`.
 - Serve the `entities` area from the backend data source. Live updates (#23) and value hints (#24) stay on the mock until those issues.
-- Add the settings `PGREST_URL`, `NGSI_CONTEXT_URL` and `TIMESCALE_ENTITY_TABLE`.
+- Add the settings `PGREST_URL`, `NGSI_CONTEXT_URL`, `NGSI_ALLOWED_CONTEXTS` and `TIMESCALE_ENTITY_TABLE`.
+- Add the runtime dependency `google-re2`, for patterns that can't hold up the backend.
 - Report an unreachable or failing Scorpio or PostgREST as `unavailable` with HTTP 502.
 - Extend the agent's history source with relationship and text changes and lifecycle reads from `entities`, and include rows where `deleted` is null. The diagnostic workflow stays read-only.
 - Add PostgREST to the local environment under a profile, and move the sample history table to the platform's layout, with an `entities` table.

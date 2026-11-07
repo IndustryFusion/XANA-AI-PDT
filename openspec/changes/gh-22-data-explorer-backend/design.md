@@ -29,6 +29,8 @@ Checked against the digital twin's charts and code, and a real Scorpio (6.0.2 al
 | PostgREST auth | No anonymous role. JWT checked against Keycloak's keys, and the role comes from the `role` claim, which the `pgrest_role` client scope hard-codes to the reader user. The `scorpio` client has that scope, so the operator's token works. | Requests carry the operator's bearer token. Without one the platform's PostgREST answers 401, which is shown as such. |
 | PostgREST filters | `eq.`, `in.`, `lte.`, `gte.`, `or`, `order`, `limit`, `select` on the platform's quoted camelCase columns all work. Values in `in.()` and `or=()` must be double-quoted, or a comma in a value changes the filter. | Values are always quoted and escaped. Attribute names are never joined in unquoted. |
 | Scorpio attribute names | Platform attributes are full IRIs, and answers keep them. A short name in `q` without a context expands to the default context and **silently matches nothing** on such data. With a `Link` context that maps the term, it matches. | `NGSI_CONTEXT_URL` adds a `Link` header. It also fixes the agent's inverse relationship queries, which otherwise find nothing on platform data. |
+| Operators in `q` | `~=` and `!~=` answer 400 (a jsonpath syntax error), and ranges too. `!attr` answers 500. `==`, `!=`, `>`, `>=`, `<`, `<=`, lists, `attr`, `attr.sub`, `attr[key]`, `;`, `|` and parentheses work. | See decision 3. |
+| Remote contexts | An entity's `@context` URL is fetched by Scorpio from inside the cluster, and the failure's reason quotes the address. | See decision 11. |
 | IRIs in `q` | A full IRI with a dot in its host (`https://industry-fusion.com/...`) **silently matches nothing**, because `.` separates sub-attributes in a `q` path. IRIs without a dot work. | The UI's query builder offers the broker's names. See decision 3. |
 | Bad `q` | Scorpio answers 500 with an internal error for `((`. | The backend checks the syntax first and answers `invalid`, with the position. |
 | Partial attribute update | `PATCH .../attrs/{name}` **replaces** the attribute, losing `unitCode` and sub-attributes, and answers 204 for an attribute that does not exist. `PATCH /entities/{id}` merges, but needs `type` in each fragment. | See decision 2. |
@@ -53,19 +55,27 @@ Routes take no address, header or token from the caller. Scorpio is `NGSI_URL`, 
 - **Update:** read the entity, refuse a missing attribute as `not_found`, then `PATCH /entities/{id}` with the existing `type` in each fragment, stamping `observedAt` when a value changes and the fragment doesn't set it. Text for a numeric value is refused as `invalid`. An attribute with several datasets is overwritten through `POST .../attrs`, which keeps its other datasets.
 - **Sub-attribute delete:** read, remove, then overwrite through `POST .../attrs`.
 
-There is a short gap between reading and writing, in which another writer's change to the same attribute's sub-attributes can be lost. **Alternative:** `PATCH .../attrs/{name}`. Rejected: it loses units and sub-attributes.
+The backend makes these read-then-write steps one at a time per entity, so two adds of one attribute give one success and one `conflict`, where the broker would answer 204 to both and drop a value. Another writer, or a second backend process, can still change an attribute between the read and the write, and that change can be lost. There is one process per deployment while the session is per process (#36). **Alternative:** `PATCH .../attrs/{name}`. Rejected: it loses units and sub-attributes.
 
 ### 3. A `q` that Scorpio can't evaluate
 
-The backend has its own parser for the documented `q` grammar, needed for syntax errors and time-shift. When an attribute in `q` is an IRI with a dot, which Scorpio silently fails on, the backend reads up to 5000 entities for the query's type and filters them itself, and returns the first `limit` matches.
+The backend has its own parser for the documented `q` grammar, needed for syntax errors and time-shift. It evaluates an expression itself when it holds `~=`, `!~=`, `!attr`, a range, or an IRI with a dot, as Scorpio refuses, fails on or silently misses those. It does the same if Scorpio fails on any other expression that passed the syntax check. It reads up to 5000 entities for the query's type, and returns the first `limit` matches.
 
-**Alternatives:** pass it through (silently wrong), or register a generated context in the broker for each query (leaves contexts behind).
+**When it stops early,** the answer has a header `X-Results-Limited: scanned=5000, total=5300`, as the body stays what the broker's would be. The data source gives the list a `limited` member, and the Data Explorer says so, also when nothing matched.
+
+These were measured on Scorpio 6.0.2, as the platform's own image isn't available. If the platform's accepts more, the backend still answers correctly, just more slowly.
+
+**Alternatives:** pass everything through (refused or silently wrong), or register a generated context in the broker for each query (leaves contexts behind, and covers only IRIs).
+
+**Patterns run on RE2** (`google-re2`), as Python's `re` let `(a+)+$` on 28 characters hold up the whole backend for 29 seconds. RE2's time is linear in the text, so no worker or timeout is needed. It has no look-around or back-references, which are refused as `invalid`. **Alternatives:** the `regex` package with a timeout still blocks the event loop for that time; a thread can't be stopped; a worker process is more to run and fail.
 
 ### 4. History through PostgREST
 
 `history` selects by entity and attribute, in a time range, oldest first, up to 5000 rows. A name without a scheme also matches IRIs ending in `/name` or `#name`, so short names work on the sample data. Top-level rows only (`parentId` is null), unless the name is a sub-attribute's. `deleted = true` rows are left out; `attr-status` reports them. Numbers come back as numbers, unless `valueType` says string, and relationships stay text.
 
 `getAttributeHistory`'s `not_found` is not produced: the store can't tell an unknown entity from one with no rows, so the answer is an empty list.
+
+A short name is matched with `like`, so `%` and `_` in it are escaped, and `*` is refused. When a range holds more rows than fit, the answer has the same header, `newest=5000`, and the history says so.
 
 ### 5. Time-shift reconstructs from rows
 
@@ -97,6 +107,21 @@ The backend source maps snake_case keys to camelCase, which would alter attribut
 ### 10. Agent history
 
 Two reads are added to the history source: non-numeric changes (`changes`), and entity lifecycle (`lifecycle`). Observe calls them separately from `recent`, and a failure leaves the rest of the round unchanged. An external program's history source that doesn't offer them is treated as having none. All go through the read-only transaction that the source already uses.
+
+### 11. Remote contexts
+
+Scorpio fetches an entity's `@context` from inside the cluster, so an import is another way of reaching internal addresses, past the checks of decision 6. **Only these may reach the broker:** the ETSI core context, `NGSI_CONTEXT_URL`, the addresses in `NGSI_ALLOWED_CONTEXTS`, and inline contexts with no `@import` or nested `@context`. Anything else fails that entity, whatever its source. A `@context` inside an attribute is refused on import and on edits. Addresses are taken out of the reasons the broker gives.
+
+**Alternatives:**
+- Apply decision 6's check to the context's address: Scorpio makes the connection, so a second DNS answer or a redirect would get past it.
+- Refuse every `@context`: real documents name the core context.
+- Strip it: the same terms would then mean something else.
+
+**Limit:** a platform that imports documents naming its own contexts must list them.
+
+### 12. What isn't in the health report
+
+PostgREST, Alerta, Fuseki and EMQX aren't in `/api/diagnostics`. The `backend/service-runtime` spec lists four dependencies, and a local environment without the optional profiles would show as degraded. A decision for maintainers. Each area shows its own failures.
 
 ## Risks and limits
 
