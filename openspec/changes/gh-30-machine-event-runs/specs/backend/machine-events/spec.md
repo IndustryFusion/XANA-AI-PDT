@@ -17,6 +17,10 @@
 - **WHEN** a call presents the secret
 - **THEN** it is answered 202 with `{accepted, ignored}` before any run starts
 
+#### Scenario: Body too large
+- **WHEN** a body is over 10 MiB
+- **THEN** it is answered 413, and nothing is queued
+
 #### Scenario: Queue full
 - **WHEN** the queue is full
 - **THEN** the call is answered 503, and says so
@@ -103,15 +107,19 @@ The worker SHALL go on after any failure, and lose no event while the process li
 
 #### Scenario: Data the database can't store
 - **WHEN** an event holds a NUL or a lone surrogate, in its machine, issue or values
-- **THEN** those are left out, and if the database still refuses it, it is logged and the next event is handled
+- **THEN** those are left out, an event with no machine or issue left is refused, and if the database refuses the data for what it is, or its size, it is logged and the next event is handled
+
+#### Scenario: A database that can't write for now
+- **WHEN** the database refuses for any other reason, such as being read-only
+- **THEN** the worker tries again until it can, and one run starts
 
 #### Scenario: A triggered run just failed
 - **WHEN** a triggered run of a machine failed within the last 5 minutes, and another event for it arrives
-- **THEN** no run starts
+- **THEN** no run starts yet. Its values aren't taken as seen, and the latest event per machine and source starts once the wait ends, with no further event needed
 
 #### Scenario: A short name with the broker down
 - **WHEN** an event's short name can't be resolved, and an open run's identifier ends in that name
-- **THEN** no run starts
+- **THEN** no run starts, and its values aren't taken as seen
 
 #### Scenario: Unknown name
 - **WHEN** an event names a machine that can't be resolved

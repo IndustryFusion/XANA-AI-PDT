@@ -75,10 +75,10 @@ Checked by the worker, one event at a time, on the same state as the screens: an
 | Queue full | `503`, so the sender can tell. The queue holds 1000 events |
 | Memory database down | The worker holds the event and tries again every 5 s, so nothing is lost while the process lives. The queue fills behind it |
 | Language model down | The run starts, and fails visibly with its source. Unlike an operator, nobody is there to read a refusal |
-| A triggered run just failed | For 5 minutes, an event for that machine starts nothing, so that a failing model gives one failed run per machine, not one per alert |
+| A triggered run just failed | For 5 minutes, an event for that machine starts nothing, so that a failing model gives one failed run per machine, not one per alert. The latest event per machine and source is held in memory, with its values not taken as seen, and starts when the wait ends |
 | Unknown short name | Logged and dropped |
 | Short name with the broker down | It stays as given, and an open run whose identifier ends in it counts as that machine's |
-| Data the database refuses | NUL and lone surrogates are taken out first. If it still refuses, logged and dropped; only a lost connection is tried again |
+| Data the database refuses | NUL and lone surrogates are taken out first, and nothing left is refused. Only a data, integrity or limit error (class 54) is logged and dropped. Everything else is tried again, as a read-only database or a missing right can be put right, so such a fault holds the queue back until then. A body is limited to 10 MiB |
 | Anything unexpected | Logged and dropped; the worker goes on |
 | Backend stops | **What is in the queue is lost.** The issue asks for a queue, and the broker doesn't retry. Keeping events in the database would add a store for a window of milliseconds |
 
