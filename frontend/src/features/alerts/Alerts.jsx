@@ -38,10 +38,17 @@ export const REFRESH_OPTIONS = [
 ]
 const DEFAULT_REFRESH = 30_000
 
-function readRefresh() {
+/** What the operator chose, or null. */
+function readChosenRefresh() {
   const raw = localStorage.getItem(REFRESH_KEY)
   const stored = Number(raw)
-  return raw !== null && REFRESH_OPTIONS.some((o) => o.value === stored) ? stored : DEFAULT_REFRESH
+  return raw !== null && REFRESH_OPTIONS.some((o) => o.value === stored) ? stored : null
+}
+
+/** The refresh options, with the configured default among them. */
+function refreshOptions(configured) {
+  if (configured == null || REFRESH_OPTIONS.some((o) => o.value === configured)) return REFRESH_OPTIONS
+  return [...REFRESH_OPTIONS, { value: configured, label: `${configured / 1000} s` }].sort((a, b) => a.value - b.value)
 }
 
 /** Number of alerts per severity for the current filter; selecting one filters by it. */
@@ -63,7 +70,7 @@ function SeveritySummary({ counts, selected, onSelect }) {
   )
 }
 
-function Filters({ filters, onChange, refreshMs, onRefreshMs, onRefresh }) {
+function Filters({ filters, onChange, refreshMs, options, onRefreshMs, onRefresh }) {
   const environments = useData('alerts', 'listEnvironments')
   const services = useData('alerts', 'listServices')
   const ids = { status: useId(), env: useId(), service: useId(), text: useId(), sort: useId(), refresh: useId() }
@@ -104,7 +111,7 @@ function Filters({ filters, onChange, refreshMs, onRefreshMs, onRefresh }) {
       <div className="field">
         <label className="field__label" htmlFor={ids.refresh}>Automatic refresh</label>
         <select id={ids.refresh} value={refreshMs} onChange={(e) => onRefreshMs(Number(e.target.value))}>
-          {REFRESH_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
       </div>
       <Button onClick={onRefresh}>Refresh now</Button>
@@ -144,7 +151,10 @@ export default function Alerts() {
   const { params, query, navigate } = useRoute()
   const filters = readFilters(query)
   const selectedAlert = params.alertId ?? null
-  const [refreshMs, setRefreshMs] = useState(readRefresh)
+  const [chosenRefresh, setChosenRefresh] = useState(readChosenRefresh)
+  const settings = useData('alerts', 'getAlertSettings')
+  const configuredRefresh = settings.data ? settings.data.refreshIntervalS * 1000 : null
+  const refreshMs = chosenRefresh ?? configuredRefresh ?? DEFAULT_REFRESH
   const [refreshKey, setRefreshKey] = useState(0)
   const [selection, setSelection] = useState([])
   const [failures, setFailures] = useState({})
@@ -167,7 +177,7 @@ export default function Alerts() {
   const changeFilters = (next, typing) => navigate(selectedAlert ? alertPath(selectedAlert, next) : alertsPath(next), { replace: typing })
 
   function changeRefresh(value) {
-    setRefreshMs(value)
+    setChosenRefresh(value)
     localStorage.setItem(REFRESH_KEY, String(value))
   }
 
@@ -210,8 +220,14 @@ export default function Alerts() {
         {result.data && <p className="muted">{result.data.total} {result.data.total === 1 ? 'alert matches' : 'alerts match'} the filter</p>}
       </div>
 
+      {result.data?.searchLimited && (
+        <p className="muted" role="status">
+          Only the first {result.data.searched} alerts of this filter were searched, so there may be more matches, and the numbers here count only those. Narrow the status, environment or service.
+        </p>
+      )}
+
       <SeveritySummary counts={counts} selected={filters.severity} onSelect={(severity) => changeFilters({ ...filters, severity })} />
-      <Filters filters={filters} onChange={changeFilters} refreshMs={refreshMs} onRefreshMs={changeRefresh} onRefresh={refresh} />
+      <Filters filters={filters} onChange={changeFilters} refreshMs={refreshMs} options={refreshOptions(configuredRefresh)} onRefreshMs={changeRefresh} onRefresh={refresh} />
 
       {outcome && <ActionResults outcome={outcome} onDismiss={() => setOutcome(null)} />}
 

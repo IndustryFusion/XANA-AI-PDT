@@ -55,6 +55,8 @@ Database connections use TLS (`POSTGRES_SSLMODE: require`), which encrypts the c
 
 The Data Explorer reads history from `pgrestUrl` (the platform's `pgrest` service). Set `ngsiContextUrl` if operators or the agent's lookups use short names on data with full IRIs.
 
+Alerts use `alertaUrl`, which must end in `/api`. Set the key with `XANA_ALERTA_API_KEY`, or as `ALERTA_API_KEY` in the existing secret.
+
 Value hints read `fusekiUrl` and `fusekiDataset`. Set `fusekiGraphBase` to `http://<Fuseki's external host>/<realm>`, as the platform names its graphs after that host.
 
 Live updates use `mqttBrokerUrl`, `mqttMgmtUrl` and, if Scorpio reaches the broker at another address, `mqttBrokerNotifyUrl`. Operators need `Factory-Admin` or `Factory-Reader` on client `scorpio`. A page served from another address than the UI's needs `WS_ALLOWED_ORIGINS` in `extraConfig`.

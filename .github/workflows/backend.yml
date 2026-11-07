@@ -99,7 +99,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Start the local environment
-        run: docker compose -f compose.yaml --profile history --profile live --profile auth --profile platform-mqtt --profile ontology up -d --build db broker sample-data backend pgrest-keys pgrest emqx keycloak mqtt-auth emqx-platform fuseki sample-ontology
+        run: docker compose -f compose.yaml --profile history --profile live --profile auth --profile platform-mqtt --profile ontology --profile alerts up -d --build db broker sample-data backend pgrest-keys pgrest emqx keycloak mqtt-auth emqx-platform fuseki sample-ontology alerta-db alerta sample-alerts
 
       - name: Wait for the sample data and the backend
         run: |
@@ -126,6 +126,8 @@ jobs:
           TEST_KEYCLOAK_URL: http://127.0.0.1:8081
           TEST_FUSEKI_URL: http://127.0.0.1:3030
           FUSEKI_ADMIN_PASSWORD: admin
+          TEST_ALERTA_URL: http://127.0.0.1:8082/api
+          TEST_ALERTA_KEY: local-development-only-key
         run: |
           pip install -e ./agent -e ".[dev]"
           timeout 180 sh -c 'until curl -sf http://127.0.0.1:8081/realms/iff > /dev/null; do sleep 3; done'
@@ -133,7 +135,7 @@ jobs:
           docker compose -f compose.yaml stop backend
           TEST_FUSEKI_CALLBACK_HOST=$(docker network inspect xana-ai-pdt_default -f '{{(index .IPAM.Config 0).Gateway}}')
           export TEST_FUSEKI_CALLBACK_HOST
-          pytest tests/test_explorer_real.py tests/test_live_updates_real.py tests/test_ontology_real.py
+          pytest tests/test_explorer_real.py tests/test_live_updates_real.py tests/test_ontology_real.py tests/test_alerta_real.py
           docker compose -f compose.yaml start backend
           timeout 120 sh -c 'until curl -sf http://127.0.0.1:8000/healthz > /dev/null; do sleep 2; done'
 
@@ -158,5 +160,5 @@ jobs:
 
       - name: Local environment logs
         if: failure()
-        run: docker compose -f compose.yaml logs --no-color --tail 300 backend sample-data broker pgrest emqx emqx-platform mqtt-auth keycloak fuseki sample-ontology
+        run: docker compose -f compose.yaml logs --no-color --tail 300 backend sample-data broker pgrest emqx emqx-platform mqtt-auth keycloak fuseki sample-ontology alerta sample-alerts
 

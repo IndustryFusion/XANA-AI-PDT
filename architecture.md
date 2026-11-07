@@ -88,7 +88,7 @@ Built with React 18 + Vite in JavaScript. Structured views, no chat interface. E
 
 **Data layer.** Screens obtain data only through the UI data interface (`src/data`), one module per area: session, runs, incidents, entities, alerts, dataspace, system health, and the optional knowledge base. A data source implements the interface and is selected with `VITE_DATA_SOURCE`:
 - `mock` (default): runs in the browser with deterministic seeded data, a simulated run engine, and development controls for per-area latency and failure. No backend is needed.
-- `backend`: the operations the backend provides (session, runs and their stream, incident history, the Data Explorer's entities, system health) over REST and WebSocket, with key mapping (snake_case ↔ camelCase), error mapping and stream reconnection. Every other operation is delegated to the mock source (`{ ...mock[area], ...backend[area] }`), so the whole UI stays usable while later phases bring their backends. Attaching it changed no screen.
+- `backend`: the operations the backend provides (session, runs and their stream, incident history, the Data Explorer's entities, alerts, system health) over REST and WebSocket, with key mapping (snake_case ↔ camelCase), error mapping and stream reconnection. Every other operation is delegated to the mock source (`{ ...mock[area], ...backend[area] }`), so the whole UI stays usable while later phases bring their backends. Attaching it changed no screen.
 
 The interface is documented in `frontend/docs/data-interface.md`. Lint rules forbid screens from importing a data source or doing network I/O directly.
 
@@ -168,6 +168,7 @@ Fields are snake_case. A refused request answers `{"error": {"kind", "message"}}
 | `/api/agent/mb-feedback/{run_id}` | POST | *Later phase.* Process a machine builder reply (called by inbox poller) |
 | `/api/agent/operator-approve/{run_id}` | POST | *Later phase.* Operator approves or declines an out-of-policy data request |
 | `/api/ngsi/*` | — | Data Explorer: query, edit, import, history and time-shift, on `NGSI_URL` and `PGREST_URL` only, and live updates (`/api/ngsi/ws`) through a broker subscription with an MQTT endpoint. For operators; the workflow has no path to it |
+| `/api/alerta/*` | — | Alerts screen: list, count, detail, actions, environments, services, on `ALERTA_URL` only. Actions are for operators; the workflow only reads |
 | `/api/gateway/*` | — | *Later phase.* Gateway token management and peer/capability inspection |
 | `/api/ifric/*` | — | *Later phase.* IFRIC registry token management and factory identity |
 | `/events/ngsi` | POST | *Later phase.* Webhook for Scorpio NGSI-LD notifications |
@@ -276,7 +277,7 @@ The workflow reads through three protocols (`sources/base.py`), so a program can
 | `sources/timescale.py` | `HistorySource`: `TimescaleHistorySource` (recent values with trend; bucketed metrics) | psycopg 3, read-only transactions, attribute table `TIMESCALE_TABLE` |
 | `sources/memory.py` | `IncidentMemory`: `InMemoryIncidentMemory` (similar incidents, store) | Process memory; the PostgreSQL implementation lives in the service, which owns the schema |
 
-`testing.py` provides fake sources and scripted answers for every step; the scripted provider (`LLM_PROVIDER=scripted`) uses them, so a complete run works without a model. Alerts, dataspace gateway and IFRIC sources are not part of phase 1.
+`testing.py` provides fake sources and scripted answers for every step; the scripted provider (`LLM_PROVIDER=scripted`) uses them, so a complete run works without a model. Active alerts come from an optional source; dataspace gateway and IFRIC sources are not part of phase 1.
 
 #### Knowledge Base (`rag-tool`)
 
@@ -456,8 +457,9 @@ MQTT_BROKER_NOTIFY_URL=              # the MQTT broker as Scorpio reaches it, if
 WS_ALLOWED_ORIGINS=                  # other origins that may open the live updates stream
 NGSI_TENANT=                         # optional NGSILD-Tenant
 NGSI_CONTEXT_URL=                    # Link context; short names need it on data with full IRIs
-ALERTA_URL=http://...
+ALERTA_URL=http://alerta:8080/api    # must end in /api
 ALERTA_API_KEY=...                   # secret
+ALERTS_REFRESH_INTERVAL_S=30         # the Alerts screen's default
 
 # IFF Dataspace Gateway
 GATEWAY_URL=http://...

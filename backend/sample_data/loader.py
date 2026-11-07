@@ -263,6 +263,51 @@ def load_ontology(settings: Settings, wait_s: float = 120, transport: httpx.Base
             log.info("Ontology: %s loaded", name)
 
 
+def rule_alerts(entities: list[dict]) -> list[dict]:
+    """Sample alerts in the form the platform's rules give them: the resource is the full entity ID."""
+    machines = [e["id"] for e in entities if e.get("type") == "Machine"]
+    samples = [
+        ("warning", "Property value out of range", "Model validation for attribute temperature failed for {id}."),
+        ("critical", "ClassConstraintComponent(partOf)", "Model validation for relationship partOf failed for {id}."),
+        ("major", "MinCountConstraintComponent(status)", "Model validation for property status failed for {id}."),
+    ]
+    return [
+        {
+            "resource": machine,
+            "event": event,
+            "environment": "Development",
+            "service": ["SHACL Validator"],
+            "severity": severity,
+            "customer": None,
+            "text": text.format(id=machine),
+        }
+        for machine, (severity, event, text) in zip(machines, samples, strict=False)
+    ]
+
+
+def load_alerts(settings: Settings, wait_s: float = 180, transport: httpx.BaseTransport | None = None) -> int:
+    """Sends the sample alerts as the platform's bridge does. Sending one again only counts it as a duplicate."""
+    key = settings.alerta_api_key.get_secret_value() if settings.alerta_api_key else ""
+    headers = {"Authorization": f"Key {key}"}
+    url = settings.alerta_url.rstrip("/")
+    with httpx.Client(timeout=30, transport=transport, headers=headers) as client:
+        deadline = time.monotonic() + wait_s
+        while True:
+            try:
+                if client.get(f"{url}/alerts", params={"page-size": 1}).status_code < 500:
+                    break
+            except httpx.TransportError:
+                pass
+            if time.monotonic() > deadline:
+                raise TimeoutError(f"Alerta did not answer within {wait_s:g} s")
+            time.sleep(3)
+        alerts = rule_alerts(read_sample_data()["entities"])
+        for alert in alerts:
+            client.post(f"{url}/alert", json=alert).raise_for_status()
+    log.info("Alerts: %d sent", len(alerts))
+    return len(alerts)
+
+
 def load(settings: Settings, broker_wait_s: float = 300) -> None:
     data = read_sample_data()
     with httpx.Client(timeout=30) as client:

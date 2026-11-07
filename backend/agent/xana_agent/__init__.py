@@ -27,6 +27,7 @@ from xana_agent import testing as _testing
 from xana_agent.schemas import IncidentRecord, Outcome, PastIncident, Rejection, RoundInput, StepEvent
 from xana_agent.scripted import ScriptedChatModel, example_for, register_example
 from xana_agent.sources import (
+    AlertaAlertSource,
     ContextSource,
     HistorySource,
     IncidentMemory,
@@ -41,6 +42,7 @@ from xana_agent.workflow import Workflow
 _testing.register_scripted_answers()
 
 __all__ = [
+    "AlertaAlertSource",
     "ContextSource",
     "HistorySource",
     "InMemoryIncidentMemory",

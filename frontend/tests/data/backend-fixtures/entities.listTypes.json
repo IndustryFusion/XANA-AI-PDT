@@ -4,8 +4,10 @@
   "status": 200,
   "body": [
     "Component",
+    "E2e",
     "Factory",
     "Machine",
+    "Mq",
     "ProductionLine",
     "Sensor"
   ]

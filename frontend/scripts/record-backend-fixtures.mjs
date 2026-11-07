@@ -117,4 +117,14 @@ record('entities.getAttributeStatus', await call('GET', `/api/ngsi/attr-status?e
 record('entities.listTypesAt', await call('GET', `/api/ngsi/timeshift/types?at=${encodeURIComponent(at)}`))
 record('entities.queryEntitiesAt', await call('GET', `/api/ngsi/timeshift/entities?type=Machine&limit=2&at=${encodeURIComponent(at)}`))
 if (process.env.RECORD_IMPORT_URL) record('entities.fetchImportDocument', await call('POST', '/api/ngsi/import/fetch', { url: process.env.RECORD_IMPORT_URL }))
+// Alerts, on the local environment's `alerts` profile.
+const listed = record('alerts.listAlerts', await call('GET', '/api/alerta/alerts'))
+record('alerts.countAlerts', await call('GET', '/api/alerta/alerts/count'))
+record('alerts.getAlert', await call('GET', `/api/alerta/alert/${listed.alerts[0].id}`))
+const acted = listed.alerts[0].id
+await call('PUT', `/api/alerta/alert/${acted}/action`, { action: 'ack', text: 'Recorded for the fixtures.' })
+record('alerts.applyAlertAction', await call('PUT', `/api/alerta/alert/${acted}/action`, { action: 'unack', text: 'Recorded for the fixtures.' }))
+record('alerts.listEnvironments', await call('GET', '/api/alerta/environments'))
+record('alerts.listServices', await call('GET', '/api/alerta/services'))
+record('alerts.getAlertSettings', await call('GET', '/api/alerta/config'))
 console.log(`Fixtures written to ${OUT}`)

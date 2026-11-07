@@ -1,0 +1,13 @@
+{
+  "method": "GET",
+  "path": "/api/alerta/alerts/count",
+  "status": 200,
+  "body": {
+    "total": 3,
+    "bySeverity": {
+      "critical": 1,
+      "major": 1,
+      "warning": 1
+    }
+  }
+}

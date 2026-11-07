@@ -4,18 +4,23 @@
   "status": 200,
   "body": [
     "address",
+    "cfg",
     "configuration",
     "description",
+    "https://example.org/plain",
     "installedOn",
+    "label",
     "location",
     "machineType",
     "manufacturer",
     "measures",
     "name",
+    "note",
     "operatingMode",
     "partOf",
     "shifts",
     "status",
+    "temp",
     "value"
   ]
 }

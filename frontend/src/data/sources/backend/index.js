@@ -16,20 +16,21 @@
 
 /**
  * Backend data source. Serves what the backend provides (session, runs,
- * incidents, the entities of the data explorer, system health) and delegates every other operation to the mock source, so
+ * incidents, the entities of the data explorer, alerts, system health) and delegates every other operation to the mock source, so
  * the whole UI stays usable while later phases bring their backends.
  *
  * Each area is `{ ...mock[area], ...backend[area] }`: delegation is visible here only.
  */
 import { AREAS } from '../../interface'
 import * as mock from '../mock'
+import { alerts as backendAlerts } from './alerts'
 import { entities as backendEntities } from './entities'
 import { incidents as backendIncidents } from './incidents'
 import { runs as backendRuns } from './runs'
 import { session as backendSession } from './session'
 import { system as backendSystem } from './system'
 
-const backend = { session: backendSession, runs: backendRuns, incidents: backendIncidents, entities: backendEntities, system: backendSystem }
+const backend = { session: backendSession, runs: backendRuns, incidents: backendIncidents, entities: backendEntities, alerts: backendAlerts, system: backendSystem }
 
 /** Operations of each area that the backend serves; everything else comes from the mock. */
 export const SERVED = Object.fromEntries(Object.entries(backend).map(([name, ops]) => [name, Object.keys(ops)]))

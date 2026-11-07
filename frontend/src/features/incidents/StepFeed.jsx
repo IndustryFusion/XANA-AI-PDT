@@ -16,6 +16,8 @@
 
 import { useId, useState } from 'react'
 import { MESSAGE_KINDS } from '../../data/conversationActs'
+import { Link, paths } from '../../app/router'
+import { StatusBadge } from '../../ui/components'
 import { StructuredFields } from '../../ui/structured'
 import { confidenceTone } from '../../ui/status'
 import { formatTime, humanize, percent } from '../../ui/format'
@@ -59,6 +61,22 @@ function PolicyCheck({ output }) {
   )
 }
 
+/** The active alerts an observe step found, each opening the alert. */
+function ObservedAlerts({ alerts }) {
+  if (!alerts?.length) return null
+  return (
+    <ul className="plain-list step__alerts" aria-label="Active alerts">
+      {alerts.map((a) => (
+        <li key={a.id ?? `${a.resource}-${a.event}`}>
+          <StatusBadge kind="severity" value={a.severity} />{' '}
+          {a.id ? <Link to={paths.alert(a.id)}>{a.event}</Link> : a.event}
+          {' '}<span className="mono">{a.resource}</span>: {a.text}
+        </li>
+      ))}
+    </ul>
+  )
+}
+
 /** One step of the feed: kind, time, summary and expandable structured output. */
 export function StepItem({ step, showInput = false }) {
   const [open, setOpen] = useState(false)
@@ -75,6 +93,7 @@ export function StepItem({ step, showInput = false }) {
       </div>
       <p className="step__summary">{summary}</p>
       {step.node === 'policy_check' && <PolicyCheck output={step.output} />}
+      {step.node === 'observe' && <ObservedAlerts alerts={step.output?.alerts} />}
       <button type="button" className="step__toggle" aria-expanded={open} aria-controls={detailsId} onClick={() => setOpen((o) => !o)}>
         {open ? 'Hide details' : 'Show details'}<span className="visually-hidden"> of {label} step</span>
       </button>

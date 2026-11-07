@@ -34,7 +34,9 @@ export const RUN_STATUS = {
 }
 
 export const SEVERITY = {
+  security: { label: 'Security', tone: 'danger' },
   critical: { label: 'Critical', tone: 'danger' },
+  down: { label: 'Down', tone: 'danger' },
   major: { label: 'Major', tone: 'warning' },
   minor: { label: 'Minor', tone: 'attention' },
   warning: { label: 'Warning', tone: 'attention' },
@@ -44,6 +46,7 @@ export const SEVERITY = {
   indeterminate: { label: 'Indeterminate', tone: 'neutral' },
   normal: { label: 'Normal', tone: 'success' },
   ok: { label: 'OK', tone: 'success' },
+  up: { label: 'Up', tone: 'success' },
   cleared: { label: 'Cleared', tone: 'success' },
   unknown: { label: 'Unknown', tone: 'neutral' },
 }

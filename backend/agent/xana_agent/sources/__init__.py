@@ -15,7 +15,9 @@
 #
 """Data sources of the workflow: protocols and implementations."""
 
+from xana_agent.sources.alerta import AlertaAlertSource
 from xana_agent.sources.base import (
+    AlertSource,
     AttributeChange,
     Bucket,
     ChangeHistorySource,
@@ -32,6 +34,8 @@ from xana_agent.sources.ontology import FusekiOntologySource
 from xana_agent.sources.timescale import TimescaleHistorySource
 
 __all__ = [
+    "AlertSource",
+    "AlertaAlertSource",
     "FusekiOntologySource",
     "AttributeChange",
     "Bucket",

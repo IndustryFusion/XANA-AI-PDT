@@ -1,0 +1,51 @@
+{
+  "method": "PUT",
+  "path": "/api/alerta/alert/577d8ca5-d657-4349-be55-d5a8308d3957/action",
+  "status": 200,
+  "body": {
+    "id": "577d8ca5-d657-4349-be55-d5a8308d3957",
+    "resource": "urn:ngsi-ld:Machine:laser-cutter-02",
+    "event": "ClassConstraintComponent(partOf)",
+    "text": "Model validation for relationship partOf failed for urn:ngsi-ld:Machine:laser-cutter-02.",
+    "severity": "critical",
+    "status": "open",
+    "environment": "Development",
+    "service": [
+      "SHACL Validator"
+    ],
+    "group": "Misc",
+    "value": null,
+    "origin": "uwsgi/2ced0feeb5de",
+    "type": "exceptionAlert",
+    "createTime": "2026-11-07T00:55:44.979Z",
+    "lastReceiveTime": "2026-11-07T00:55:44.999Z",
+    "duplicateCount": 0,
+    "attributes": {},
+    "history": [
+      {
+        "at": "2026-11-07T00:55:44.979Z",
+        "type": "new",
+        "status": "open",
+        "severity": "critical",
+        "text": "Model validation for relationship partOf failed for urn:ngsi-ld:Machine:laser-cutter-02.",
+        "user": "admin@example.org"
+      },
+      {
+        "at": "2026-11-07T00:56:39.238Z",
+        "type": "status",
+        "status": "ack",
+        "severity": "critical",
+        "text": "Recorded for the fixtures.",
+        "user": "admin@example.org"
+      },
+      {
+        "at": "2026-11-07T00:56:39.405Z",
+        "type": "status",
+        "status": "open",
+        "severity": "critical",
+        "text": "Recorded for the fixtures.",
+        "user": "admin@example.org"
+      }
+    ]
+  }
+}

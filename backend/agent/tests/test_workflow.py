@@ -19,7 +19,16 @@ from datetime import UTC, datetime, timedelta
 import httpx
 import pytest
 
-from xana_agent import InMemoryIncidentMemory, NgsiContextSource, Outcome, PastIncident, RoundInput, StepEvent, Workflow
+from xana_agent import (
+    AlertaAlertSource,
+    InMemoryIncidentMemory,
+    NgsiContextSource,
+    Outcome,
+    PastIncident,
+    RoundInput,
+    StepEvent,
+    Workflow,
+)
 from xana_agent.schemas import Decision, HypothesisList, ValidatedHypothesisList, ValidationPlan
 from xana_agent.scripted import ScriptedChatModel
 from xana_agent.sources.base import AttributeChange, LifecycleEvent, SourceUnavailable
@@ -549,3 +558,172 @@ async def test_observed_changes_reach_the_hypothesize_prompt():
     model.answers[HypothesisList] = recording
     await run(workflow(llm=model, history=history))
     assert any("manual-xyz" in text for text in seen)
+
+
+# ── Active alerts ───────────────────────────────────────────────────────────
+
+
+class FakeAlerts:
+    def __init__(self, by_entity=None, failing=()):
+        self.by_entity = by_entity or {}
+        self.failing = set(failing)
+        self.asked = []
+
+    async def active(self, entity_id):
+        self.asked.append(entity_id)
+        if entity_id in self.failing:
+            raise SourceUnavailable("Alerta not reachable (ConnectError).")
+        return self.by_entity.get(entity_id, [])
+
+
+def _alert(alert_id, resource=MACHINE_ID, severity="warning", hours_ago=0.0):
+    at = (datetime.now(UTC) - timedelta(hours=hours_ago)).isoformat()
+    return {
+        "id": alert_id,
+        "resource": resource,
+        "event": f"event-{alert_id}",
+        "severity": severity,
+        "status": "open",
+        "text": f"text of {alert_id}",
+        "lastReceiveTime": at,
+    }
+
+
+async def _observed(alerts):
+    by_node, _steps, outcome = await run(workflow(alerts=alerts))
+    return by_node["observe"].output, outcome
+
+
+async def test_active_alert_is_listed_with_the_source_ok():
+    alerts = FakeAlerts({MACHINE_ID: [_alert("a1")]})
+    output, outcome = await _observed(alerts)
+    assert [a["id"] for a in output["alerts"]] == ["a1"]
+    assert next(s for s in output["sources"] if s["source"] == "Alerta")["status"] == "ok"
+    assert "1 active alert" in output["summary"]
+    assert outcome.kind != "failed"
+    assert alerts.asked[0] == MACHINE_ID
+
+
+async def test_alerts_reach_the_hypothesize_prompt():
+    seen = []
+    model = StepScript().model()
+    original = model.answers.get(HypothesisList)
+
+    def recording(prompt):
+        seen.append(str(prompt))
+        return original(prompt) if callable(original) else original
+
+    model.answers[HypothesisList] = recording
+    await run(workflow(llm=model, alerts=FakeAlerts({MACHINE_ID: [_alert("a1")]})))
+    assert any("text of a1" in text and '"weight"' in text.replace("'", '"') for text in seen)
+
+
+async def test_duplicates_are_listed_once():
+    shared = _alert("same")
+    by_node, _steps, _outcome = await run(workflow(alerts=None))
+    other = next(e for e in by_node["observe"].output["entities"] if e != MACHINE_ID)
+    alerts = FakeAlerts({MACHINE_ID: [shared], other: [shared]})
+    output, _ = await _observed(alerts)
+    assert other in alerts.asked
+    assert [a["id"] for a in output["alerts"]] == ["same"]
+
+
+async def test_weight_falls_with_age_and_rises_with_severity():
+    alerts = FakeAlerts(
+        {
+            MACHINE_ID: [
+                _alert("old", hours_ago=48),
+                _alert("new", hours_ago=1),
+                _alert("critical-old", severity="critical", hours_ago=24),
+                _alert("unknown-age") | {"lastReceiveTime": "nonsense"},
+            ]
+        }
+    )
+    output, _ = await _observed(alerts)
+    weights = {a["id"]: a["weight"] for a in output["alerts"]}
+    assert weights["new"] > weights["old"]
+    assert weights["critical-old"] > weights["old"]
+    assert [a["id"] for a in output["alerts"]][:2] == ["critical-old", "new"]
+    assert weights["unknown-age"] < weights["new"]
+
+
+async def test_alerts_are_read_for_the_machine_and_five_related_entities_only():
+    machine = {"id": MACHINE_ID, "type": "Machine"}
+    machine |= {f"rel{i}": {"type": "Relationship", "object": f"urn:c:{i}"} for i in range(8)}
+    entities = [machine, *({"id": f"urn:c:{i}", "type": "C"} for i in range(8))]
+    alerts = FakeAlerts()
+    await run(workflow(context=FakeContextSource(entities), alerts=alerts))
+    assert len(alerts.asked) == 6
+    assert alerts.asked[0] == MACHINE_ID
+
+
+async def test_at_most_twenty_alerts_go_on():
+    many = [_alert(f"a{i}", hours_ago=i) for i in range(30)]
+    output, _ = await _observed(FakeAlerts({MACHINE_ID: many}))
+    assert len(output["alerts"]) == 20
+    assert output["alerts"][0]["id"] == "a0"
+
+
+async def test_one_failing_entity_leaves_the_rest_and_shows_the_source_unavailable():
+    entities = sample_entities()
+    other = next(e["id"] for e in entities if e["id"] != MACHINE_ID)
+    output, outcome = await _observed(FakeAlerts({MACHINE_ID: [_alert("a1")]}, failing=[other]))
+    assert [a["id"] for a in output["alerts"]] == ["a1"]
+    source = next(s for s in output["sources"] if s["source"] == "Alerta")
+    assert source["status"] == "unavailable"
+    assert "1 of" in source["detail"]
+    assert output["partial_data"] is False
+    assert outcome.kind != "failed"
+
+
+async def test_alerta_down_does_not_fail_the_round():
+    class Down:
+        async def active(self, entity_id):
+            raise httpx.ConnectError("http://inner-host")
+
+    by_node, _steps, outcome = await run(workflow(alerts=Down()))
+    output = by_node["observe"].output
+    assert output["alerts"] == []
+    assert output["partial_data"] is True
+    source = next(s for s in output["sources"] if s["source"] == "Alerta")
+    assert source["status"] == "unavailable"
+    assert "inner-host" not in source["detail"]
+    assert outcome.kind != "failed"
+    assert {"observe", "hypothesize", "validate", "decide"} <= set(by_node)
+
+
+async def test_a_hanging_alert_source_cannot_hold_up_a_round(monkeypatch):
+    import xana_agent.steps.observe as observe_step
+
+    monkeypatch.setattr(observe_step, "ALERT_TIMEOUT_S", 0.01)
+
+    class Hanging:
+        async def active(self, entity_id):
+            await asyncio.sleep(60)
+
+    by_node, _steps, outcome = await asyncio.wait_for(run(workflow(alerts=Hanging())), 5)
+    assert next(s for s in by_node["observe"].output["sources"] if s["source"] == "Alerta")["status"] == "unavailable"
+    assert outcome.kind != "failed"
+
+
+async def test_without_an_alert_source_nothing_changes():
+    output, _ = await _observed(None)
+    assert output["alerts"] == []
+    assert [s["source"] for s in output["sources"]] == ["Context broker", "Time-series database"]
+
+
+async def test_the_alert_source_only_reads():
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        return httpx.Response(200, json={"alerts": [_alert("a1")]})
+
+    source = AlertaAlertSource("http://alerta.test/api", "k", transport=httpx.MockTransport(handler))
+    await run(workflow(alerts=source))
+    assert {r.method for r in requests} == {"GET"}
+    assert all(r.url.path == "/api/alerts" for r in requests)
+    assert all(r.headers["Authorization"] == "Key k" for r in requests)
+    first = list(requests[0].url.params.multi_items())
+    assert ("resource", MACHINE_ID) in first
+    assert ("status", "open") in first and ("status", "ack") in first

@@ -122,7 +122,7 @@ test('a run archived elsewhere shows that it is no longer active', async ({ page
   await expect(page.getByRole('heading', { name: 'This run is not active' })).toBeVisible()
 })
 
-test('a stopped backend affects only its areas: active incidents and the explorer show errors, alerts still work', async ({ page }) => {
+test('a stopped backend affects only its areas: active incidents, the explorer and alerts show errors, the dataspace still works', async ({ page }) => {
   await page.route('**/api/**', (route) => route.abort('connectionrefused'))
   await page.goto('/incidents')
   const error = page.getByRole('alert').filter({ hasText: 'Could not load open runs' })
@@ -133,7 +133,10 @@ test('a stopped backend affects only its areas: active incidents and the explore
   await expect(page.getByRole('alert').filter({ hasText: 'Could not load entity types' })).toContainText('The backend cannot be reached.')
 
   await page.goto('/alerts')
-  await expect(page.getByRole('table')).toBeVisible()
+  await expect(page.getByRole('alert').filter({ hasText: 'Could not load alerts' })).toContainText('The backend cannot be reached.')
+
+  await page.goto('/dataspace')
+  await expect(page.getByRole('heading', { name: 'Dataspace' })).toBeVisible()
 
   await page.unroute('**/api/**')
   await page.goto('/incidents')

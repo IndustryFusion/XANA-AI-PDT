@@ -110,6 +110,15 @@ class ChangeHistorySource(Protocol):
 
 
 @runtime_checkable
+class AlertSource(Protocol):
+    """Active alerts. Only reads: acting on an alert is for operators."""
+
+    async def active(self, entity_id: str) -> list[dict[str, Any]]:
+        """Open and acknowledged alerts whose resource is exactly this entity ID."""
+        ...
+
+
+@runtime_checkable
 class IncidentMemory(Protocol):
     """Confirmed incidents."""
 

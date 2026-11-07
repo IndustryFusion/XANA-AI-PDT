@@ -1,0 +1,77 @@
+{
+  "method": "GET",
+  "path": "/api/alerta/alerts",
+  "status": 200,
+  "body": {
+    "alerts": [
+      {
+        "id": "577d8ca5-d657-4349-be55-d5a8308d3957",
+        "resource": "urn:ngsi-ld:Machine:laser-cutter-02",
+        "event": "ClassConstraintComponent(partOf)",
+        "text": "Model validation for relationship partOf failed for urn:ngsi-ld:Machine:laser-cutter-02.",
+        "severity": "critical",
+        "status": "open",
+        "environment": "Development",
+        "service": [
+          "SHACL Validator"
+        ],
+        "group": "Misc",
+        "value": null,
+        "origin": "uwsgi/2ced0feeb5de",
+        "type": "exceptionAlert",
+        "createTime": "2026-11-07T00:55:44.979Z",
+        "lastReceiveTime": "2026-11-07T00:55:44.999Z",
+        "duplicateCount": 0,
+        "attributes": {}
+      },
+      {
+        "id": "50086029-28a5-41d9-8cac-725fc2feedf9",
+        "resource": "urn:ngsi-ld:Machine:press-brake-01",
+        "event": "MinCountConstraintComponent(status)",
+        "text": "Model validation for property status failed for urn:ngsi-ld:Machine:press-brake-01.",
+        "severity": "major",
+        "status": "open",
+        "environment": "Development",
+        "service": [
+          "SHACL Validator"
+        ],
+        "group": "Misc",
+        "value": null,
+        "origin": "uwsgi/2ced0feeb5de",
+        "type": "exceptionAlert",
+        "createTime": "2026-11-07T00:55:45.060Z",
+        "lastReceiveTime": "2026-11-07T00:55:45.080Z",
+        "duplicateCount": 0,
+        "attributes": {}
+      },
+      {
+        "id": "3d01ffbb-2be3-45c9-a325-342129876500",
+        "resource": "urn:ngsi-ld:Machine:laser-cutter-01",
+        "event": "Property value out of range",
+        "text": "Model validation for attribute temperature failed for urn:ngsi-ld:Machine:laser-cutter-01.",
+        "severity": "warning",
+        "status": "open",
+        "environment": "Development",
+        "service": [
+          "SHACL Validator"
+        ],
+        "group": "Misc",
+        "value": null,
+        "origin": "uwsgi/2ced0feeb5de",
+        "type": "exceptionAlert",
+        "createTime": "2026-11-07T00:55:44.893Z",
+        "lastReceiveTime": "2026-11-07T00:55:44.913Z",
+        "duplicateCount": 0,
+        "attributes": {}
+      }
+    ],
+    "total": 3,
+    "bySeverity": {
+      "critical": 1,
+      "major": 1,
+      "warning": 1
+    },
+    "page": 1,
+    "pageSize": 50
+  }
+}

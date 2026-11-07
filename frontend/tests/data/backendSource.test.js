@@ -224,9 +224,10 @@ describe('delegation to the mock', () => {
         'deleteAttribute', 'deleteEntity', 'importEntities', 'fetchImportDocument', 'deleteByTypes',
         'getAttributeHistory', 'getAttributeStatus', 'listTypesAt', 'queryEntitiesAt', 'subscribeEntities', 'getLiveUpdateHealth', 'getValueHints',
       ],
+      alerts: ['listAlerts', 'countAlerts', 'getAlert', 'applyAlertAction', 'listEnvironments', 'listServices', 'getAlertSettings'],
       system: ['getHealth'],
     })
-    for (const name of ['alerts', 'dataspace']) expect(backend[name]).toEqual(mock[name])
+    expect(backend.dataspace).toEqual(mock.dataspace)
     expect(backend.session.getFactory).toBe(mock.session.getFactory)
     expect(backend.session.signIn).not.toBe(mock.session.signIn)
     expect(backend.info.signInHint).toBeUndefined()
@@ -239,8 +240,8 @@ describe('delegation to the mock', () => {
   test('delegated operations work without a backend', async () => {
     mock.store.reset()
     fakeFetch({})
-    const stats = await bindArea('alerts', backend.alerts).countAlerts({})
-    expect(stats).toBeTruthy()
+    const peers = await bindArea('dataspace', backend.dataspace).getConnection()
+    expect(peers).toBeTruthy()
     expect(fetch).not.toHaveBeenCalled()
   })
 })
@@ -286,6 +287,31 @@ describe('entities', () => {
   test('a stopped service keeps the backend kind and message', async () => {
     fakeFetch({ 'GET /api/ngsi/history': { status: 502, body: { error: { kind: 'unavailable', message: 'The history service (PostgREST) cannot be reached (ConnectError).' } } } })
     await expect(entities.getAttributeHistory('urn:a', 'b')).rejects.toMatchObject({ kind: 'unavailable', message: expect.stringContaining('PostgREST') })
+  })
+})
+
+describe('alerts', () => {
+  const alerts = bindArea('alerts', backend.alerts)
+
+  test('filters go as parameters, and keys under attributes stay', async () => {
+    const answer = { alerts: [{ id: 'a', attributes: { ip_address: 'x' } }], total: 1, bySeverity: { major: 1 }, page: 1, pageSize: 50 }
+    const fn = fakeFetch({ 'GET /api/alerta/alerts': { body: answer } })
+    expect(await alerts.listAlerts({ status: ['open', 'ack'], severity: 'major', text: 'urn:x', pageSize: 50 })).toEqual(answer)
+    const params = new URLSearchParams(fn.calls[0].search)
+    expect(params.get('status')).toBe('open,ack')
+    expect(params.get('text')).toBe('urn:x')
+    expect(params.get('page_size')).toBe('50')
+  })
+
+  test('an action goes to the alert, and a conflict keeps its message', async () => {
+    const fn = fakeFetch({ 'PUT /api/alerta/alert/a%2Fb/action': { status: 409, body: { error: { kind: 'conflict', message: 'alert is already in ack status' } } } })
+    await expect(alerts.applyAlertAction('a/b', { action: 'ack', text: 'n' })).rejects.toMatchObject({ kind: 'conflict', message: 'alert is already in ack status' })
+    expect(fn.calls[0].body).toEqual({ action: 'ack', text: 'n' })
+  })
+
+  test('the refresh interval comes from the backend', async () => {
+    fakeFetch({ 'GET /api/alerta/config': { body: { refresh_interval_s: 45 } } })
+    expect(await alerts.getAlertSettings()).toEqual({ refreshIntervalS: 45 })
   })
 })
 

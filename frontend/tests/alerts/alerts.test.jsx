@@ -321,3 +321,16 @@ describe('context menu and quick start', () => {
     expect(within(bar).queryByRole('link', { name: 'Start new incident' })).not.toBeInTheDocument()
   })
 })
+
+describe('a search that stopped early', () => {
+  test('says so, and that the numbers count only what was searched', async () => {
+    renderApp({ path: `${paths.alerts()}?text=zzz-no-such`, controls: { authEnabled: false, searchCap: 2 } })
+    expect(await screen.findByText(/Only the first 2 alerts of this filter were searched/)).toHaveAttribute('role', 'status')
+  })
+
+  test('says nothing without a limit', async () => {
+    renderApp({ path: `${paths.alerts()}?text=zzz-no-such`, controls: { authEnabled: false } })
+    await screen.findByText('No alerts match the current filter.')
+    expect(screen.queryByText(/of this filter were searched/)).toBeNull()
+  })
+})

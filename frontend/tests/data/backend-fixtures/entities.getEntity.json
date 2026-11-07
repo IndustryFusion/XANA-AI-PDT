@@ -39,8 +39,8 @@
     },
     "status": {
       "type": "Property",
-      "value": "idle",
-      "observedAt": "2026-11-06T22:07:42Z"
+      "value": "running",
+      "observedAt": "2026-11-02T12:00:00.000Z"
     }
   }
 }
