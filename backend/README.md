@@ -22,6 +22,14 @@ sample_data/         sample machine data (exported from the UI mock) and its loa
 compose.yaml         local environment
 ```
 
+## Dataspace
+
+With `GATEWAY_URL`, the backend is a participant of the IndustryFusion Dataspace. Its contract is `gateway-api.md` in that repository. `GATEWAY_KEYCLOAK_URL` has to be the address the dataspace's services know Keycloak by, as they compare a token's issuer exactly, and `SETTINGS_ENCRYPTION_KEY` is required. The client ID is an operator's `ifric_company_id` claim, or else `GATEWAY_CLIENT_ID`.
+
+The client secret is entered on the Dataspace screen or set in `GATEWAY_CLIENT_SECRET`. Once accepted, it is stored encrypted in `gateway_credentials`. If the key changes, the stored secret can't be read, and the screen asks for it again. The token stays in memory. It is checked every 60 seconds and renewed with 120 seconds left, and after 3 failures in a row renewal stops and the screen says so. The backend connects by itself after sign-in, or at startup when sign-in is off, unless the operator disconnected.
+
+The health report's `connector` check reads through the participant's adapter, as the contract offers agents nothing that reaches the connector. A connector failing behind a working adapter doesn't show there.
+
 ## Local environment
 
 Requirements: Docker with Compose. Run all commands from the repository root.
@@ -55,6 +63,8 @@ Data and models are kept in Docker volumes between runs. `docker compose -f back
 **With live updates:** add `--profile live`, which starts EMQX (5.8, as on the platform). Here it takes any client; the platform checks a token and a role. See [Data Explorer](#data-explorer). `--profile platform-mqtt` starts another EMQX that checks like the platform, for tests: it needs the `auth` profile, and `emqx/mqtt_auth.py` has the rules.
 
 **With value hints:** add `--profile ontology`, which starts Fuseki and loads sample shapes and knowledge from `sample_data/ontology/`.
+
+**With a dataspace:** run one by its own instructions, and set `GATEWAY_URL`, `GATEWAY_KEYCLOAK_URL`, `GATEWAY_CLIENT_ID` and `SETTINGS_ENCRYPTION_KEY`.
 
 **With alerts:** add `--profile alerts`, which starts Alerta (9.0.4, as on the platform, with its severities) and sends sample alerts in the form the platform's rules give them. The key is `local-development-only-key` unless `ALERTA_API_KEY` is set. Without the profile, the Alerts screen says that Alerta is unavailable, and runs show that source as unavailable.
 

@@ -122,7 +122,7 @@ test('a run archived elsewhere shows that it is no longer active', async ({ page
   await expect(page.getByRole('heading', { name: 'This run is not active' })).toBeVisible()
 })
 
-test('a stopped backend affects only its areas: active incidents, the explorer and alerts show errors, the dataspace still works', async ({ page }) => {
+test('a stopped backend affects only its areas: active incidents, the explorer, alerts and the dataspace show errors', async ({ page }) => {
   await page.route('**/api/**', (route) => route.abort('connectionrefused'))
   await page.goto('/incidents')
   const error = page.getByRole('alert').filter({ hasText: 'Could not load open runs' })
@@ -137,6 +137,7 @@ test('a stopped backend affects only its areas: active incidents, the explorer a
 
   await page.goto('/dataspace')
   await expect(page.getByRole('heading', { name: 'Dataspace' })).toBeVisible()
+  await expect(page.getByRole('alert').filter({ hasText: 'Could not load the dataspace connection' })).toContainText('The backend cannot be reached.')
 
   await page.unroute('**/api/**')
   await page.goto('/incidents')
@@ -146,6 +147,6 @@ test('a stopped backend affects only its areas: active incidents, the explorer a
 test('system health shows the backend checks', async ({ page }) => {
   await page.goto('/system')
   const health = page.getByRole('table', { name: 'Dependencies and their health' })
-  for (const check of ['Memory database', 'Time-series store', 'Context broker', 'Language model']) await expect(health).toContainText(check)
+  for (const check of ['Memory database', 'Time-series store', 'Context broker', 'Language model', 'Dataspace gateway', 'Dataspace connector']) await expect(health).toContainText(check)
   await expect(health).toContainText('Scripted answers, no model')
 })

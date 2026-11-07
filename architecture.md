@@ -169,7 +169,7 @@ Fields are snake_case. A refused request answers `{"error": {"kind", "message"}}
 | `/api/agent/operator-approve/{run_id}` | POST | *Later phase.* Operator approves or declines an out-of-policy data request |
 | `/api/ngsi/*` | — | Data Explorer: query, edit, import, history and time-shift, on `NGSI_URL` and `PGREST_URL` only, and live updates (`/api/ngsi/ws`) through a broker subscription with an MQTT endpoint. For operators; the workflow has no path to it |
 | `/api/alerta/*` | — | Alerts screen: list, count, detail, actions, environments, services, on `ALERTA_URL` only. Actions are for operators; the workflow only reads |
-| `/api/gateway/*` | — | *Later phase.* Gateway token management and peer/capability inspection |
+| `/api/gateway/*` | — | The dataspace connection: `config`, `status`, `connect`, `disconnect`, `token-claims`, `peers`, `peers/{id}/capabilities`, `policies`, `capabilities/requests`, `capabilities/policy`. Answers never hold a token or secret |
 | `/api/ifric/*` | — | *Later phase.* IFRIC registry token management and factory identity |
 | `/events/ngsi` | POST | *Later phase.* Webhook for Scorpio NGSI-LD notifications |
 | `/events/alert` | POST | *Later phase.* Webhook for external alert systems |
@@ -220,6 +220,8 @@ Step content uses the field names of the UI's data interface, in snake_case; the
 **Model calls.** Every call asks for a structured answer: through the schema as `format` on Ollama, accepting content or a tool call; in the prompt on OpenAI-compatible servers set through `OPENAI_BASE_URL`; and through `with_structured_output` on cloud providers. Calls have a timeout of `LLM_TIMEOUT_S` and up to three retries when the answer does not match the structure. A timeout or a fourth mismatch fails the round with the step and a readable reason. Prompts (`agent/xana_agent/prompts/`) pass every value as JSON in a named section; operator text is marked as data, never as instructions.
 
 **Sign-in.** With `KEYCLOAK_URL` set, the backend signs in to Keycloak for the operator with the password grant, keeps the token fresh in memory, and sends it to the context broker. There is one session per backend process, and the backend's own API is not protected, so network access to it must be limited. With nobody signed in, broker requests carry no token. These are open decisions, recorded in the `gh-21-keycloak-sign-in` design.
+
+**Dataspace connection.** With `GATEWAY_URL`, the backend holds a `client_credentials` token of the dataspace realm, separate from the operator's, in memory. It is checked every 60 seconds and renewed with 120 seconds left, and renewal stops after 3 failures in a row, which the operator sees. The client secret is stored encrypted in `gateway_credentials`, with no plaintext fallback. The `gateway` and `connector` health checks read the gateway and, through it, the participant's adapter.
 
 **Read-only.** Sources only read: the context source sends GET requests, the history source runs read-only transactions. The validation plan is limited to the entities observed in the round, so text in the issue cannot widen what is read. Memory is written only by `act`.
 
@@ -369,6 +371,14 @@ incidents (
     reopened_run_id    TEXT
 )
 
+-- 004_gateway_credentials.sql
+gateway_credentials (
+    id                BOOLEAN PRIMARY KEY,  -- one row at most
+    client_id         TEXT,
+    encrypted_secret  TEXT,
+    connect_wanted    BOOLEAN               -- false after the operator disconnected
+)
+
 agent_traces (
     id          SERIAL PRIMARY KEY,
     incident_id INT REFERENCES incidents(id) ON DELETE CASCADE,
@@ -421,7 +431,7 @@ In **production** (K8s), non-sensitive config comes from a Helm-rendered ConfigM
 
 For **local development**, copy `backend/.env.example` to `backend/.env` and fill in credentials. `backend/.env.example` lists every variable the backend reads, with its default; an invalid value stops the backend at startup with a message naming the variable (never its value). Secrets are never returned or logged; connection URLs are shown with the password masked.
 
-Key variable groups (gateway and IFRIC variables belong to later phases):
+Key variable groups (IFRIC variables belong to a later phase):
 
 ```
 # LLM
@@ -464,9 +474,10 @@ ALERTS_REFRESH_INTERVAL_S=30         # the Alerts screen's default
 # IFF Dataspace Gateway
 GATEWAY_URL=http://...
 GATEWAY_KEYCLOAK_URL=https://...
-GATEWAY_KEYCLOAK_REALM=iff
-GATEWAY_CLIENT_ID=...
-GATEWAY_CLIENT_SECRET=...            # secret
+GATEWAY_KEYCLOAK_REALM=dataspace
+GATEWAY_CLIENT_ID=...                # an operator's ifric_company_id claim comes first
+GATEWAY_CLIENT_SECRET=...            # secret; optional, the operator can enter it; stored encrypted
+SETTINGS_ENCRYPTION_KEY=...          # secret; required with GATEWAY_URL
 
 # IFRIC Registry
 IFRIC_URL=https://dev-registry.ifric.org

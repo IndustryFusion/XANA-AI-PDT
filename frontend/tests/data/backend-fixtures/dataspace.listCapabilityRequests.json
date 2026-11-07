@@ -1,0 +1,17 @@
+{
+  "method": "GET",
+  "path": "/api/gateway/capabilities/requests",
+  "status": 200,
+  "body": [
+    {
+      "id": "a32d39be-1cf6-4df3-9af7-9d99fa814d68",
+      "requester_id": "urn:example:xana-builder",
+      "capability": "twin:history",
+      "purpose": "Compare runs",
+      "requested_at": "2026-11-07T02:23:45.456311+00:00",
+      "status": "pending",
+      "note": null,
+      "decided_at": null
+    }
+  ]
+}

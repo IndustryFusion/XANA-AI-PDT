@@ -25,6 +25,7 @@ from functools import lru_cache
 from typing import Literal
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
+from cryptography.fernet import Fernet
 from langchain_core.language_models.chat_models import BaseChatModel
 from pydantic import Field, SecretStr, ValidationError, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -33,6 +34,8 @@ from app.redact import Redactor, url_password
 from xana_agent.sources.ontology import is_iri
 
 Provider = Literal["ollama", "anthropic", "openai", "scripted"]
+
+_MAKE_KEY = "Make one with: python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'"
 
 
 class ConfigError(Exception):
@@ -63,6 +66,14 @@ class Settings(BaseSettings):
     keycloak_realm: str = "iff"
     keycloak_client_id: str = "scorpio"
     factory_id: str | None = None
+
+    gateway_url: str | None = None
+    gateway_keycloak_url: str | None = None
+    gateway_keycloak_realm: str = "dataspace"
+    gateway_client_id: str | None = None
+    gateway_client_secret: SecretStr | None = None
+    settings_encryption_key: SecretStr | None = None
+    data_sharing_policy: Literal["minimal", "adjacent", "timeseries"] = "minimal"
 
     ngsi_url: str = "http://localhost:9090"
     ngsi_tenant: str | None = None
@@ -118,10 +129,10 @@ class Settings(BaseSettings):
             raise ValueError("must be an IRI without spaces, quotes or brackets; it goes into SPARQL queries")
         return value
 
-    @field_validator("pgrest_url", "fuseki_url", "mqtt_mgmt_url")
+    @field_validator("pgrest_url", "fuseki_url", "mqtt_mgmt_url", "gateway_url", "gateway_keycloak_url")
     @classmethod
-    def _http_address(cls, value: str) -> str:
-        return with_scheme(value, "http")
+    def _http_address(cls, value: str | None) -> str | None:
+        return value and with_scheme(value, "http")
 
     @field_validator("mqtt_broker_url", "mqtt_broker_notify_url")
     @classmethod
@@ -151,6 +162,19 @@ class Settings(BaseSettings):
         return self
 
     @model_validator(mode="after")
+    def _gateway_is_complete(self) -> Settings:
+        if self.settings_encryption_key:
+            try:
+                Fernet(self.settings_encryption_key.get_secret_value())
+            except ValueError:
+                raise ValueError(f"SETTINGS_ENCRYPTION_KEY is not a valid key. {_MAKE_KEY}") from None
+        if self.gateway_url and not self.settings_encryption_key:
+            raise ValueError(f"SETTINGS_ENCRYPTION_KEY is required when GATEWAY_URL is set. {_MAKE_KEY}")
+        if self.gateway_url and not self.gateway_keycloak_url:
+            raise ValueError("GATEWAY_KEYCLOAK_URL is required when GATEWAY_URL is set")
+        return self
+
+    @model_validator(mode="after")
     def _tracing_keys_come_together(self) -> Settings:
         if bool(self.langfuse_public_key) != bool(self.langfuse_secret_key):
             raise ValueError("LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY must be set together")
@@ -176,6 +200,8 @@ class Settings(BaseSettings):
                 self.openai_api_key and self.openai_api_key.get_secret_value(),
                 self.langfuse_secret_key and self.langfuse_secret_key.get_secret_value(),
                 self.alerta_api_key and self.alerta_api_key.get_secret_value(),
+                self.gateway_client_secret and self.gateway_client_secret.get_secret_value(),
+                self.settings_encryption_key and self.settings_encryption_key.get_secret_value(),
                 url_password(self.timescale_db_url.get_secret_value()),
                 url_password(self.postgres_memory_url.get_secret_value()),
             ]

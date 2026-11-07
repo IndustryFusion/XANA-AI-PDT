@@ -1,0 +1,41 @@
+{
+  "method": "GET",
+  "path": "/api/gateway/peers/urn%3Aexample%3Axana-builder/capabilities",
+  "status": 200,
+  "body": {
+    "peer_id": "urn:example:xana-builder",
+    "name": "urn:example:xana-builder",
+    "at_peer": [
+      {
+        "capability": "mb:confidential",
+        "status": "granted",
+        "label": "Machine builder documents",
+        "description": "Service bulletins and maintenance procedures not published elsewhere. Available by default.",
+        "decision_note": null
+      }
+    ],
+    "here": [
+      {
+        "capability": "twin:direct",
+        "status": "granted",
+        "label": "Machine twin",
+        "description": "Current state and sensor values of the machine in question. Available by default.",
+        "decision_note": null
+      },
+      {
+        "capability": "twin:adjacents",
+        "status": "default",
+        "label": "Neighbouring machines",
+        "description": "State of machines connected to the one in question, for looking at a whole line. Available once approved.",
+        "decision_note": null
+      },
+      {
+        "capability": "twin:history",
+        "status": "default",
+        "label": "Machine history",
+        "description": "Past values and events of the machine, for comparing runs over time. Available once approved.",
+        "decision_note": null
+      }
+    ]
+  }
+}
