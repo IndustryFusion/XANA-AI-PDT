@@ -11,10 +11,11 @@ Against the broker image of the local environment:
 
 - `receiverInfo` entries are sent as HTTP headers on HTTP notifications, so a shared secret works. A `PATCH` changes them and the address.
 - A second `POST` of the same ID answers `409`. A `GET` by ID shows the subscription, including `receiverInfo`, and `notification.status`.
-- **A write to a watched attribute notifies also if the value is the same.** A write to another attribute doesn't. Creating an entity notifies too.
+- **A write to a watched attribute notifies also if the value is the same.** A write to another attribute doesn't. Creating an entity with a watched attribute notifies too, and `notificationTrigger` doesn't change that on this broker.
 - With `application/ld+json`, the body needs `@context`. Without one, `Machine` expands under the default context, so it matches nothing on data with full IRIs. So the subscription names `NGSI_CONTEXT_URL` when set, and the core context otherwise.
+- **On data with full IRIs, `status` can't be named by a context.** Under a context mapping it to `https://…/status`, the broker keeps the core context's own term for it, while the other three and `Machine` expand as the context says, so a change of `status` notifies nothing. In full, it works. That is why `MACHINE_WATCH_TYPE` and `MACHINE_WATCH_ATTRIBUTES` exist, with the issue's values as defaults. Each takes a short name or a full IRI. Notifications are read by the last part of a name.
 
-**Not verified: the real platform,** as none can be reached from here. If the platform's machines aren't of a type that `Machine` expands to under `NGSI_CONTEXT_URL`, nothing will match, and the subscription still reads as active.
+**Not verified: the real platform,** as none can be reached from here. If the platform's machines aren't of the configured type, or the attributes have other IRIs, nothing will match, and the subscription still reads as active. The platform's own type and attribute names decide the values to set.
 
 ## Decisions
 
@@ -52,7 +53,7 @@ With sign-in off, no token is needed, so the identity counts as available.
 
 A run starts for an event if the machine has no open run, and:
 
-- **from the broker:** the machine's watched values differ from those last seen. They are stored, so that a restart doesn't start a run for every machine at its next write. A machine never seen counts as changed. The subscription uses `notificationTrigger` to leave out the creation of an entity where the broker supports it.
+- **from the broker:** the machine's watched values differ from those last seen. They are stored, so that a restart doesn't start a run for every machine at its next write. **A machine never seen counts as changed, so its first report starts one run,** also a healthy one: a machine created with `status: running`, or each machine once after the first install, since the first report of a real fault can't be told from it. Nothing says what a healthy value is on the platform.
 - **from Alerta:** the alert isn't a repeat (`repeat`), its severity isn't `ok`, `normal`, `up`, `cleared`, `informational`, `debug` or `trace`, and its status isn't `closed`, `expired`, `shelved` or `blackout`. `resource` is the machine, as on the Alerts screen. `{machine_id, issue}` is accepted too, for other senders.
 
 Values seen during an open run are stored too. So a fault that came during a run and is reported again after it ends starts nothing new, while a further change does.

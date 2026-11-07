@@ -28,6 +28,10 @@ The backend SHALL read each entity of a notification as an event for that machin
 - **WHEN** a notification reports a machine's `status` with a value not seen before
 - **THEN** one run starts for that machine, with an issue naming the value
 
+#### Scenario: A machine not seen before
+- **WHEN** the first notification for a machine arrives, whatever its values
+- **THEN** one run starts
+
 #### Scenario: The same values again
 - **WHEN** a notification repeats the watched values last seen for the machine, also after a restart
 - **THEN** no run starts
@@ -106,7 +110,11 @@ The worker SHALL go on after any failure, and lose no event while the process li
 - **THEN** it is logged, and the next event is handled
 
 ### Requirement: The subscription
-The backend SHALL keep one subscription with the ID `urn:ngsi-ld:Subscription:XanaPDT:MachineWatch`, on type `Machine`, watching `status`, `errorCode`, `alarmLevel` and `faultCode`, delivered to `{CALLBACK_BASE_URL}/events/ngsi` with the secret, under `NGSI_CONTEXT_URL` or else the core context.
+The backend SHALL keep one subscription with the ID `urn:ngsi-ld:Subscription:XanaPDT:MachineWatch`, by default on type `Machine`, watching `status`, `errorCode`, `alarmLevel` and `faultCode`, delivered to `{CALLBACK_BASE_URL}/events/ngsi` with the secret, under `NGSI_CONTEXT_URL` or else the core context.
+
+#### Scenario: Data with full IRIs
+- **WHEN** `MACHINE_WATCH_TYPE` and `MACHINE_WATCH_ATTRIBUTES` name the platform's type and attributes, in short names or full IRIs
+- **THEN** a change of a watched attribute on such data notifies, and is read by the last part of its name
 
 #### Scenario: No identity yet
 - **WHEN** sign-in is on, and neither a service identity nor a signed-in operator has a token
