@@ -96,6 +96,20 @@ def check_no_secret_in_a_config_map(chart: str) -> None:
                 assert SECRET_VALUE not in str(document["spec"]["template"]["spec"]["containers"]), name
 
 
+def check_machine_events_settings(chart: str) -> None:
+    rendered = render(
+        chart,
+        "config.CALLBACK_BASE_URL=http://x-backend:8000",
+        f"secrets.values.EVENT_WEBHOOK_SECRET={SECRET_VALUE}",
+        f"secrets.values.KEYCLOAK_SERVICE_CLIENT_SECRET={SECRET_VALUE}",
+    )
+    config = rendered["ConfigMap/x-backend"]["data"]
+    assert config["CALLBACK_BASE_URL"] == "http://x-backend:8000"
+    assert SECRET_VALUE not in str(config)
+    assert SECRET_VALUE not in str(rendered["Deployment/x-backend"])
+    assert set(rendered["Secret/x-backend"]["stringData"]) >= {"EVENT_WEBHOOK_SECRET", "KEYCLOAK_SERVICE_CLIENT_SECRET"}
+
+
 def check_database_ca(chart: str) -> None:
     without = render(chart)
     assert "POSTGRES_SSLROOTCERT" not in without["ConfigMap/x-backend"]["data"]
@@ -128,6 +142,7 @@ CHECKS = (
     check_values_with_operator_secret,
     check_values_only,
     check_no_secret_in_a_config_map,
+    check_machine_events_settings,
     check_database_ca,
     check_restricted_pods,
 )

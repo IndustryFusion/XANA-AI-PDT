@@ -66,6 +66,9 @@ export const RUN_STATES = [
   'completed', 'failed', 'stopped',
 ]
 
+/** Where a run came from: an operator, a machine event from the context broker, or an alert. */
+export const RUN_SOURCES = ['operator', 'ngsi', 'alert']
+
 /** Delivery states of messages the operator sent to the machine builder. */
 export const DELIVERY_STATES = ['pending', 'delivered', 'failed']
 
@@ -263,7 +266,7 @@ const user = { username: 'string', name: 'string', email: 'string' }
 
 const runSummary = {
   runId: 'string', incidentId: '?number', machineId: 'string', issue: 'string',
-  status: { $enum: RUN_STATES }, startedAt: 'date', updatedAt: 'date', escalationRef: '?string',
+  status: { $enum: RUN_STATES }, startedAt: 'date', updatedAt: 'date', escalationRef: '?string', source: { $enum: RUN_SOURCES },
 }
 const step = { node: 'string', input: { $optional: {} }, output: {}, at: 'date' }
 const outbox = [{ messageId: 'string', status: { $enum: DELIVERY_STATES } }]
@@ -278,7 +281,7 @@ const run = {
 const status = { status: { $enum: RUN_STATES } }
 const incidentSummary = {
   id: 'string', number: 'number', machineId: 'string', issue: 'string', outcome: { $enum: INCIDENT_OUTCOMES },
-  rootCause: '?string', escalated: 'boolean', escalationRef: '?string', startedAt: 'date', closedAt: 'date', reopenedRunId: '?string',
+  rootCause: '?string', escalated: 'boolean', escalationRef: '?string', startedAt: 'date', closedAt: 'date', reopenedRunId: '?string', source: { $enum: RUN_SOURCES },
 }
 const entity = { id: 'string', type: 'string' }
 const alertSummary = {

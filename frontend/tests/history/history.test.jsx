@@ -17,7 +17,8 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { paths } from '../../src/app/router'
-import { renderApp } from '../helpers'
+import { store } from '../../src/data/sources/mock'
+import { renderApp, renderAppWith } from '../helpers'
 
 const controls = { authEnabled: false, speed: 50 }
 const open = (path) => renderApp({ path, controls })
@@ -35,6 +36,15 @@ describe('incident list', () => {
     expect(items[0].querySelector('time')).toHaveAttribute('datetime')
     const dates = items.map((li) => li.querySelector('time').getAttribute('datetime'))
     expect([...dates].sort().reverse()).toEqual(dates)
+  })
+
+  test('an incident from an alert says so in the list and its details', async () => {
+    renderAppWith(() => { store.update((s) => { s.incidents[0].source = 'alert'; return s }) }, { path: '/history', controls })
+    const [first] = await screen.findAllByTestId('run-source')
+    expect(first).toHaveTextContent('Alert')
+    await userEvent.setup().click(first.closest('a'))
+    await waitFor(() => expect(screen.getAllByTestId('run-source')).toHaveLength(2))
+    expect(screen.getAllByTestId('run-source')[1]).toHaveTextContent('Alert')
   })
 
   test('search and outcome filter narrow the list', async () => {

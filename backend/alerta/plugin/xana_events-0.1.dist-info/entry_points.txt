@@ -1,0 +1,2 @@
+[alerta.plugins]
+xana_events = xana_events:SendToXana

@@ -164,8 +164,8 @@ export function createAreas(store) {
     }),
   }
 
-  const incidentSummary = ({ id, number, machineId, issue, outcome, rootCause, escalated, escalationRef, startedAt, closedAt, reopenedRunId }) =>
-    ({ id, number, machineId, issue, outcome, rootCause, escalated, escalationRef, startedAt, closedAt, reopenedRunId })
+  const incidentSummary = ({ id, number, machineId, issue, outcome, rootCause, escalated, escalationRef, startedAt, closedAt, reopenedRunId, source }) =>
+    ({ id, number, machineId, issue, outcome, rootCause, escalated, escalationRef, startedAt, closedAt, reopenedRunId, source })
 
   const dayStart = (d) => (d ? new Date(`${d.slice(0, 10)}T00:00:00`).getTime() : -Infinity)
   const dayEnd = (d) => (d ? new Date(`${d.slice(0, 10)}T23:59:59.999`).getTime() : Infinity)

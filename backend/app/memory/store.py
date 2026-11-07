@@ -127,10 +127,10 @@ class RunStore:
                 """
                 INSERT INTO runs (run_id, incident_number, machine_id, issue, status, data, steps, round,
                                   clarifications, rejected, started_at, updated_at,
-                                  escalation, outbox, conversation_id, attempt)
+                                  escalation, outbox, conversation_id, attempt, source)
                 VALUES (%(run_id)s, %(incident_id)s, %(machine_id)s, %(issue)s, %(status)s, %(data)s, %(steps)s,
                         %(round)s, %(clarifications)s, %(rejected)s, %(started_at)s, %(updated_at)s,
-                        %(escalation)s, %(outbox)s, %(conversation_id)s, %(attempt)s)
+                        %(escalation)s, %(outbox)s, %(conversation_id)s, %(attempt)s, %(source)s)
                 ON CONFLICT (run_id) DO UPDATE SET
                     incident_number = EXCLUDED.incident_number, status = EXCLUDED.status, data = EXCLUDED.data,
                     steps = EXCLUDED.steps, round = EXCLUDED.round, clarifications = EXCLUDED.clarifications,
@@ -143,6 +143,21 @@ class RunStore:
             if processed:
                 await _mark_processed(conn, processed, run.run_id)
         return run
+
+    async def watched_values(self, machine_id: str) -> dict[str, Any] | None:
+        """The watched values last seen for a machine, or None if it hasn't been seen."""
+        async with self._db.transaction() as conn:
+            cur = await conn.execute("SELECT watched FROM machine_watched_values WHERE machine_id = %s", (machine_id,))
+            row = await cur.fetchone()
+        return row["watched"] if row else None
+
+    async def remember_watched_values(self, machine_id: str, watched: dict[str, Any]) -> None:
+        async with self._db.transaction() as conn:
+            await conn.execute(
+                "INSERT INTO machine_watched_values (machine_id, watched) VALUES (%s, %s) ON CONFLICT (machine_id) "
+                "DO UPDATE SET watched = EXCLUDED.watched, seen_at = now()",
+                (machine_id, Jsonb(watched)),
+            )
 
     async def load(self) -> list[RunState]:
         async with self._db.transaction() as conn:
@@ -166,6 +181,7 @@ class RunStore:
                 outbox=tuple(r["outbox"]),
                 conversation_id=r["conversation_id"],
                 attempt=r["attempt"],
+                source=r["source"],
             )
             for r in rows
         ]
@@ -196,6 +212,7 @@ def _run_row(run: RunState) -> dict[str, Any]:
         "outbox": Jsonb(list(run.outbox)),
         "conversation_id": run.conversation_id,
         "attempt": Jsonb(run.attempt) if run.attempt is not None else None,
+        "source": run.source,
     }
 
 
@@ -234,11 +251,11 @@ class IncidentStore:
                 """
                 INSERT INTO incidents (number, run_id, machine_id, machine_type, issue, outcome, root_cause,
                                        recommended_action, decision, resolution, started_at, closed_at, archived_at,
-                                       builder, escalation, conversation_id, conversation_state)
+                                       builder, escalation, conversation_id, conversation_state, source)
                 VALUES (COALESCE(%(number)s, nextval('incident_number')), %(run_id)s, %(machine_id)s,
                         %(machine_type)s, %(issue)s, %(outcome)s, %(root_cause)s, %(recommended_action)s,
                         %(decision)s, %(resolution)s, %(started_at)s, %(at)s, %(at)s,
-                        %(builder)s, %(escalation)s, %(conversation_id)s, %(conversation_state)s)
+                        %(builder)s, %(escalation)s, %(conversation_id)s, %(conversation_state)s, %(source)s)
                 ON CONFLICT (run_id) DO UPDATE SET
                     number = EXCLUDED.number,
                     machine_type = COALESCE(EXCLUDED.machine_type, incidents.machine_type),
@@ -247,7 +264,7 @@ class IncidentStore:
                     resolution = EXCLUDED.resolution, closed_at = EXCLUDED.closed_at,
                     archived_at = EXCLUDED.archived_at, builder = EXCLUDED.builder,
                     escalation = EXCLUDED.escalation, conversation_id = EXCLUDED.conversation_id,
-                    conversation_state = EXCLUDED.conversation_state
+                    conversation_state = EXCLUDED.conversation_state, source = EXCLUDED.source
                 RETURNING id
                 """,
                 {
@@ -267,6 +284,7 @@ class IncidentStore:
                     "escalation": Jsonb(run.escalation) if run.escalation else None,
                     "conversation_id": run.conversation_id,
                     "conversation_state": _conversation_state(run),
+                    "source": run.source,
                 },
             )
             incident_id = (await cur.fetchone())["id"]
@@ -394,6 +412,7 @@ def _incident_summary(row: dict[str, Any]) -> dict[str, Any]:
         "started_at": row["started_at"].isoformat(),
         "closed_at": row["closed_at"].isoformat(),
         "reopened_run_id": row["reopened_run_id"],
+        "source": row["source"],
     }
 
 

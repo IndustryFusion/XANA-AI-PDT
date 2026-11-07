@@ -29,12 +29,15 @@ from fastapi import FastAPI
 from langchain_core.language_models import BaseChatModel
 
 from app.alerta import AlertaClient
-from app.api import alerta, auth, diagnostics, errors, gateway, ifric, incidents, ngsi, runs, shacl, stream
+from app.api import alerta, auth, diagnostics, errors, events, gateway, ifric, incidents, ngsi, runs, shacl, stream
 from app.auth import KeycloakSession
 from app.config import Settings, get_llm, load_settings
 from app.dataspace.connection import GatewayConnection
 from app.dataspace.credentials import CredentialStore
 from app.dataspace.gateway import GatewayClient
+from app.events.identity import ServiceIdentity
+from app.events.subscription import MachineWatch
+from app.events.worker import EventWorker
 from app.health import HealthService
 from app.ifric import RegistryClient
 from app.memory.migrate import Migrator
@@ -49,7 +52,7 @@ from app.runs.escalation import Escalator
 from app.runs.inbox import InboxPoller
 from app.runs.machines import MachineResolver
 from app.runs.manager import RunManager
-from app.runs.model import RunState
+from app.runs.model import OPERATOR, RunState
 from app.tracing import tracing_callbacks
 from xana_agent import NgsiContextSource, TimescaleHistorySource, Workflow
 from xana_agent.conversation import ConversationAgent
@@ -76,10 +79,24 @@ class AgentDeps:
     history: HistorySource
     machines: MachineResolver
     alerts: AlertSource | None = None
+    # The same, for triggered runs: they use another identity. None means the above.
+    triggered_context: ContextSource | None = None
+    triggered_machines: MachineResolver | None = None
 
     @classmethod
-    def from_settings(cls, s: Settings, token: Callable[[], str | None] | None = None) -> AgentDeps:
+    def from_settings(
+        cls,
+        s: Settings,
+        token: Callable[[], str | None] | None = None,
+        triggered_token: Callable[[], str | None] | None = None,
+    ) -> AgentDeps:
         return cls(
+            triggered_context=NgsiContextSource(
+                s.ngsi_url, s.ngsi_tenant, token=triggered_token, context_url=s.ngsi_context_url
+            ),
+            triggered_machines=MachineResolver(
+                s.ngsi_url, s.ngsi_tenant, s.health_timeout_s, token=triggered_token, context_url=s.ngsi_context_url
+            ),
             llm=get_llm(s),
             context=NgsiContextSource(s.ngsi_url, s.ngsi_tenant, token=token, context_url=s.ngsi_context_url),
             history=TimescaleHistorySource(
@@ -119,15 +136,29 @@ def create_app(
     )
     registry = RegistryClient(settings, gateway_connection.token, transport=gateway_transport)
     gateway_client = GatewayClient(gateway_connection, transport=gateway_transport, names=registry.names)
-    health = health or HealthService(settings, migrator, token=session.token, gateway=gateway_client, registry=registry)
-    agent = agent or AgentDeps.from_settings(settings, token=session.token)
+    service_identity = ServiceIdentity(settings)
+
+    def triggered_token() -> str | None:
+        """For what runs without an operator asking. Never for what someone asks through `/api`."""
+        return service_identity.token() or session.token()
+
+    machine_watch = MachineWatch(settings, triggered_token, session.enabled)
+    health = health or HealthService(
+        settings,
+        migrator,
+        token=session.token,
+        gateway=gateway_client,
+        registry=registry,
+        machine_watch=machine_watch,
+    )
+    agent = agent or AgentDeps.from_settings(settings, token=session.token, triggered_token=triggered_token)
     incident_store = IncidentStore(db)
     callbacks = tracing_callbacks(settings)
 
-    def workflow(memory: IncidentMemory) -> Workflow:
+    def workflow(memory: IncidentMemory, source: str = OPERATOR) -> Workflow:
         return Workflow(
             agent.llm,
-            agent.context,
+            agent.context if source == OPERATOR else (agent.triggered_context or agent.context),
             agent.history,
             memory,
             threshold=settings.decision_confidence_threshold,
@@ -179,6 +210,7 @@ def create_app(
     run_store = manager._store
     manager.desk = ConversationDesk(manager, gateway_client, escalator, run_store, incident_store, conversation_agent)
     inbox = InboxPoller(gateway_client, manager.desk, settings.inbox_poll_interval_s)
+    event_worker = EventWorker(manager, agent.triggered_machines or agent.machines)
 
     @contextlib.asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -187,12 +219,18 @@ def create_app(
         # that needs them (or from the memory health check).
         await db.open()
         task = asyncio.create_task(manager.start_up())
+        service_identity.start()
+        event_worker.start()
+        machine_watch.start()
         if settings.gateway_url:
             inbox.start()
         if not session.enabled:
             live.start()
             gateway_connection.start()
         yield
+        await machine_watch.stop()
+        await event_worker.stop()
+        await service_identity.close()
         await live.stop()
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
@@ -229,6 +267,14 @@ def create_app(
     app.state.alerta = AlertaClient(settings)
     app.state.ontology = ontology
     app.state.inbox = inbox
+    app.state.events = event_worker
+    app.state.machine_watch = machine_watch
+    app.state.service_identity = service_identity
+
+    async def wake_machine_watch() -> None:
+        machine_watch.wake()
+
+    session.on_sign_in.append(wake_machine_watch)
     errors.install(app)
     app.add_middleware(ConnectionInScope)
 
@@ -247,4 +293,5 @@ def create_app(
     app.include_router(gateway.router)
     app.include_router(ifric.router)
     app.include_router(stream.router)
+    app.include_router(events.router)
     return app

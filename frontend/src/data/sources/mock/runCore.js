@@ -54,7 +54,7 @@ export function initialCounters() {
 export function createRunRecord({ runId, machineId, issue, scenario, at, incidentId = null }) {
   return {
     runId, incidentId, machineId, issue,
-    status: 'running', startedAt: at, updatedAt: at, escalationRef: null,
+    status: 'running', startedAt: at, updatedAt: at, escalationRef: null, source: 'operator',
     scenario: getScenario(scenario).id,
     data: {}, steps: [], escalation: null, outbox: [],
     round: 1, rejected: [], wait: null, remoteClose: null, reopenedFrom: null,
@@ -63,8 +63,8 @@ export function createRunRecord({ runId, machineId, issue, scenario, at, inciden
 }
 
 export function summarize(run) {
-  const { runId, incidentId, machineId, issue, status, startedAt, updatedAt, escalationRef } = run
-  return { runId, incidentId, machineId, issue, status, startedAt, updatedAt, escalationRef }
+  const { runId, incidentId, machineId, issue, status, startedAt, updatedAt, escalationRef, source } = run
+  return { runId, incidentId, machineId, issue, status, startedAt, updatedAt, escalationRef, source }
 }
 
 export function isReopenable(run) {
@@ -487,6 +487,7 @@ export function incidentFromRun(run, at) {
     number: run.incidentId,
     runId: run.runId,
     machineId: run.machineId,
+    source: run.source,
     issue: run.issue,
     outcome: run.status,
     rootCause,

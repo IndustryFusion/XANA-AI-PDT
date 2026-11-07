@@ -139,6 +139,29 @@ jobs:
           docker compose -f compose.yaml start backend
           timeout 120 sh -c 'until curl -sf http://127.0.0.1:8000/healthz > /dev/null; do sleep 2; done'
 
+      - name: Machine events against real services
+        env:
+          EVENT_WEBHOOK_SECRET: ci-only
+          CALLBACK_BASE_URL: http://backend:8000
+          XANA_EVENTS_URL: http://backend:8000/events/alert
+          TEST_EVENT_SECRET: ci-only
+          TEST_EVENTS_BACKEND_URL: http://127.0.0.1:8000
+          TEST_EVENTS_BACKEND_CONTAINER: xana-ai-pdt-backend-1
+          TEST_BROKER_URL: http://127.0.0.1:9090
+          TEST_ALERTA_URL: http://127.0.0.1:8082/api
+          TEST_ALERTA_KEY: local-development-only-key
+          TEST_KEYCLOAK_URL: http://127.0.0.1:8081
+        run: |
+          docker compose -f compose.yaml --profile alerts up -d --no-deps backend alerta
+          timeout 120 sh -c 'until curl -sf http://127.0.0.1:8000/healthz > /dev/null; do sleep 2; done'
+          timeout 120 sh -c 'until curl -sf http://127.0.0.1:8082/api/management/healthcheck > /dev/null; do sleep 2; done'
+          TEST_FUSEKI_CALLBACK_HOST=$(docker network inspect xana-ai-pdt_default -f '{{(index .IPAM.Config 0).Gateway}}')
+          export TEST_FUSEKI_CALLBACK_HOST
+          pytest tests/test_events_real.py
+          # Off again: the tests below change machines and raise alerts.
+          env -u EVENT_WEBHOOK_SECRET -u CALLBACK_BASE_URL -u XANA_EVENTS_URL docker compose -f compose.yaml --profile alerts up -d --no-deps backend alerta
+          timeout 120 sh -c 'until curl -sf http://127.0.0.1:8000/healthz > /dev/null; do sleep 2; done'
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22

@@ -105,7 +105,7 @@ async def test_nothing_reachable_real_probes():
     s = make_settings()
     report = await HealthService(s, Migrator(s.postgres_memory_url.get_secret_value())).report()
     assert report["overall"] == "error"
-    assert {c["status"] for c in report["checks"] if c["id"] not in ("gateway", "connector", "ifric")} == {"error"}
+    assert {c["status"] for c in report["checks"] if c["id"] not in ("gateway", "connector", "ifric", "machine_events")} == {"error"}
 
 
 async def test_password_masked_in_detail_and_log(caplog):
@@ -181,6 +181,7 @@ def test_app_starts_without_dependencies():
         "llm",
         "gateway",
         "connector",
+        "machine_events",
         "ifric",
     }
 

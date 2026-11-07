@@ -29,7 +29,7 @@
             {
               "name": "Laser cutter 01 temperature",
               "value": 30.2,
-              "unit": "°C",
+              "unit": "\u00b0C",
               "assessment": "rising",
               "entity_id": "urn:ngsi-ld:Sensor:laser-cutter-01-temperature",
               "attribute": "value"
@@ -293,6 +293,7 @@
     ],
     "escalation": null,
     "outbox": [],
-    "reopenable": false
+    "reopenable": false,
+    "source": "operator"
   }
 }

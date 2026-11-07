@@ -6,6 +6,7 @@ Python 3.12 / FastAPI backend of XANA AI PDT. It is built in phases (issue #12).
 - the incident memory database and its migrations;
 - the Data Explorer's routes on the context broker and the attribute history ([Data Explorer](#data-explorer));
 - runs that operators start, clarify, confirm or reject, stop and archive, with a live stream and the incident history ([API](#api));
+- runs that start from machine events and alerts ([Machine events](#machine-events));
 - a local environment with sample machine data;
 - the diagnostic agent workflow as a package of its own ([`agent/README.md`](agent/README.md)).
 
@@ -21,6 +22,19 @@ agent/               the xana-agent package: diagnostic agent workflow, installa
 sample_data/         sample machine data (exported from the UI mock) and its loader
 compose.yaml         local environment
 ```
+
+## Machine events
+
+A problem on a machine starts a run by itself. `POST /events/ngsi` and `POST /events/alert` add to a queue of 1000, with one worker. Such a run appears and behaves like any other, with `source` `ngsi` or `alert`.
+
+- **Who may call:** whoever presents `EVENT_WEBHOOK_SECRET` as `Authorization: Bearer <secret>`. Without one set, every call is refused. Whoever may read subscriptions from the broker can read the secret.
+- **The subscription:** with `CALLBACK_BASE_URL`, the backend as the broker reaches it, it keeps `urn:ngsi-ld:Subscription:XanaPDT:MachineWatch`. It needs an identity when sign-in is on, tries again until it has one, and updates what exists after a restart. It isn't deleted on shutdown. The `machine_events` check in the health report gives its state.
+- **Platform data:** `MACHINE_WATCH_TYPE` and `MACHINE_WATCH_ATTRIBUTES` say what it watches, as short names under `NGSI_CONTEXT_URL` or as full IRIs. **`status` is a term of NGSI-LD's core context, and the broker keeps that meaning under any context, so on data with full IRIs, name it in full.** A wrong type or attribute matches nothing, and the check still says `ok`. This hasn't been tried on the real platform.
+- **The identity:** `KEYCLOAK_SERVICE_CLIENT_ID` and `KEYCLOAK_SERVICE_CLIENT_SECRET` name a client with a service account, which needs read access to the broker. Without one, the signed-in operator's token is used. Triggered runs and the subscription use this, also after a restart. Runs that operators start and routes under `/api` never do.
+- **What starts a run:** a machine with no open run, also counting paused runs, and also after a restart. From the broker: watched values other than those last seen, as it notifies every write. So a machine's first report starts one, also a healthy one, including each machine once after the first install. From an alert: one that isn't a repeat, not `ok`, `normal`, `up`, `cleared`, `informational`, `debug` or `trace`, and not `closed`, `expired`, `shelved` or `blackout`. An operator can still start a second run on a machine.
+- **When things fail:** a full queue answers 503. While the memory database is down, the event waits. With the language model down, the run starts and fails visibly. An unknown short name is logged and dropped. **What is in the queue when the backend stops is lost.**
+- **Alerta:** it has no outbound webhook, so `alerta/plugin/` sends its alerts, with `XANA_EVENTS_URL` and `EVENT_WEBHOOK_SECRET` set in Alerta's environment. It is loaded by adding the folder to `PYTHONPATH` and `xana_events` to `PLUGINS`, as the local environment does. **The platform's Alerta doesn't load it,** as its chart installs plugins from one fixed repository by name, so it needs an image or chart change there.
+- **While the API is open:** anyone who can reach `/api` can answer a triggered run's question, which starts a new round with the service identity, and read its steps. See [Sign-in](#sign-in).
 
 ## Dataspace
 
@@ -88,6 +102,8 @@ Data and models are kept in Docker volumes between runs. `docker compose -f back
 
 **With the IFRIC registry:** add `--profile ifric`, which starts a stub of the routes the backend uses, with `IFRIC_URL=http://ifric:4007` and `FACTORY_ID=urn:ngsi-ld:Factory:plant-north`. To use the real one, run it from its own repository, on the dataspace's realm.
 
+**With machine events:** set `EVENT_WEBHOOK_SECRET` to any value, `CALLBACK_BASE_URL=http://backend:8000`, and for alerts `XANA_EVENTS_URL=http://backend:8000/events/alert`. With sign-in, the realm has a client for it: `KEYCLOAK_SERVICE_CLIENT_ID=xana-events`, `KEYCLOAK_SERVICE_CLIENT_SECRET=local-development-only-secret`.
+
 **With alerts:** add `--profile alerts`, which starts Alerta (9.0.4, as on the platform, with its severities) and sends sample alerts in the form the platform's rules give them. The key is `local-development-only-key` unless `ALERTA_API_KEY` is set. Without the profile, the Alerts screen says that Alerta is unavailable, and runs show that source as unavailable.
 
 **Ports in use:** if a host port is taken, set `XANA_DB_PORT`, `XANA_BROKER_PORT`, `XANA_OLLAMA_PORT`, `XANA_KEYCLOAK_PORT`, `XANA_PGREST_PORT`, `XANA_MQTT_PORT`, `XANA_MQTT_MGMT_PORT`, `XANA_MQTT_PLATFORM_PORT`, `XANA_FUSEKI_PORT`, `XANA_ALERTA_PORT` or `XANA_BACKEND_PORT`.
@@ -115,7 +131,7 @@ Fields are snake_case. A refused request answers `{"error": {"kind", "message"}}
 | `/api/auth/status` | GET | `{valid, user, factory_id, company_id, token_expires_in_s}` |
 | `/api/auth/logout` | POST | Sign out; 204 |
 | `/api/agent/run` | POST `{machine_id, issue}` | Start a run; answers 202 `{run_id}` before the first step. `machine_id` may be a short name such as `laser-cutter-01` |
-| `/api/agent/runs` | GET | Runs that are not archived, newest first |
+| `/api/agent/runs` | GET | Runs that are not archived, newest first. Each has `source`: `operator`, `ngsi` or `alert` |
 | `/api/agent/status/{run_id}` | GET | The run with `data`, `steps`, `escalation`, `outbox` and `reopenable` |
 | `/api/agent/clarify/{run_id}` | POST `{text, files}` | Answer the agent's question (`awaiting_input`); starts a new round |
 | `/api/agent/confirm-resolution/{run_id}` | POST `{confirmed, text, files}` | Confirm (logs the incident) or reject with a reason (new round) in `awaiting_confirmation` |
@@ -146,6 +162,8 @@ Fields are snake_case. A refused request answers `{"error": {"kind", "message"}}
 | `/api/alerta/environments`, `services` | GET | Names |
 | `/api/alerta/config` | GET | `{refresh_interval_s}` |
 | `/api/ngsi/subscription-health` | GET | `{status, state, detail, expires_at, delivery}` of live updates |
+| `/events/ngsi` | POST | A notification of the context broker. Needs the webhook secret. 202 `{accepted, ignored}`; `unauthorized`, `invalid`, or 503 with the queue full |
+| `/events/alert` | POST | An Alerta alert or `{machine_id, issue}`. As above |
 | `/ws/run/{run_id}` | WebSocket | `snapshot` first, then `step` and `status` events; `keepalive` every 20 s while quiet; `error` and close code 4404 for an unknown or archived run |
 
 - **Attachments:** `files` items are `{name, type, size, data_url}`: images, PDF or plain text, at most 5 files of 10 MB each. Only the name, type and size are kept.

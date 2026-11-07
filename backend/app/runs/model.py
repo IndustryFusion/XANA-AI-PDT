@@ -34,6 +34,11 @@ AWAITING_OPERATOR_APPROVAL = "awaiting_operator_approval"
 AWAITING_RECOMMENDATION_REVIEW = "awaiting_recommendation_review"
 MB_CLOSED = "mb_closed"
 
+# Where a run came from.
+OPERATOR = "operator"
+NGSI = "ngsi"
+ALERT = "alert"
+
 CONVERSATION = (AWAITING_MACHINE_BUILDER, AWAITING_OPERATOR_APPROVAL, AWAITING_RECOMMENDATION_REVIEW)
 OPEN = (RUNNING, AWAITING_INPUT, AWAITING_CONFIRMATION, *CONVERSATION)
 FINISHED = (COMPLETED, FAILED, STOPPED, MB_CLOSED)
@@ -72,6 +77,7 @@ class RunState:
     outbox: tuple[dict[str, Any], ...] = ()
     conversation_id: str | None = None
     attempt: dict[str, Any] | None = None  # how far an escalation that failed got
+    source: str = OPERATOR
 
     def summary(self) -> dict[str, Any]:
         return {
@@ -83,6 +89,7 @@ class RunState:
             "started_at": self.started_at.isoformat(),
             "updated_at": self.updated_at.isoformat(),
             "escalation_ref": self.escalation["ref"] if self.escalation else None,
+            "source": self.source,
         }
 
     def view(self) -> dict[str, Any]:

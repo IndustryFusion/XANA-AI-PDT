@@ -27,6 +27,7 @@ import asyncio
 import contextlib
 import logging
 import uuid
+from collections import Counter
 from collections.abc import Awaitable, Callable, Coroutine
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -44,6 +45,8 @@ from app.runs.model import (
     AWAITING_MACHINE_BUILDER,
     CONVERSATION,
     FAILED,
+    OPEN,
+    OPERATOR,
     RUNNING,
     STOPPED,
     RunState,
@@ -62,7 +65,7 @@ NO_ESCALATION = "No dataspace is configured for this installation."
 NOT_REOPENABLE = "Only runs with a machine-builder conversation can be reopened."
 
 Work = Literal["analyse", "act"]
-WorkflowFactory = Callable[[IncidentMemory], Workflow]
+WorkflowFactory = Callable[[IncidentMemory, str], Workflow]
 
 
 class RunRecord:
@@ -108,6 +111,7 @@ class RunManager:
         self._ready = False
         self._ready_lock = asyncio.Lock()
         self._reopen_lock = asyncio.Lock()
+        self._starting: Counter[str] = Counter()  # machines whose new run is being stored
 
     # ── Startup and shutdown ─────────────────────────────────────────────────
 
@@ -235,13 +239,45 @@ class RunManager:
         await self._require_model()
         return await self._create(await self._machines.resolve(machine_id), issue)
 
-    async def _create(self, machine_id: str, issue: str) -> str:
+    async def start_triggered(
+        self, machine_id: str, issue: str, source: str, watched: dict[str, Any] | None = None
+    ) -> str | None:
+        """Starts a run for an event, unless the machine has an open one, or reported nothing new.
+
+        The ID of the run, or None. Raises `unavailable` if the memory database can't be used, and then
+        trying again is safe: the values are stored last, and by then the open run stops a second one.
+        """
+        await self.ready()
+        try:
+            known = await self._store.watched_values(machine_id) if watched is not None else None
+            changed = watched is None or watched != known
+            run_id = None
+            if changed and not self._has_open_run(machine_id):
+                # No check of the language model: nobody is there to read a refusal, so a failed run shows it.
+                run_id = await self._create(machine_id, issue, source)
+            if watched is not None and changed:
+                await self._store.remember_watched_values(machine_id, watched)
+        except StoreUnavailable as error:
+            raise unavailable(str(error)) from None
+        return run_id
+
+    def _has_open_run(self, machine_id: str) -> bool:
+        if self._starting[machine_id] > 0:
+            return True
+        return any(r.state.machine_id == machine_id and r.state.status in OPEN for r in self._runs.values())
+
+    async def _create(self, machine_id: str, issue: str, source: str = OPERATOR) -> str:
         now = self._now()
-        state = RunState(str(uuid.uuid4()), machine_id, issue, RUNNING, started_at=now, updated_at=now)
+        state = RunState(str(uuid.uuid4()), machine_id, issue, RUNNING, started_at=now, updated_at=now, source=source)
+        self._starting[machine_id] += 1
         try:
             state = await self._store.save(state)
         except StoreUnavailable as error:
             raise unavailable(f"{error} The run was not started.") from None
+        finally:
+            self._starting[machine_id] -= 1
+            if self._starting[machine_id] == 0:
+                del self._starting[machine_id]
         rec = RunRecord(state)
         self._runs[state.run_id] = rec
         self._launch(rec, "analyse")
@@ -561,7 +597,7 @@ class RunManager:
         try:
             async with self._slots:
                 state = rec.state
-                workflow = self._workflow(self._incidents.memory_for(state))
+                workflow = self._workflow(self._incidents.memory_for(state), state.source)
                 round_input = RoundInput(
                     machine_id=state.machine_id,
                     issue=state.issue,

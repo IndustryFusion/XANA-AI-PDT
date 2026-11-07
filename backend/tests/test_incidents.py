@@ -166,6 +166,7 @@ async def test_completed_run_archived(url):
         "started_at",
         "closed_at",
         "reopened_run_id",
+        "source",
     }
 
 
