@@ -66,6 +66,13 @@ class Settings(BaseSettings):
     keycloak_realm: str = "iff"
     keycloak_client_id: str = "scorpio"
     factory_id: str | None = None
+    keycloak_service_client_id: str | None = None
+    keycloak_service_client_secret: SecretStr | None = None
+
+    callback_base_url: str | None = None
+    event_webhook_secret: SecretStr | None = None
+    machine_watch_type: str = Field("Machine", min_length=1)
+    machine_watch_attributes: str = Field("status,errorCode,alarmLevel,faultCode", min_length=1)
 
     gateway_url: str | None = None
     gateway_keycloak_url: str | None = None
@@ -131,7 +138,15 @@ class Settings(BaseSettings):
             raise ValueError("must be an IRI without spaces, quotes or brackets; it goes into SPARQL queries")
         return value
 
-    @field_validator("pgrest_url", "fuseki_url", "mqtt_mgmt_url", "gateway_url", "gateway_keycloak_url", "ifric_url")
+    @field_validator(
+        "pgrest_url",
+        "fuseki_url",
+        "mqtt_mgmt_url",
+        "gateway_url",
+        "gateway_keycloak_url",
+        "ifric_url",
+        "callback_base_url",
+    )
     @classmethod
     def _http_address(cls, value: str | None) -> str | None:
         return value and with_scheme(value, "http")
@@ -148,7 +163,7 @@ class Settings(BaseSettings):
             raise ValueError("must be a table name (letters, digits, underscores, optional schema)")
         return value
 
-    @field_validator("anthropic_api_key", "openai_api_key", "alerta_api_key")
+    @field_validator("anthropic_api_key", "openai_api_key", "alerta_api_key", "event_webhook_secret")
     @classmethod
     def _key_without_spaces(cls, value: SecretStr | None) -> SecretStr | None:
         if value is not None and any(c.isspace() for c in value.get_secret_value()):
@@ -177,6 +192,16 @@ class Settings(BaseSettings):
         return self
 
     @model_validator(mode="after")
+    def _machine_events_are_complete(self) -> Settings:
+        if self.callback_base_url and not self.event_webhook_secret:
+            raise ValueError("EVENT_WEBHOOK_SECRET is required when CALLBACK_BASE_URL is set")
+        if bool(self.keycloak_service_client_id) != bool(self.keycloak_service_client_secret):
+            raise ValueError("KEYCLOAK_SERVICE_CLIENT_ID and KEYCLOAK_SERVICE_CLIENT_SECRET must be set together")
+        if self.keycloak_service_client_id and not self.keycloak_url:
+            raise ValueError("KEYCLOAK_URL is required when KEYCLOAK_SERVICE_CLIENT_ID is set")
+        return self
+
+    @model_validator(mode="after")
     def _tracing_keys_come_together(self) -> Settings:
         if bool(self.langfuse_public_key) != bool(self.langfuse_secret_key):
             raise ValueError("LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY must be set together")
@@ -188,6 +213,10 @@ class Settings(BaseSettings):
         self.postgres_memory_url = SecretStr(_with_query(self.postgres_memory_url.get_secret_value(), tls))
         self.timescale_db_url = SecretStr(_with_query(self.timescale_db_url.get_secret_value(), tls))
         return self
+
+    @property
+    def watched_attributes(self) -> list[str]:
+        return [name.strip() for name in self.machine_watch_attributes.split(",") if name.strip()]
 
     @property
     def llm_label(self) -> str:
@@ -204,6 +233,8 @@ class Settings(BaseSettings):
                 self.alerta_api_key and self.alerta_api_key.get_secret_value(),
                 self.gateway_client_secret and self.gateway_client_secret.get_secret_value(),
                 self.settings_encryption_key and self.settings_encryption_key.get_secret_value(),
+                self.event_webhook_secret and self.event_webhook_secret.get_secret_value(),
+                self.keycloak_service_client_secret and self.keycloak_service_client_secret.get_secret_value(),
                 url_password(self.timescale_db_url.get_secret_value()),
                 url_password(self.postgres_memory_url.get_secret_value()),
             ]

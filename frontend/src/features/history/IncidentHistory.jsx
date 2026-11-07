@@ -21,7 +21,7 @@ import { EntityRef, entityLabel } from '../../app/EntityRef'
 import { Link, paths, useRoute } from '../../app/router'
 import { Button, Card, DataView, EmptyState, ErrorState, LoadingState, StatusBadge } from '../../ui/components'
 import { ConfidenceMeter, ConfirmDialog } from '../../ui/structured'
-import { formatDate, formatTime } from '../../ui/format'
+import { formatDate, formatTime, runSourceLabel, triggeredBy } from '../../ui/format'
 import { useRevealOnChange } from '../../app/reveal'
 import { INCIDENT_OUTCOME, toneOf } from '../../ui/status'
 import { MessageThread, threadEntries } from '../incidents/Conversation'
@@ -117,6 +117,7 @@ export function IncidentList({ selected, machine }) {
                       <span>#{i.number}</span>
                       <span>{entityLabel(i.machineId)}</span>
                       <span><time dateTime={i.closedAt}>{formatDate(i.closedAt)}</time></span>
+                      {triggeredBy(i.source) && <span data-testid="run-source">{triggeredBy(i.source)}</span>}
                     </span>
                   </Link>
                   <StatusBadge kind="outcome" value={i.outcome} />
@@ -180,6 +181,7 @@ export function IncidentDetail({ id }) {
         <p className="run-header__issue">{incident.issue}</p>
         <dl className="details run-header__details">
           <dt>Machine</dt><dd><EntityRef id={incident.machineId} /></dd>
+          <dt>Started by</dt><dd data-testid="run-source">{runSourceLabel(incident.source)}</dd>
           <dt>Started</dt><dd><time dateTime={incident.startedAt}>{formatTime(incident.startedAt)}</time></dd>
           <dt>Closed</dt><dd><time dateTime={incident.closedAt}>{formatTime(incident.closedAt)}</time></dd>
         </dl>

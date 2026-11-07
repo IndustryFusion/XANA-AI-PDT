@@ -31,6 +31,7 @@ import psycopg
 from app.config import Settings
 from app.dataspace.gateway import GatewayClient
 from app.errors import Refused
+from app.events.subscription import ACTIVE, DELIVERY_FAILING, NOT_CONFIGURED, TENANT_LIMIT, WAITING, MachineWatch
 from app.ifric import RegistryClient
 from app.memory.migrate import Migrator
 from app.redact import mask_url
@@ -43,6 +44,10 @@ Probe = Callable[[], Awaitable[tuple[Status, str]]]
 UNCONFIRMED = "could not be confirmed, so it is assumed to be available"
 NO_DATASPACE = "No dataspace is configured"
 NO_REGISTRY = "No IFRIC registry is configured"
+NO_EVENTS = (
+    "Machine events aren't configured: CALLBACK_BASE_URL is not set. A subscription made earlier stays in the "
+    "context broker, and goes on delivering, until it is deleted there"
+)
 NO_MODEL_LIST = (404, 405, 501)  # an OpenAI-compatible server need not offer a model list
 
 LABELS = {
@@ -53,6 +58,7 @@ LABELS = {
     "gateway": "Dataspace gateway",
     "connector": "Dataspace connector",
     "ifric": "IFRIC registry",
+    "machine_events": "Machine events",
 }
 
 
@@ -86,7 +92,9 @@ class HealthService:
         token: Callable[[], str | None] | None = None,
         gateway: GatewayClient | None = None,
         registry: RegistryClient | None = None,
+        machine_watch: MachineWatch | None = None,
     ) -> None:
+        self._machine_watch = machine_watch
         self._registry = registry
         self._token = token
         self._gateway = gateway
@@ -102,6 +110,7 @@ class HealthService:
             "gateway": self._gateway_check,
             "connector": self._connector_check,
             "ifric": self._ifric_check,
+            "machine_events": self._machine_events_check,
         }
         self._clock = clock
         self._cached: tuple[float, dict] | None = None
@@ -114,7 +123,9 @@ class HealthService:
                 return self._cached[1]
             checks = await asyncio.gather(*(self._run(cid, probe) for cid, probe in self._probes.items()))
             result = {
-                "overall": overall([c.status for c in checks if c.detail not in (NO_DATASPACE, NO_REGISTRY)]),
+                "overall": overall(
+                    [c.status for c in checks if c.detail not in (NO_DATASPACE, NO_REGISTRY, NO_EVENTS)]
+                ),
                 "checked_at": datetime.now(UTC).isoformat(),
                 "checks": [asdict(c) for c in checks],
                 "models": self._models(checks),
@@ -218,6 +229,14 @@ class HealthService:
             return "ok", NO_REGISTRY
         participant = self._gateway.connection.participant_id if self._gateway else None
         return await self._registry.check(participant)
+
+    async def _machine_events_check(self) -> tuple[Status, str]:
+        watch = self._machine_watch
+        if watch is None or watch.state == NOT_CONFIGURED:
+            return "ok", NO_EVENTS
+        if watch.state == ACTIVE:
+            return "ok", watch.detail
+        return ("degraded" if watch.state in (WAITING, DELIVERY_FAILING, TENANT_LIMIT) else "error"), watch.detail
 
     def _label(self) -> str:
         return (self._s.llm_provider_name or "Ollama") if self._s.llm_provider == "ollama" else self._s.llm_label

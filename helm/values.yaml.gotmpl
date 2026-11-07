@@ -44,6 +44,14 @@ config:
   NGSI_CONTEXT_URL: {{ . | quote }}
   {{- end }}
   PGREST_URL: {{ .Values.pgrestUrl | quote }}
+  {{- with .Values.callbackBaseUrl }}
+  CALLBACK_BASE_URL: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.keycloakServiceClientId }}
+  KEYCLOAK_SERVICE_CLIENT_ID: {{ . | quote }}
+  {{- end }}
+  MACHINE_WATCH_TYPE: {{ .Values.machineWatchType | quote }}
+  MACHINE_WATCH_ATTRIBUTES: {{ .Values.machineWatchAttributes | quote }}
   {{- with .Values.gatewayUrl }}
   GATEWAY_URL: {{ . | quote }}
   {{- end }}
@@ -94,6 +102,12 @@ secrets:
     {{- end }}
     {{- with env "XANA_GATEWAY_CLIENT_SECRET" }}
     GATEWAY_CLIENT_SECRET: {{ . | quote }}
+    {{- end }}
+    {{- with env "XANA_EVENT_WEBHOOK_SECRET" }}
+    EVENT_WEBHOOK_SECRET: {{ . | quote }}
+    {{- end }}
+    {{- with env "XANA_KEYCLOAK_SERVICE_CLIENT_SECRET" }}
+    KEYCLOAK_SERVICE_CLIENT_SECRET: {{ . | quote }}
     {{- end }}
     {{- with env "XANA_SETTINGS_ENCRYPTION_KEY" }}
     SETTINGS_ENCRYPTION_KEY: {{ . | quote }}

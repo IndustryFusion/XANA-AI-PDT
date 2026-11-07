@@ -41,6 +41,10 @@ class StoreUnavailable(Exception):
     """The memory database could not be used. The message is safe to show."""
 
 
+class StoreRefused(StoreUnavailable):
+    """The memory database is there, and refused this data: trying the same again won't help."""
+
+
 class Database:
     """A small connection pool, opened at startup without waiting for the database."""
 
@@ -81,6 +85,9 @@ class Database:
             raise StoreUnavailable("The memory database is not reachable.") from None
         except psycopg.Error as error:
             log.warning("Memory database error: %s", self._redact(error))
+            # Only what is wrong with this data. Anything else may pass, such as a database that is read-only for now.
+            if isinstance(error, psycopg.DataError | psycopg.IntegrityError) or (error.sqlstate or "").startswith("54"):
+                raise StoreRefused("The memory database refused the request.") from None
             raise StoreUnavailable("The memory database could not complete the request.") from None
 
 
@@ -127,10 +134,10 @@ class RunStore:
                 """
                 INSERT INTO runs (run_id, incident_number, machine_id, issue, status, data, steps, round,
                                   clarifications, rejected, started_at, updated_at,
-                                  escalation, outbox, conversation_id, attempt)
+                                  escalation, outbox, conversation_id, attempt, source)
                 VALUES (%(run_id)s, %(incident_id)s, %(machine_id)s, %(issue)s, %(status)s, %(data)s, %(steps)s,
                         %(round)s, %(clarifications)s, %(rejected)s, %(started_at)s, %(updated_at)s,
-                        %(escalation)s, %(outbox)s, %(conversation_id)s, %(attempt)s)
+                        %(escalation)s, %(outbox)s, %(conversation_id)s, %(attempt)s, %(source)s)
                 ON CONFLICT (run_id) DO UPDATE SET
                     incident_number = EXCLUDED.incident_number, status = EXCLUDED.status, data = EXCLUDED.data,
                     steps = EXCLUDED.steps, round = EXCLUDED.round, clarifications = EXCLUDED.clarifications,
@@ -166,6 +173,7 @@ class RunStore:
                 outbox=tuple(r["outbox"]),
                 conversation_id=r["conversation_id"],
                 attempt=r["attempt"],
+                source=r["source"],
             )
             for r in rows
         ]
@@ -196,6 +204,7 @@ def _run_row(run: RunState) -> dict[str, Any]:
         "outbox": Jsonb(list(run.outbox)),
         "conversation_id": run.conversation_id,
         "attempt": Jsonb(run.attempt) if run.attempt is not None else None,
+        "source": run.source,
     }
 
 
@@ -235,11 +244,11 @@ class IncidentStore:
                 """
                 INSERT INTO incidents (number, run_id, machine_id, machine_type, issue, outcome, root_cause,
                                        recommended_action, decision, resolution, started_at, closed_at, archived_at,
-                                       builder, escalation, conversation_id, conversation_state)
+                                       builder, escalation, conversation_id, conversation_state, source)
                 VALUES (COALESCE(%(number)s, nextval('incident_number')), %(run_id)s, %(machine_id)s,
                         %(machine_type)s, %(issue)s, %(outcome)s, %(root_cause)s, %(recommended_action)s,
                         %(decision)s, %(resolution)s, %(started_at)s, %(at)s, %(at)s,
-                        %(builder)s, %(escalation)s, %(conversation_id)s, %(conversation_state)s)
+                        %(builder)s, %(escalation)s, %(conversation_id)s, %(conversation_state)s, %(source)s)
                 ON CONFLICT (run_id) DO UPDATE SET
                     number = EXCLUDED.number,
                     machine_type = COALESCE(EXCLUDED.machine_type, incidents.machine_type),
@@ -248,7 +257,7 @@ class IncidentStore:
                     resolution = EXCLUDED.resolution, closed_at = EXCLUDED.closed_at,
                     archived_at = EXCLUDED.archived_at, builder = EXCLUDED.builder,
                     escalation = EXCLUDED.escalation, conversation_id = EXCLUDED.conversation_id,
-                    conversation_state = EXCLUDED.conversation_state
+                    conversation_state = EXCLUDED.conversation_state, source = EXCLUDED.source
                 RETURNING id
                 """,
                 {
@@ -268,6 +277,7 @@ class IncidentStore:
                     "escalation": Jsonb(run.escalation) if run.escalation else None,
                     "conversation_id": run.conversation_id,
                     "conversation_state": _conversation_state(run),
+                    "source": run.source,
                 },
             )
             incident_id = (await cur.fetchone())["id"]
@@ -406,6 +416,7 @@ def _incident_summary(row: dict[str, Any]) -> dict[str, Any]:
         "started_at": row["started_at"].isoformat(),
         "closed_at": row["closed_at"].isoformat(),
         "reopened_run_id": row["reopened_run_id"],
+        "source": row["source"],
     }
 
 

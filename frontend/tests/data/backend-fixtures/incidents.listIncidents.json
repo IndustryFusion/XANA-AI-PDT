@@ -14,7 +14,8 @@
       "escalation_ref": null,
       "started_at": "2026-11-07T00:56:29.509628+00:00",
       "closed_at": "2026-11-07T00:56:30.400385+00:00",
-      "reopened_run_id": null
+      "reopened_run_id": null,
+      "source": "operator"
     },
     {
       "id": "7",
@@ -27,7 +28,8 @@
       "escalation_ref": null,
       "started_at": "2026-11-07T00:56:26.456262+00:00",
       "closed_at": "2026-11-07T00:56:29.417981+00:00",
-      "reopened_run_id": null
+      "reopened_run_id": null,
+      "source": "operator"
     },
     {
       "id": "6",
@@ -40,7 +42,8 @@
       "escalation_ref": null,
       "started_at": "2026-11-07T00:47:30.632517+00:00",
       "closed_at": "2026-11-07T00:47:31.857425+00:00",
-      "reopened_run_id": null
+      "reopened_run_id": null,
+      "source": "operator"
     },
     {
       "id": "4",
@@ -53,7 +56,8 @@
       "escalation_ref": null,
       "started_at": "2026-11-07T00:47:18.709346+00:00",
       "closed_at": "2026-11-07T00:47:22.289574+00:00",
-      "reopened_run_id": null
+      "reopened_run_id": null,
+      "source": "operator"
     },
     {
       "id": "3",
@@ -66,7 +70,8 @@
       "escalation_ref": null,
       "started_at": "2026-11-07T00:31:07.166310+00:00",
       "closed_at": "2026-11-07T00:31:08.154035+00:00",
-      "reopened_run_id": null
+      "reopened_run_id": null,
+      "source": "operator"
     },
     {
       "id": "1",
@@ -79,7 +84,8 @@
       "escalation_ref": null,
       "started_at": "2026-11-07T00:30:57.294280+00:00",
       "closed_at": "2026-11-07T00:30:59.556744+00:00",
-      "reopened_run_id": null
+      "reopened_run_id": null,
+      "source": "operator"
     }
   ]
 }

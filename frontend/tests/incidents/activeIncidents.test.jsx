@@ -49,6 +49,19 @@ describe('open runs list', () => {
     expect(within(rows[3]).getByText('Awaiting machine builder')).not.toHaveClass('badge--pulse')
   })
 
+  test('a run from a machine event or an alert says so, and an operator\'s adds nothing', async () => {
+    resetMock({ path: '/incidents', controls })
+    store.update((s) => { s.runs[0].source = 'ngsi'; s.runs[1].source = 'alert'; return s })
+    render(<App />)
+    const rows = await items()
+    expect(within(rows[0]).getByTestId('run-source')).toHaveTextContent('Machine event')
+    expect(within(rows[1]).getByTestId('run-source')).toHaveTextContent('Alert')
+    expect(within(rows[2]).queryByTestId('run-source')).toBeNull()
+    await userEvent.setup().click(within(rows[0]).getByRole('link'))
+    const details = await screen.findAllByTestId('run-source')
+    expect(details.map((d) => d.textContent)).toContain('Machine event')
+  })
+
   test('no open runs: an empty state offers to start a new analysis', async () => {
     const user = userEvent.setup()
     resetMock({ path: '/incidents', controls })

@@ -133,6 +133,7 @@ async def test_list_includes_finished_runs_newest_first(url):
         "started_at",
         "updated_at",
         "escalation_ref",
+        "source",
     }
 
 

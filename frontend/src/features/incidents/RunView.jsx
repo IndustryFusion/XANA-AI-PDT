@@ -22,7 +22,7 @@ import { EntityRef } from '../../app/EntityRef'
 import { Link, paths } from '../../app/router'
 import { Button, ErrorState, LoadingState, StatusBadge, Tabs } from '../../ui/components'
 import { ConfirmDialog } from '../../ui/structured'
-import { formatTime } from '../../ui/format'
+import { formatTime, runSourceLabel } from '../../ui/format'
 import { toneOf } from '../../ui/status'
 import { DecisionCard, HypothesisList } from './Analysis'
 import Conversation from './Conversation'
@@ -42,6 +42,7 @@ export function RunHeader({ run }) {
       <p className="run-header__issue">{run.issue}</p>
       <dl className="details run-header__details">
         <dt>Machine</dt><dd><EntityRef id={run.machineId} /></dd>
+        <dt>Started by</dt><dd data-testid="run-source">{runSourceLabel(run.source)}</dd>
         {run.escalationRef && <><dt>Escalation</dt><dd className="mono">{run.escalationRef}</dd></>}
         <dt>Run</dt><dd className="mono">{run.runId}</dd>
         <dt>Started</dt><dd><time dateTime={run.startedAt}>{formatTime(run.startedAt)}</time></dd>

@@ -177,8 +177,8 @@ Fields are snake_case. A refused request answers `{"error": {"kind", "message"}}
 | `/api/alerta/*` | — | Alerts screen: list, count, detail, actions, environments, services, on `ALERTA_URL` only. Actions are for operators; the workflow only reads |
 | `/api/gateway/*` | — | The dataspace connection: `config`, `status`, `connect`, `disconnect`, `token-claims`, `peers`, `peers/{id}/capabilities`, `policies`, `capabilities/requests`, `capabilities/policy`. Answers never hold a token or secret |
 | `/api/ifric/*` | — | The IFRIC registry, with the dataspace token: `config`, `status`, `factory`, `resolve`, `resolve-builders`. For the backend only, and not an agent tool |
-| `/events/ngsi` | POST | *Later phase.* Webhook for Scorpio NGSI-LD notifications |
-| `/events/alert` | POST | *Later phase.* Webhook for external alert systems |
+| `/events/ngsi` | POST | Webhook for Scorpio's notifications; needs the webhook secret |
+| `/events/alert` | POST | Webhook for alerts, from Alerta through its plugin or `{machine_id, issue}`; needs the webhook secret |
 
 **Runs** (`app/runs/`). `RunManager` holds one `RunRecord` per non-archived run: its stored state, a lock that every change takes, the task of the round in progress and the subscribers of its stream. Each round runs as an `asyncio` task; at most `MAX_CONCURRENT_ROUNDS` run at once and further rounds wait in `running`. An operation is accepted only in the statuses that allow it (clarify in `awaiting_input`; confirm or reject in `awaiting_confirmation`; stop in `running`, `awaiting_input`, `awaiting_confirmation`; archive in `completed`, `failed`, `stopped`), otherwise it is refused as `conflict`. Stopping cancels the round; a step that completes afterwards is discarded. Operator answers are recorded as `clarification` and `resolution` steps; attached files keep only name, type and size.
 
@@ -332,9 +332,11 @@ External alert       → POST /events/alert ─┤→ asyncio.Queue → event_wo
 User action          → POST /api/agent/run ─┘ (bypasses queue, direct)
 ```
 
-`event_worker` runs as a background asyncio task throughout the server lifetime. It deduplicates: if a machine already has an active run, subsequent events for that machine are dropped. Each run is fired as a separate `asyncio.create_task` so the worker is never blocked by a slow agent.
+`event_worker` runs as a background asyncio task throughout the server lifetime, one event at a time. Every event starts a run, unless a run that an event started for the same machine is still in its first analysis: until it completes, fails, is stopped or pauses for the operator. Values are not compared with those reported before, and runs an operator started don't hold events up. For 5 minutes after a triggered run of a machine failed, the latest event per machine and source waits, and starts when that time is up. Each run is its own task, so the worker is never blocked by a slow agent. Runs and incidents record their `source`: `operator`, `ngsi` or `alert`. The queue is in memory, so what it holds when the backend stops is lost.
 
-On startup, the backend registers a Scorpio NGSI-LD subscription watching `status`, `errorCode`, `alarmLevel`, `faultCode` on all `Machine` entities. The subscription is idempotent (upserted by stable ID).
+Once an identity is available, the backend keeps a Scorpio NGSI-LD subscription with a stable ID, watching `status`, `errorCode`, `alarmLevel`, `faultCode` on `Machine` entities. It retries until it can, and its state is the `machine_events` health check. The identity is a service client of its own (`KEYCLOAK_SERVICE_CLIENT_ID`), or else the signed-in operator. Triggered runs use the same, also after a restart. Runs that operators start and everything under `/api` never use the service client.
+
+Callers present `EVENT_WEBHOOK_SECRET` as a bearer token. Alerta has no outbound webhook, so a plugin in `backend/alerta/plugin/` sends its alerts.
 
 #### Memory Layer (`app/memory/`)
 

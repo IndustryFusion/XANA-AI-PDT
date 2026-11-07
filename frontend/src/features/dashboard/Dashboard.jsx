@@ -20,6 +20,7 @@ import { useData } from '../../data/useData'
 import { EntityRef } from '../../app/EntityRef'
 import { Link, paths } from '../../app/router'
 import { Button, Card, DataView, EmptyState, StatusBadge } from '../../ui/components'
+import { triggeredBy } from '../../ui/format'
 import { SEVERITY_ORDER, toneOf } from '../../ui/status'
 import './dashboard.css'
 
@@ -101,7 +102,10 @@ function IncidentsTile({ opts }) {
                 <li key={run.runId} className={`tile__item tile__item--toned toned toned--${toneOf('run', run.status)}`}>
                   <div className="tile__item-main">
                     <Link to={paths.run(run.runId)} className="tile__item-title">{run.issue}</Link>
-                    <span className="row muted"><EntityRef id={run.machineId} /></span>
+                    <span className="row muted">
+                      <EntityRef id={run.machineId} />
+                      {triggeredBy(run.source) && <span data-testid="run-source">{triggeredBy(run.source)}</span>}
+                    </span>
                   </div>
                   <StatusBadge kind="run" value={run.status} />
                 </li>

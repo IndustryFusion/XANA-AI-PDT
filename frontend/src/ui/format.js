@@ -14,7 +14,18 @@
 // limitations under the License.
 //
 
-/** Display formats for times, ages, sizes and percentages. */
+/** Display formats for times, ages, sizes, percentages and where a run came from. */
+
+const RUN_SOURCE_LABELS = { operator: 'Operator', ngsi: 'Machine event', alert: 'Alert' }
+
+export function runSourceLabel(source) {
+  return RUN_SOURCE_LABELS[source] ?? RUN_SOURCE_LABELS.operator
+}
+
+/** What lists show: only what didn't come from an operator. */
+export function triggeredBy(source) {
+  return source && source !== 'operator' ? runSourceLabel(source) : null
+}
 
 export function formatTime(iso) {
   if (!iso) return ''

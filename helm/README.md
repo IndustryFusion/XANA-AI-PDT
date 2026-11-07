@@ -61,6 +61,8 @@ The IFRIC registry uses `ifricUrl`, including its port, and `factoryId`.
 
 Alerts use `alertaUrl`, which must end in `/api`. Set the key with `XANA_ALERTA_API_KEY`, or as `ALERTA_API_KEY` in the existing secret.
 
+Machine events use `callbackBaseUrl`, the backend as Scorpio reaches it, and `XANA_EVENT_WEBHOOK_SECRET`, or `EVENT_WEBHOOK_SECRET` in the existing secret. With nobody signed in, they need a Keycloak client with a service account and read access to Scorpio: `keycloakServiceClientId`, and `XANA_KEYCLOAK_SERVICE_CLIENT_SECRET`, or `KEYCLOAK_SERVICE_CLIENT_SECRET` in the existing secret. The platform has no such client, so one has to be created. On data with full IRIs, set `machineWatchType` and `machineWatchAttributes` to the platform's names, with `status` in full. Alerts need the plugin loaded in Alerta, which the platform's chart doesn't do. See [Machine events](../backend/README.md#machine-events).
+
 Value hints read `fusekiUrl` and `fusekiDataset`. Set `fusekiGraphBase` to `http://<Fuseki's external host>/<realm>`, as the platform names its graphs after that host.
 
 Live updates use `mqttBrokerUrl`, `mqttMgmtUrl` and, if Scorpio reaches the broker at another address, `mqttBrokerNotifyUrl`. Operators need `Factory-Admin` or `Factory-Reader` on client `scorpio`. A page served from another address than the UI's needs `WS_ALLOWED_ORIGINS` in `extraConfig`.

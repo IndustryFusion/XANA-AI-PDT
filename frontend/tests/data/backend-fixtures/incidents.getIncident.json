@@ -126,7 +126,7 @@
           "signals": [
             {
               "name": "Laser cutter 01 temperature",
-              "unit": "°C",
+              "unit": "\u00b0C",
               "value": 30.2,
               "attribute": "value",
               "entity_id": "urn:ngsi-ld:Sensor:laser-cutter-01-temperature",
@@ -417,7 +417,7 @@
           "signals": [
             {
               "name": "Laser cutter 01 temperature",
-              "unit": "°C",
+              "unit": "\u00b0C",
               "value": 30.2,
               "attribute": "value",
               "entity_id": "urn:ngsi-ld:Sensor:laser-cutter-01-temperature",
@@ -713,7 +713,7 @@
           "signals": [
             {
               "name": "Laser cutter 01 temperature",
-              "unit": "°C",
+              "unit": "\u00b0C",
               "value": 30.2,
               "attribute": "value",
               "entity_id": "urn:ngsi-ld:Sensor:laser-cutter-01-temperature",
@@ -963,6 +963,7 @@
         "round": 3
       }
     ],
-    "run_id": "0badaa29-2f46-4fb7-9b51-4b383d38e967"
+    "run_id": "0badaa29-2f46-4fb7-9b51-4b383d38e967",
+    "source": "operator"
   }
 }

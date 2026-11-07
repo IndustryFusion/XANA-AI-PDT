@@ -43,6 +43,15 @@ test('shows the five tiles with their data', async () => {
   expect(await within(health).findByText('Overall: ok')).toBeVisible()
 })
 
+test('a run from a machine event says so on its tile', async () => {
+  renderApp(open)
+  await tile('Active incidents')
+  store.update((s) => { s.runs[0].source = 'ngsi'; return s })
+  await userEvent.setup().click(await screen.findByRole('button', { name: 'Refresh now' }))
+  const incidents = await tile('Active incidents')
+  expect(await within(incidents).findByTestId('run-source')).toHaveTextContent('Machine event')
+})
+
 test('tile headers and listed incidents link to their areas and items', async () => {
   const user = userEvent.setup()
   renderApp(open)

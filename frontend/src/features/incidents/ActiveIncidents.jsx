@@ -20,7 +20,7 @@ import { useData } from '../../data/useData'
 import { EntityRef, entityLabel } from '../../app/EntityRef'
 import { Link, paths, useRoute } from '../../app/router'
 import { Button, Card, DataView, EmptyState, StatusBadge } from '../../ui/components'
-import { formatAge } from '../../ui/format'
+import { formatAge, triggeredBy } from '../../ui/format'
 import { useRevealOnChange } from '../../app/reveal'
 import { toneOf } from '../../ui/status'
 import RunView from './RunView'
@@ -62,6 +62,7 @@ export function RunList({ selected, machine, refreshKey }) {
                     <span>{entityLabel(r.machineId)}</span>
                     <span>{r.incidentId != null ? `#${r.incidentId}` : 'No incident number yet'}</span>
                     <span>{formatAge(r.startedAt)}</span>
+                    {triggeredBy(r.source) && <span data-testid="run-source">{triggeredBy(r.source)}</span>}
                   </span>
                 </Link>
                 <StatusBadge kind="run" value={r.status} />

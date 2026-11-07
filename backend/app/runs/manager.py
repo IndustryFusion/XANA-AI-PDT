@@ -34,8 +34,8 @@ from typing import Any, Literal
 
 from app.errors import Refused, conflict, invalid, not_found, unavailable
 from app.memory.migrate import MigrationError, Migrator
-from app.memory.store import IncidentStore, RunStore, StoreUnavailable
-from app.runs.conversation import ConversationDesk
+from app.memory.store import IncidentStore, RunStore, StoreRefused, StoreUnavailable
+from app.runs.conversation import ConversationDesk, clean
 from app.runs.escalation import DELIVERY, FINAL_STATUSES, Escalator, NotPossible, Plan, incident_message
 from app.runs.files import Attachment, check_files
 from app.runs.machines import MachineResolver
@@ -44,6 +44,8 @@ from app.runs.model import (
     AWAITING_MACHINE_BUILDER,
     CONVERSATION,
     FAILED,
+    OPERATOR,
+    OPERATOR_STEPS,
     RUNNING,
     STOPPED,
     RunState,
@@ -60,11 +62,12 @@ MAX_TEXT = 4000
 OUTBOX_POLL_S = 5
 CLOSE_RETRY_S = 60
 CLOSE_RETRY_MAX_S = 3600
+TRIGGERED_RETRY_AFTER_S = 300
 NO_ESCALATION = "No dataspace is configured for this installation."
 NOT_REOPENABLE = "Only runs with a machine-builder conversation can be reopened."
 
 Work = Literal["analyse", "act"]
-WorkflowFactory = Callable[[IncidentMemory], Workflow]
+WorkflowFactory = Callable[[IncidentMemory, str], Workflow]
 
 
 class RunRecord:
@@ -233,7 +236,7 @@ class RunManager:
     # ── Operations ───────────────────────────────────────────────────────────
 
     async def start(self, machine_id: str, issue: str) -> str:
-        machine_id, issue = machine_id.strip(), issue.strip()
+        machine_id, issue = clean(machine_id).strip(), clean(issue).strip()
         if not machine_id:
             raise invalid("Enter the machine.")
         if not issue:
@@ -244,11 +247,56 @@ class RunManager:
         await self._require_model()
         return await self._create(await self._machines.resolve(machine_id), issue)
 
-    async def _create(self, machine_id: str, issue: str) -> str:
+    async def start_triggered(self, machine_id: str, issue: str, source: str) -> str | None:
+        """Starts a run for an event, unless a run an event started for this machine is still in progress.
+
+        The ID of the run, or None. Raises `unavailable` if the memory database can't be used, and then
+        trying again is safe: nothing was stored.
+        """
+        await self.ready()
+        if self._triggered_in_progress(machine_id):
+            return None
+        try:
+            # No check of the language model: nobody is there to read a refusal, so a failed run shows it.
+            return await self._create(machine_id, issue, source)
+        except StoreRefused as error:
+            raise invalid(str(error)) from None
+        except StoreUnavailable as error:
+            raise unavailable(str(error)) from None
+
+    def _triggered_in_progress(self, machine_id: str) -> bool:
+        """A run an event started for this machine is still working on its first analysis.
+
+        It stops counting once that analysis ends: completed, failed, stopped, or waiting for the operator,
+        whatever happens to the run afterwards.
+        """
+        return any(
+            r.state.source != OPERATOR
+            and r.state.status == RUNNING
+            and r.state.round == 1
+            and not any(step["node"] in OPERATOR_STEPS for step in r.state.steps)
+            and _same_machine(r.state.machine_id, machine_id)
+            for r in self._runs.values()
+        )
+
+    def failed_lately(self, machine_id: str) -> bool:
+        """A triggered run failed for this machine a moment ago: another would fail too, and only add to the list."""
+        since = self._now() - timedelta(seconds=TRIGGERED_RETRY_AFTER_S)
+        return any(
+            r.state.status == FAILED
+            and r.state.source != OPERATOR
+            and r.state.updated_at > since
+            and _same_machine(r.state.machine_id, machine_id)
+            for r in self._runs.values()
+        )
+
+    async def _create(self, machine_id: str, issue: str, source: str = OPERATOR) -> str:
         now = self._now()
-        state = RunState(str(uuid.uuid4()), machine_id, issue, RUNNING, started_at=now, updated_at=now)
+        state = RunState(str(uuid.uuid4()), machine_id, issue, RUNNING, started_at=now, updated_at=now, source=source)
         try:
             state = await self._store.save(state)
+        except StoreRefused as error:
+            raise invalid(f"{error} The run was not started.") from None
         except StoreUnavailable as error:
             raise unavailable(f"{error} The run was not started.") from None
         rec = RunRecord(state)
@@ -611,7 +659,7 @@ class RunManager:
         try:
             async with self._slots:
                 state = rec.state
-                workflow = self._workflow(self._incidents.memory_for(state))
+                workflow = self._workflow(self._incidents.memory_for(state), state.source)
                 round_input = RoundInput(
                     machine_id=state.machine_id,
                     issue=state.issue,
@@ -713,6 +761,13 @@ _NAMES = {
     "archive": "archiving",
     "escalate": "escalating",
 }
+
+
+def _same_machine(one: str, other: str) -> bool:
+    """Also a short name that couldn't be resolved, and the identifier it ends."""
+    if one == other:
+        return True
+    return (":" not in other and one.endswith(f":{other}")) or (":" not in one and other.endswith(f":{one}"))
 
 
 def _operator_text(text: str) -> str:

@@ -47,6 +47,10 @@ x-backend-env: &backend-env
   KEYCLOAK_URL: ${KEYCLOAK_URL:-}
   KEYCLOAK_REALM: ${KEYCLOAK_REALM:-iff}
   KEYCLOAK_CLIENT_ID: ${KEYCLOAK_CLIENT_ID:-scorpio}
+  KEYCLOAK_SERVICE_CLIENT_ID: ${KEYCLOAK_SERVICE_CLIENT_ID:-}
+  KEYCLOAK_SERVICE_CLIENT_SECRET: ${KEYCLOAK_SERVICE_CLIENT_SECRET:-}
+  CALLBACK_BASE_URL: ${CALLBACK_BASE_URL:-}
+  EVENT_WEBHOOK_SECRET: ${EVENT_WEBHOOK_SECRET:-}
   FACTORY_ID: ${FACTORY_ID:-}
   OLLAMA_URL: http://ollama:11434
   ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
@@ -207,8 +211,13 @@ services:
       ADMIN_KEY: ${ALERTA_API_KEY:-local-development-only-key}
       ALERTA_API_KEY: ${ALERTA_API_KEY:-local-development-only-key}
       ALERTA_SVR_CONF_FILE: /app/alertad.conf
+      # Sends new alerts to the backend, when both are set.
+      PYTHONPATH: /opt/xana-plugin
+      XANA_EVENTS_URL: ${XANA_EVENTS_URL:-}
+      EVENT_WEBHOOK_SECRET: ${EVENT_WEBHOOK_SECRET:-}
     volumes:
       - ./alerta/alertad.conf:/app/alertad.conf:ro
+      - ./alerta/plugin:/opt/xana-plugin:ro
     depends_on:
       alerta-db:
         condition: service_healthy

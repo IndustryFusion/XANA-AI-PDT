@@ -5,8 +5,12 @@
   "roles": {
     "client": {
       "scorpio": [
-        { "name": "Factory-Admin" },
-        { "name": "Factory-Reader" }
+        {
+          "name": "Factory-Admin"
+        },
+        {
+          "name": "Factory-Reader"
+        }
       ]
     }
   },
@@ -58,6 +62,16 @@
           }
         }
       ]
+    },
+    {
+      "clientId": "xana-events",
+      "name": "XANA machine events (development only)",
+      "enabled": true,
+      "publicClient": false,
+      "secret": "local-development-only-secret",
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false
     }
   ],
   "users": [
@@ -82,7 +96,11 @@
       "firstName": "Sample",
       "lastName": "Operator",
       "email": "operator@example.org",
-      "clientRoles": { "scorpio": ["Factory-Admin"] },
+      "clientRoles": {
+        "scorpio": [
+          "Factory-Admin"
+        ]
+      },
       "credentials": [
         {
           "type": "password",
