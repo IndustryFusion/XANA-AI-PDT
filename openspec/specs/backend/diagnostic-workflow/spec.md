@@ -119,7 +119,7 @@ When the context broker, the time-series store or incident memory cannot be reac
 - **THEN** the decision is made without past incidents, and the step says so
 
 ### Requirement: Model failure
-When the language model does not answer within its timeout, or twice in a row gives an answer that does not match the expected structure, the round SHALL fail with the failing step and a readable reason.
+When the language model does not answer within its timeout, or gives an answer that does not match the expected structure on the first try and on three retries, the round SHALL fail with the failing step and a readable reason.
 
 #### Scenario: Timeout
 - **WHEN** the model does not answer during the validate step within the timeout
@@ -127,7 +127,7 @@ When the language model does not answer within its timeout, or twice in a row gi
 
 #### Scenario: Malformed answer
 - **WHEN** the model's first answer in a step does not match the expected structure
-- **THEN** the step asks once more. If the second answer matches, the round continues; otherwise it fails with that step.
+- **THEN** the step asks again, up to three times. If an answer matches, the round continues; otherwise it fails with that step and a reason that says the structure did not match.
 
 ### Requirement: Read-only towards the factory
 The workflow SHALL only read from the context broker and the time-series store. Text from the issue, a clarification or a rejection reason SHALL be treated as data, never as instructions that change which data the workflow may access.

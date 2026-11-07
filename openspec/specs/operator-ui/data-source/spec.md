@@ -35,7 +35,7 @@ Screens SHALL depend only on the UI data interface, never on a particular data s
 - **THEN** they fail if any screen refers to the mock data source directly or performs network requests outside the data source
 
 ### Requirement: Documented data interface
-The UI data interface SHALL be documented per area (session, runs, incidents, entities, alerts, dataspace, knowledge base, system health), listing each operation, its inputs, the data it returns and its error cases.
+The UI data interface SHALL be documented per area (session, runs, incidents, entities, alerts, dataspace, system health, and the optional knowledge base), listing each operation, its inputs, the data it returns and its error cases.
 
 #### Scenario: Interface coverage
 - **WHEN** the data-interface tests run against the mock data source
@@ -80,7 +80,8 @@ The backend data source SHALL serve these operations from the backend:
 - clarifying, confirming or rejecting a resolution, stopping and archiving;
 - the escalation preflight and reopening a run;
 - listing, reading and reopening incidents;
-- the health report.
+- the health report;
+- the session: its configuration, sign-in, state and sign-out.
 
 Its results SHALL have the shapes the interface documents.
 
@@ -121,3 +122,14 @@ When the backend data source loses a run's live connection, it SHALL report that
 #### Scenario: Run gone
 - **WHEN** the watched run has been archived by another operator
 - **THEN** the stream reports `not_found` and the run view shows that the run is no longer active
+
+### Requirement: Knowledge base area is optional
+The data layer SHALL expose the knowledge base area only while the knowledge base is turned on, on every data source.
+
+#### Scenario: Area absent by default
+- **WHEN** the UI is built with default settings
+- **THEN** the data layer has no knowledge base area on either data source
+
+#### Scenario: Backend build shows no mock documents
+- **WHEN** the UI is built with the backend data source and default settings
+- **THEN** no screen shows documents from the mock data source
