@@ -711,7 +711,7 @@ async def test_a_grant_of_history_holds_related_signals_if_those_entities_may_go
     app, space = make(url, tier="timeseries")
     async with running(app) as client:
         history, check = await history_grant(app, space, client, "approved")
-    assert history
+    assert {signal["entity_id"] for signal in history} > {MACHINE}, "a related sensor's signals, not only its own"
     assert check["signals"] == len(history)
     assert f"{len(history)} signals" in check["decision"]
     assert list(check["files"]) == ["signal-history.json"]
