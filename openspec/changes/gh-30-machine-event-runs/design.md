@@ -15,6 +15,8 @@ Against the broker image of the local environment:
 - With `application/ld+json`, the body needs `@context`. Without one, `Machine` expands under the default context, so it matches nothing on data with full IRIs. So the subscription names `NGSI_CONTEXT_URL` when set, and the core context otherwise.
 - **On data with full IRIs, `status` can't be named by a context.** Under a context mapping it to `https://…/status`, the broker keeps the core context's own term for it, while the other three and `Machine` expand as the context says, so a change of `status` notifies nothing. In full, it works. That is why `MACHINE_WATCH_TYPE` and `MACHINE_WATCH_ATTRIBUTES` exist, with the issue's values as defaults. Each takes a short name or a full IRI. Notifications are read by the last part of a name.
 
+**Open: on CI, the same broker image fails on each notification under a context from a listener,** with a JSON-LD error in its log and no notification, while the same test passes on a local environment, repeatedly. The cause isn't known. So that test doesn't run in CI, and notifications under `NGSI_CONTEXT_URL` have to be confirmed where they will be used.
+
 **Not verified: the real platform,** as none can be reached from here. If the platform's machines aren't of the configured type, or the attributes have other IRIs, nothing will match, and the subscription still reads as active. The platform's own type and attribute names decide the values to set.
 
 ## Decisions
