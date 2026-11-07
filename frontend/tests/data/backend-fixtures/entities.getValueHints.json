@@ -1,0 +1,21 @@
+{
+  "method": "GET",
+  "path": "/api/shacl/hints?entity_type=Machine&attribute=status",
+  "status": 200,
+  "body": {
+    "hint_type": "enum",
+    "values": [
+      "fault",
+      "idle",
+      "maintenance",
+      "running",
+      "setup"
+    ],
+    "minimum": null,
+    "maximum": null,
+    "minimum_exclusive": false,
+    "maximum_exclusive": false,
+    "datatype": null,
+    "detail": null
+  }
+}

@@ -47,7 +47,7 @@ dev = [
 include = ["app*", "sample_data*"]
 
 [tool.setuptools.package-data]
-sample_data = ["*.json"]
+sample_data = ["*.json", "*.sql", "ontology/*.ttl"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

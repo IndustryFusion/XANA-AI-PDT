@@ -32,10 +32,10 @@ Served by the backend (phase 1):
 | runs | `listActiveRuns`, `startRun`, `getRun`, `subscribeRun`, `clarify`, `confirmResolution`, `escalationPreflight`, `reopenRun`, `stopRun`, `archiveRun` | `/api/agent/…`, `/ws/run/{runId}` |
 | incidents | `listIncidents`, `getIncident`, `reopenIncident` | `/api/incidents` |
 | session | `getAuthConfig`, `getSession`, `signIn`, `signOut` | `/api/auth/config`, `status`, `connect`, `logout` |
-| entities | `getStats`, `listTypes`, `listAttributes`, `queryEntities`, `getEntity`, `updateAttributes`, `appendAttributes`, `deleteAttribute`, `deleteEntity`, `importEntities`, `fetchImportDocument`, `deleteByTypes`, `getAttributeHistory`, `getAttributeStatus`, `listTypesAt`, `queryEntitiesAt`, `subscribeEntities`, `getLiveUpdateHealth` | `/api/ngsi/…`, `/api/ngsi/ws` |
+| entities | `getStats`, `listTypes`, `listAttributes`, `queryEntities`, `getEntity`, `updateAttributes`, `appendAttributes`, `deleteAttribute`, `deleteEntity`, `importEntities`, `fetchImportDocument`, `deleteByTypes`, `getAttributeHistory`, `getAttributeStatus`, `listTypesAt`, `queryEntitiesAt`, `subscribeEntities`, `getLiveUpdateHealth`, `getValueHints` | `/api/ngsi/…`, `/api/ngsi/ws`, `/api/shacl/hints` |
 | system | `getHealth` | `/api/diagnostics` |
 
-Every other operation (the factory details in `session.getFactory`, value hints of entities, alerts, dataspace, the optional knowledge base, service settings, and the escalation and conversation operations of runs) comes from the mock, so the whole UI stays usable. `src/data/sources/backend/index.js` builds each area as `{ ...mock[area], ...backend[area] }` and lists the served operations in `SERVED`; the mock's development controls still apply to the delegated operations.
+Every other operation (the factory details in `session.getFactory`, alerts, dataspace, the optional knowledge base, service settings, and the escalation and conversation operations of runs) comes from the mock, so the whole UI stays usable. `src/data/sources/backend/index.js` builds each area as `{ ...mock[area], ...backend[area] }` and lists the served operations in `SERVED`; the mock's development controls still apply to the delegated operations.
 
 - **Stopped backend:** until the backend has answered, `getAuthConfig` reports `backendUnreachable: true` and sign-in as off, so the app opens and each area shows its own state. The session gate checks again every 10 seconds, and applies the real configuration when the backend answers. Once the backend has answered, a failed `getAuthConfig` or `getSession` stays `unavailable`.
 - **Transport:** relative paths (`/api/…`, `/ws/…`), so the development server's proxy reaches the backend (`XANA_BACKEND_URL`). `VITE_BACKEND_BASE` sets another prefix or origin. Requests time out after 15 s.
@@ -151,7 +151,7 @@ Entities are NGSI-LD entities in compacted form: `id`, `type` and one member per
 | `queryEntitiesAt(at, query)` | past ISO timestamp, query as `queryEntities` | entities as they were at that moment | `invalid`, `unavailable` |
 | `subscribeEntities({ type, ids }, onEvent)` | optional type or entity IDs, callback | `unsubscribe()`; events `{ type: 'update', entityId, attributes: { [name]: attribute } }` with the changed attributes, and perhaps others that didn't change | via `{ type: 'error', error }`; after an error no further events arrive |
 | `getLiveUpdateHealth()` | — | `{ status: ok \| unavailable, detail }`: whether live updates can be delivered | `unavailable` |
-| `getValueHints({ entityType, attribute })` | entity type and attribute | suggested values from the data model (may be empty) | `unavailable` |
+| `getValueHints({ entityType, attribute })` | entity type and attribute | `{ hintType: enum \| range \| datatype \| none, values, minimum, maximum, minimumExclusive, maximumExclusive, datatype, detail }`: allowed values and range from the data model. `none` when nothing is known or it can't be read, and then `detail` says why | `unavailable` |
 
 **Query expression (`q`).** The operators `==`, `!=`, `>`, `>=`, `<`, `<=`, `~=` (regular expression), `!~=`, `attr` (exists) and `!attr` (does not exist), combined with `;` (and, binds tighter) and `|` (or) and parentheses. Paths: `attr`, `attr.subAttribute`, `attr[key]` (member of an object value). Values: `"text"`, numbers, `true`/`false`, ranges `1..5`, lists `"a","b"`, unquoted identifiers or dates. Relationships compare their `object`, list and language attributes match if any element matches. A pattern for `~=` and `!~=` is the text as written, also unquoted: `serial~=20` finds `M20-A`, and `serial~="M","Z"` matches either. A syntax error rejects the query as `invalid` with the position.
 
@@ -167,7 +167,7 @@ Entities are NGSI-LD entities in compacted form: `id`, `type` and one member per
   - `https://samples.example.org/ngsi-ld/line-d.json`: a new production line with a machine and a sensor (created);
   - `https://samples.example.org/ngsi-ld/machine-names.json`: new names for two laser cutters (updated);
   - `https://samples.example.org/ngsi-ld/incomplete.json`: an entity without a type (the preview reports it).
-- *Value hints:* machine `status`, `operatingMode` and `machineType`, and line `shifts`.
+- *Value hints:* machine `status`, `operatingMode` and `machineType`, and line `shifts`; a range for sensor `value`, and a data type for machine `manufacturer`.
 
 ## alerts — implemented
 

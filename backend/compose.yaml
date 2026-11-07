@@ -26,9 +26,11 @@
 #   --profile history   PostgREST, for the explorer's history and time-shift
 #   --profile live      EMQX, for live updates in the explorer
 #   --profile platform-mqtt  A second EMQX that checks a token and a role, for the tests of that
+#   --profile ontology  Fuseki with sample shapes and knowledge, for value hints
 #
 # Host ports can be changed with XANA_DB_PORT, XANA_BROKER_PORT, XANA_OLLAMA_PORT,
-# XANA_KEYCLOAK_PORT, XANA_PGREST_PORT, XANA_MQTT_PORT, XANA_MQTT_MGMT_PORT, XANA_MQTT_PLATFORM_PORT and XANA_BACKEND_PORT.
+# XANA_KEYCLOAK_PORT, XANA_PGREST_PORT, XANA_MQTT_PORT, XANA_MQTT_MGMT_PORT, XANA_MQTT_PLATFORM_PORT,
+# XANA_FUSEKI_PORT and XANA_BACKEND_PORT.
 
 name: xana-ai-pdt
 
@@ -54,6 +56,9 @@ x-backend-env: &backend-env
   NGSI_CONTEXT_URL: ${NGSI_CONTEXT_URL:-}
   NGSI_ALLOWED_CONTEXTS: ${NGSI_ALLOWED_CONTEXTS:-}
   PGREST_URL: http://pgrest:3000
+  FUSEKI_URL: http://fuseki:3030
+  FUSEKI_DATASET: ${FUSEKI_DATASET:-iff}
+  FUSEKI_GRAPH_BASE: ${FUSEKI_GRAPH_BASE:-}
   MQTT_BROKER_URL: mqtt://emqx:1883
   MQTT_MGMT_URL: http://emqx:18083
   WS_ALLOWED_ORIGINS: ${WS_ALLOWED_ORIGINS:-}
@@ -142,6 +147,27 @@ services:
     ports:
       - "127.0.0.1:${XANA_MQTT_PORT:-1883}:1883"
       - "127.0.0.1:${XANA_MQTT_MGMT_PORT:-18083}:18083"
+
+  fuseki:
+    image: stain/jena-fuseki:5.1.0
+    profiles: [ontology]
+    environment:
+      ADMIN_PASSWORD: admin
+      FUSEKI_DATASET_1: ${FUSEKI_DATASET:-iff}
+    ports:
+      - "127.0.0.1:${XANA_FUSEKI_PORT:-3030}:3030"
+
+  sample-ontology:
+    build: .
+    image: xana-ai-pdt-backend:local
+    profiles: [ontology]
+    command: ["python", "-m", "sample_data", "ontology"]
+    environment:
+      <<: *backend-env
+      FUSEKI_ADMIN_PASSWORD: admin
+    depends_on:
+      - fuseki
+    restart: on-failure
 
   # EMQX with the platform's kind of check, for the tests of tokens and roles: every connection
   # and topic is asked of a small service with the rules of the platform's MQTT bridge. Not for use.

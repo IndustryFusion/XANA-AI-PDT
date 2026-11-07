@@ -16,7 +16,7 @@
 
 /**
  * The entities area served by the backend (`/api/ngsi`). Attribute names are data, so answers
- * that hold them skip the key mapping. Value hints come in a later change.
+ * that hold them skip the key mapping.
  */
 import { DataError } from '../../errors'
 import { request, seg } from './http'
@@ -80,4 +80,6 @@ export const entities = {
     request(AREA, 'GET', '/api/ngsi/timeshift/entities', { ...raw, params: { at, ...queryParams(query) } }),
   subscribeEntities,
   getLiveUpdateHealth: () => request(AREA, 'GET', '/api/ngsi/subscription-health'),
+  getValueHints: ({ entityType, attribute } = {}) =>
+    request(AREA, 'GET', '/api/shacl/hints', { params: { entity_type: entityType, attribute } }),
 }

@@ -374,7 +374,10 @@ export const SHAPES = {
     listTypesAt: ['string'],
     queryEntitiesAt: [entity],
     getLiveUpdateHealth: { status: { $enum: LIVE_UPDATE_STATES }, detail: '?string' },
-    getValueHints: ['string'],
+    getValueHints: {
+      hintType: { $enum: ['enum', 'range', 'datatype', 'none'] }, values: ['string'], minimum: '?number', maximum: '?number',
+      minimumExclusive: 'boolean', maximumExclusive: 'boolean', datatype: '?string', detail: '?string',
+    },
   },
   dataspace: {
     getConnection: connection,

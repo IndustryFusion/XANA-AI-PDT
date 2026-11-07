@@ -1,6 +1,6 @@
 {
   "method": "PATCH",
-  "path": "/api/ngsi/entities/urn%3Angsi-ld%3ARecording%3Amw5j04jq/attrs",
+  "path": "/api/ngsi/entities/urn%3Angsi-ld%3ARecording%3Amw5jf7fm/attrs",
   "status": 204,
   "body": null
 }

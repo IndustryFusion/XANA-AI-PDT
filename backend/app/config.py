@@ -30,6 +30,7 @@ from pydantic import Field, SecretStr, ValidationError, field_validator, model_v
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.redact import Redactor, url_password
+from xana_agent.sources.ontology import is_iri
 
 Provider = Literal["ollama", "anthropic", "openai", "scripted"]
 
@@ -68,6 +69,9 @@ class Settings(BaseSettings):
     ngsi_context_url: str | None = None
     ngsi_allowed_contexts: str | None = None
     pgrest_url: str = "http://pgrest:3000"
+    fuseki_url: str = "http://fuseki:3030"
+    fuseki_dataset: str = "iff"
+    fuseki_graph_base: str | None = None
     mqtt_broker_url: str = "mqtt://emqx-listeners:1883"
     mqtt_mgmt_url: str = "http://emqx-dashboard:18083"
     mqtt_broker_notify_url: str | None = None
@@ -87,7 +91,21 @@ class Settings(BaseSettings):
     backend_reload: bool = False
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
 
-    @field_validator("pgrest_url", "mqtt_mgmt_url")
+    @field_validator("fuseki_dataset")
+    @classmethod
+    def _plain_dataset_name(cls, value: str) -> str:
+        if not re.fullmatch(r"[A-Za-z0-9_\-]+", value):
+            raise ValueError("must be a dataset name (letters, digits, dashes, underscores)")
+        return value
+
+    @field_validator("fuseki_graph_base")
+    @classmethod
+    def _safe_graph_base(cls, value: str | None) -> str | None:
+        if value is not None and not is_iri(value):
+            raise ValueError("must be an IRI without spaces, quotes or brackets; it goes into SPARQL queries")
+        return value
+
+    @field_validator("pgrest_url", "fuseki_url", "mqtt_mgmt_url")
     @classmethod
     def _http_address(cls, value: str) -> str:
         return with_scheme(value, "http")
