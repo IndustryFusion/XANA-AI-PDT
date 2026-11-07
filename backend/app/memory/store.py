@@ -41,6 +41,10 @@ class StoreUnavailable(Exception):
     """The memory database could not be used. The message is safe to show."""
 
 
+class StoreRefused(StoreUnavailable):
+    """The memory database is there, and refused this data: trying the same again won't help."""
+
+
 class Database:
     """A small connection pool, opened at startup without waiting for the database."""
 
@@ -79,9 +83,12 @@ class Database:
                 yield conn
         except PoolTimeout:
             raise StoreUnavailable("The memory database is not reachable.") from None
-        except psycopg.Error as error:
+        except psycopg.OperationalError as error:
             log.warning("Memory database error: %s", self._redact(error))
             raise StoreUnavailable("The memory database could not complete the request.") from None
+        except psycopg.Error as error:
+            log.warning("Memory database error: %s", self._redact(error))
+            raise StoreRefused("The memory database refused the request.") from None
 
 
 # ── Runs ─────────────────────────────────────────────────────────────────────

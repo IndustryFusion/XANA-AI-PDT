@@ -19,6 +19,7 @@ import asyncio
 import json
 import logging
 import threading
+from datetime import timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import httpx
@@ -28,12 +29,20 @@ import pytest
 from app.config import ConfigError, load_settings
 from app.errors import invalid
 from app.events.identity import ServiceIdentity
-from app.events.subscription import ACTIVE, DELIVERY_FAILING, FAILED, SUBSCRIPTION_ID, WAITING, MachineWatch
+from app.events.subscription import (
+    ACTIVE,
+    DELIVERY_FAILING,
+    FAILED,
+    SUBSCRIPTION_ID,
+    TENANT_LIMIT,
+    WAITING,
+    MachineWatch,
+)
 from app.events.worker import QUEUE_LIMIT, Event, EventWorker, alert_event, ngsi_events
 from app.health import HealthService
 from app.main import create_app
 from app.memory.migrate import Migrator
-from app.memory.store import StoreUnavailable
+from app.memory.store import Database, StoreRefused, StoreUnavailable
 from tests.conftest import make_settings
 from tests.runs_support import (
     FAIL,
@@ -564,6 +573,108 @@ async def test_with_the_model_down_the_run_starts_and_fails_visibly(url):
         assert run["data"]["error"]
 
 
+@pytest.mark.db
+@pytest.mark.parametrize("bad", ["a\x00b", "lone \ud800 half"])
+async def test_an_alert_the_database_cant_store_doesnt_stop_later_events(url, bad):
+    async with running(event_app(url)) as client:
+        for body in ({"machine_id": MACHINE, "issue": bad}, {"resource": f"{OTHER_MACHINE}{bad}", "event": bad}):
+            answer = await client.post("/events/alert", content=json.dumps(body).encode(), headers=AUTH)
+            assert answer.status_code == 202
+        found = await runs_are(client, 2)
+    assert MACHINE in [r["machine_id"] for r in found]
+    assert "\x00" not in json.dumps(found)
+
+
+@pytest.mark.db
+async def test_a_value_the_database_cant_store_doesnt_stop_later_events(url):
+    async with running(event_app(url)) as client:
+        content = json.dumps(notification(status(MACHINE, "f\x00ault"))).encode()
+        assert (await client.post("/events/ngsi", content=content, headers=AUTH)).status_code == 202
+        await client.post("/events/ngsi", json=notification(status(OTHER_MACHINE, "fault")), headers=AUTH)
+        found = await runs_are(client, 2)
+    assert "status=fault" in {r["issue"].removeprefix("Machine event: ") for r in found}
+
+
+@pytest.mark.db
+async def test_what_the_database_refuses_is_dropped_and_a_lost_connection_is_tried_again(url):
+    app = event_app(url)
+    async with running(app) as client:
+        await open_runs(client)
+        store = app.state.runs._store
+        save, refusals = store.save, [StoreRefused("refused")]
+
+        async def refusing(run, *rest):
+            if refusals:
+                raise refusals.pop()
+            return await save(run, *rest)
+
+        store.save = refusing
+        await client.post("/events/alert", json={"machine_id": MACHINE, "issue": "refused"}, headers=AUTH)
+        await client.post("/events/alert", json={"machine_id": OTHER_MACHINE, "issue": "next"}, headers=AUTH)
+        [only] = await runs_are(client, 1)
+    assert only["machine_id"] == OTHER_MACHINE
+
+
+@pytest.mark.db
+async def test_a_database_error_tells_a_lost_connection_from_a_refusal(url):
+    db = Database(url, 1)
+    with pytest.raises(StoreRefused):
+        async with db.transaction() as conn:
+            await conn.execute("SELECT 1 FROM no_such_table")
+    await db.close()
+    gone = Database("postgresql://nobody@127.0.0.1:1/none", 0.2)
+    with pytest.raises(StoreUnavailable) as raised:
+        async with gone.transaction():
+            pass
+    assert not isinstance(raised.value, StoreRefused)
+    await gone.close()
+
+
+@pytest.mark.db
+async def test_after_a_failed_triggered_run_events_wait(url):
+    app = event_app(url)
+    async with running(app) as client:
+        for n in range(4):
+            await client.post("/events/alert", json={"machine_id": MACHINE, "issue": f"{FAIL} {n}"}, headers=AUTH)
+            await app.state.events.settled()
+            [first, *rest] = await open_runs(client)
+            await until(client, first["run_id"], "failed")
+        assert rest == []
+        await client.post("/events/alert", json={"machine_id": OTHER_MACHINE, "issue": "free"}, headers=AUTH)
+        assert len(await runs_are(client, 2)) == 2, "another machine isn't held up"
+
+        now = app.state.runs._now
+        app.state.runs._now = lambda: now() + timedelta(seconds=301)
+        await client.post("/events/alert", json={"machine_id": MACHINE, "issue": "later"}, headers=AUTH)
+        assert len(await runs_are(client, 3)) == 3
+
+
+@pytest.mark.db
+async def test_an_operators_failed_run_holds_nothing_up(url):
+    app = event_app(url)
+    async with running(app) as client:
+        run_id = await start(client, MACHINE, FAIL)
+        await until(client, run_id, "failed")
+        await client.post("/events/alert", json={"machine_id": MACHINE, "issue": "x"}, headers=AUTH)
+        assert len(await runs_are(client, 2)) == 2
+
+
+@pytest.mark.db
+async def test_a_short_name_that_cant_be_resolved_counts_as_the_open_runs_machine(url):
+    async with running(event_app(url)) as client:
+        await client.post("/events/alert", json={"machine_id": MACHINE, "issue": "one"}, headers=AUTH)
+        await client.post("/events/alert", json={"machine_id": "press-01", "issue": "two"}, headers=AUTH)
+        assert len(await runs_are(client, 1)) == 1
+        await client.post("/events/alert", json={"machine_id": "press-02", "issue": "other"}, headers=AUTH)
+        assert len(await runs_are(client, 2)) == 2
+
+
+def test_an_attribute_as_an_object_without_a_value_key_counts():
+    [event], _ = ngsi_events(notification({"id": "urn:m", "status": {"type": "Property", "code": 7}}), WATCHED)
+    assert event.watched == {"status": {"code": 7}}
+    assert ngsi_events(notification({"id": "urn:m", "status": {"type": "Property"}}), WATCHED)[0] == []
+
+
 # ── The subscription ─────────────────────────────────────────────────────────
 
 
@@ -608,7 +719,7 @@ class Clock:
         return self.now
 
 
-def watch(fake, token=lambda: None, identity_required=False, clock=None, **settings):
+def watch(fake, token=lambda: None, identity_required=False, clock=None, identity_problem=lambda: None, **settings):
     values = {
         "callback_base_url": "http://xana:8000/",
         "event_webhook_secret": SECRET,
@@ -621,6 +732,7 @@ def watch(fake, token=lambda: None, identity_required=False, clock=None, **setti
         transport=httpx.MockTransport(fake),
         clock=clock or Clock(),
         tick_s=0.01,
+        identity_problem=identity_problem,
     )
 
 
@@ -781,6 +893,32 @@ async def test_signed_out_a_subscription_stays_and_isnt_called_without_a_token()
     await subscription.check()
     assert subscription.state == ACTIVE
     assert fake.methods() == ["POST"]
+
+
+async def test_in_a_tenant_the_check_says_nothing_will_arrive():
+    fake, clock = Broker(), Clock()
+    subscription = watch(fake, clock=clock, ngsi_tenant="plant-1")
+    await subscription.check()
+    assert fake.subscription
+    assert subscription.state == TENANT_LIMIT
+    assert "delivers nothing" in subscription.detail and "may not arrive" in subscription.detail
+    clock.now += 61
+    await subscription.check()
+    assert subscription.state == TENANT_LIMIT
+    settings = make_settings()
+    service = HealthService(
+        settings, Migrator(settings.postgres_memory_url.get_secret_value()), machine_watch=subscription
+    )
+    assert (await service._machine_events_check())[0] == "degraded"
+
+
+async def test_while_waiting_it_says_why_the_service_identity_failed():
+    subscription = watch(
+        Broker(), token=lambda: None, identity_required=True, identity_problem=lambda: "The provider answered HTTP 401."
+    )
+    await subscription.check()
+    assert subscription.state == WAITING
+    assert "The provider answered HTTP 401." in subscription.detail
 
 
 def test_not_configured_doesnt_start():

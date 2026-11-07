@@ -45,6 +45,7 @@ WAITING = "waiting_for_identity"
 ACTIVE = "active"
 DELIVERY_FAILING = "delivery_failing"
 FAILED = "failed"
+TENANT_LIMIT = "no_delivery_in_tenant"
 
 
 class MachineWatch:
@@ -54,12 +55,14 @@ class MachineWatch:
         token: Callable[[], str | None],
         identity_required: bool,
         transport: httpx.AsyncBaseTransport | None = None,
+        identity_problem: Callable[[], str | None] = lambda: None,
         clock: Callable[[], float] = time.monotonic,
         tick_s: float = TICK_S,
     ) -> None:
         self._s = settings
         self._token = token
         self._identity_required = identity_required
+        self._identity_problem = identity_problem
         self._transport = transport
         self._clock = clock
         self._tick_s = tick_s
@@ -107,7 +110,9 @@ class MachineWatch:
         token = self._token()
         if self._identity_required and not token:
             if not self._ensured:
-                self._set(WAITING, "Waiting for a service identity or a signed-in operator; trying again.")
+                problem = self._identity_problem()
+                reason = f" The service identity failed: {problem}" if problem else ""
+                self._set(WAITING, f"Waiting for a service identity or a signed-in operator; trying again.{reason}")
             return  # one that exists goes on delivering, and needs no token for that
         try:
             async with httpx.AsyncClient(timeout=TIMEOUT_S, transport=self._transport) as client:
@@ -131,7 +136,7 @@ class MachineWatch:
             return
         self._ensured = True
         self._verified_at = self._clock()
-        self._set(ACTIVE, f"Subscribed; notifications go to {self._callback()}.")
+        self._set_delivering()
 
     async def _verify(self, client: httpx.AsyncClient, token: str | None) -> None:
         response = await client.get(f"{self._url}/{SUBSCRIPTION_ID}", headers=self._headers(token, False))
@@ -149,6 +154,16 @@ class MachineWatch:
                 DELIVERY_FAILING,
                 f"The context broker reports that it can't deliver to {self._callback()}. "
                 "Check that it can reach this address.",
+            )
+        else:
+            self._set_delivering()
+
+    def _set_delivering(self) -> None:
+        if self._s.ngsi_tenant:
+            self._set(
+                TENANT_LIMIT,
+                f"Subscribed in tenant {self._s.ngsi_tenant}, but the context broker delivers nothing there unless the "
+                "same context is also subscribed in its default tenant, so machine events may not arrive.",
             )
         else:
             self._set(ACTIVE, f"Subscribed; notifications go to {self._callback()}.")
