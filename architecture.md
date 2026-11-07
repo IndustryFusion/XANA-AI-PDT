@@ -172,7 +172,7 @@ Fields are snake_case. A refused request answers `{"error": {"kind", "message"}}
 | `/api/agent/recommendation-reply/{run_id}` | POST | `resolved`, `still_failing` or `escalate` |
 | `/api/agent/refresh-conversation/{run_id}` | POST | Read the conversation's state at the gateway |
 | `/api/agent/record-close/{run_id}` | POST | Record a close communicated elsewhere |
-| `/api/agent/message-files/{run_id}/{message_id}` | GET | The files of a received message |
+| `/api/agent/message-files/{run_id}/{message_id}` | GET | The files of a received message, also after archiving, by the message alone |
 | `/api/ngsi/*` | — | Data Explorer: query, edit, import, history and time-shift, on `NGSI_URL` and `PGREST_URL` only, and live updates (`/api/ngsi/ws`) through a broker subscription with an MQTT endpoint. For operators; the workflow has no path to it |
 | `/api/alerta/*` | — | Alerts screen: list, count, detail, actions, environments, services, on `ALERTA_URL` only. Actions are for operators; the workflow only reads |
 | `/api/gateway/*` | — | The dataspace connection: `config`, `status`, `connect`, `disconnect`, `token-claims`, `peers`, `peers/{id}/capabilities`, `policies`, `capabilities/requests`, `capabilities/policy`. Answers never hold a token or secret |
