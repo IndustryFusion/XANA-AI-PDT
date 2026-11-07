@@ -40,6 +40,18 @@ The backend SHALL offer entities by type, ID, ID pattern, query expression and l
 - **WHEN** a query expression has a syntax error, or the limit is outside 1 to 1000
 - **THEN** the request is refused as `invalid`, with the reason and, for a syntax error, its position
 
+#### Scenario: Every documented operator
+- **WHEN** a query expression uses any operator the UI's data interface documents, including `~=`, `!~=`, `!attr` and ranges, on a real context broker
+- **THEN** the matching entities are returned, whether or not the broker can evaluate that operator itself
+
+#### Scenario: Search that stopped early
+- **WHEN** the backend evaluates an expression itself, and there are more entities than it reads
+- **THEN** the answer says how many were searched and how many there are, and the Data Explorer says that there may be more matches, also when nothing matched
+
+#### Scenario: Pattern that takes long to evaluate
+- **WHEN** an expression or an ID pattern holds a pattern with nested repetition, on a long value
+- **THEN** it takes time linear in the value, and other requests are not held up. A pattern that can't run in linear time is refused as `invalid`.
+
 ### Requirement: Edit attributes and entities
 The backend SHALL update and add attributes, and delete attributes, sub-attributes and entities in the context broker. Whatever the operator did not change SHALL stay.
 
@@ -69,7 +81,15 @@ The backend SHALL update and add attributes, and delete attributes, sub-attribut
 
 #### Scenario: Delete a sub-attribute
 - **WHEN** a sub-attribute is deleted
-- **THEN** only it is removed, and the attribute and its other sub-attributes stay
+- **THEN** only it is removed, and the attribute and its other sub-attributes stay. With several datasets, it is removed from each dataset that has it.
+
+#### Scenario: Adding one attribute twice at the same time
+- **WHEN** two requests to this backend add the same new attribute at the same time
+- **THEN** one succeeds and the other is refused as `conflict`
+
+#### Scenario: Identifier that climbs
+- **WHEN** an identifier is `.` or `..`
+- **THEN** the request is refused, and nothing is sent to the context broker
 
 ### Requirement: Import
 The backend SHALL create or merge a list of entities and report the result per entity. When only some succeed, it SHALL answer HTTP 207.
@@ -83,8 +103,16 @@ The backend SHALL create or merge a list of entities and report the result per e
 - **THEN** the answer is HTTP 207, that entity is `failed` with the reason, and the others are imported
 
 #### Scenario: Entities with and without a context
-- **WHEN** a list mixes entities with and without their own context
+- **WHEN** a list mixes entities without a context and entities with an allowed context
 - **THEN** both kinds are imported
+
+#### Scenario: Context that isn't allowed
+- **WHEN** an entity names, at any level, a remote context other than the ETSI core context or a configured one, whether it came from a file or a fetched document
+- **THEN** that entity fails, the request does not reach the context broker, and the reason does not hold the address
+
+#### Scenario: Internal addresses in a broker's reason
+- **WHEN** the broker's reason for rejecting an entity holds an address
+- **THEN** the address is left out of what the caller gets
 
 ### Requirement: Import from a URL
 The backend SHALL fetch an import document from a public http or https URL, and SHALL refuse internal addresses. A refusal SHALL NOT reveal what the address resolved to.
@@ -102,7 +130,7 @@ The backend SHALL fetch an import document from a public http or https URL, and 
 - **THEN** the connection goes only to the checked address
 
 #### Scenario: Other schemes and credentials
-- **WHEN** the URL has another scheme, or holds a user name or password
+- **WHEN** the URL has another scheme, or holds a user name or password, or can't be parsed
 - **THEN** the request is refused as `invalid`
 
 #### Scenario: Too large or not JSON
@@ -134,6 +162,10 @@ The backend SHALL read an attribute's values over a time range, and the latest r
 #### Scenario: Value in a filter
 - **WHEN** an entity or attribute identifier holds characters with a meaning in a filter
 - **THEN** it is matched literally, and it cannot widen or change the filter
+
+#### Scenario: More values than fit
+- **WHEN** a range holds more values than the backend returns
+- **THEN** the newest are returned, the answer says so, and the history says so
 
 #### Scenario: Latest state
 - **WHEN** the latest state of an entity's attributes is requested

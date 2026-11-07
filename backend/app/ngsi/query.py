@@ -17,27 +17,31 @@
 
 The backend checks every expression before sending it, because the broker answers a syntax
 error with an internal error. It also evaluates expressions itself where the broker can't: on
-reconstructed entities, and for IRIs with a dot, which the broker takes for a sub-attribute path.
+reconstructed entities, and for what `broker_can_evaluate` says no to. Patterns run on RE2, whose
+time is linear in the text, so that no pattern can hold up the backend.
 """
 
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from functools import lru_cache
 from typing import Any
+
+import re2
 
 from app.errors import invalid
 
 _COMPARISONS = ("==", "!=", ">=", "<=", "!~=", "~=", ">", "<")
 _TOKEN = re.compile(r"[A-Za-z_@][\w@:/#%+.\-]*")
 _PLAIN_KEY = re.compile(r"[A-Za-z_@][\w@:\-]*")
-_BARE_VALUE = re.compile(r'[^;|)",]+')
+# Identifiers, numbers, ranges and dates. Anything else has to be quoted.
+_BARE_VALUE = re.compile(r"[\w:/#%+.\-@~* ]+")
 _NUMBER = re.compile(r"-?\d+(\.\d+)?")
 _RANGE = re.compile(r"(-?\d+(?:\.\d+)?)\.\.(-?\d+(?:\.\d+)?)")
 _HAS_SCHEME = re.compile(r"[A-Za-z][A-Za-z0-9+.\-]*:")
 _NEXT_IRI = re.compile(r"\.(?=[A-Za-z][A-Za-z0-9+\-]*:)")
 MAX_PATTERN = 200
-MAX_COMPARED = 4096
 
 
 @dataclass(frozen=True)
@@ -197,13 +201,22 @@ def parse(text: str | None) -> Any:
     return tree
 
 
-def compile_pattern(pattern: str, what: str) -> re.Pattern[str]:
+@lru_cache(maxsize=256)
+def _compiled(pattern: str) -> Any:
+    options = re2.Options()
+    options.log_errors = False
+    return re2.compile(pattern, options)
+
+
+def compile_pattern(pattern: str, what: str) -> Any:
     if len(pattern) > MAX_PATTERN:
         raise invalid(f"{what} is longer than {MAX_PATTERN} characters.")
     try:
-        return re.compile(pattern)
-    except re.error:
-        raise invalid(f'{what} "{pattern}" is not a valid regular expression.') from None
+        return _compiled(pattern)
+    except re2.error:
+        raise invalid(
+            f'{what} "{pattern}" is not a valid regular expression, or it needs look-around or back-references.'
+        ) from None
 
 
 def _check_patterns(tree: Any) -> None:
@@ -214,14 +227,22 @@ def _check_patterns(tree: Any) -> None:
         compile_pattern(str(tree.value), "The pattern")
 
 
-def has_dotted_iri(tree: Any) -> bool:
-    """Whether the broker would misread an attribute: it splits `q` paths at every dot."""
+def broker_can_evaluate(tree: Any) -> bool:
+    """Whether the broker answers this expression correctly. Measured on Scorpio 6.0.2.
+
+    It refuses `~=`, `!~=` and ranges, fails on `!attr`, and silently finds nothing for an IRI with
+    a dot, because it splits `q` paths at every dot.
+    """
     if tree is None:
-        return False
+        return True
     if isinstance(tree, Combined):
-        return any(has_dotted_iri(term) for term in tree.terms)
+        return all(broker_can_evaluate(term) for term in tree.terms)
+    if tree.op in ("~=", "!~=", "missing") or isinstance(tree.value, ValueRange):
+        return False
+    if isinstance(tree.value, ValueList) and any(isinstance(item, ValueRange) for item in tree.value.items):
+        return False
     names = (tree.path.attribute, *tree.path.subs)
-    return any(_HAS_SCHEME.match(name) and "." in name for name in names)
+    return not any(_HAS_SCHEME.match(name) and "." in name for name in names)
 
 
 def _plain(instance: Any) -> list[Any]:
@@ -285,7 +306,7 @@ def _holds(a: Any, op: str, b: Any) -> bool:
     if op == "!=":
         return not _equal(a, b)
     if op in ("~=", "!~="):
-        found = compile_pattern(str(b), "The pattern").search(_text(a)[:MAX_COMPARED]) is not None
+        found = compile_pattern(str(b), "The pattern").search(_text(a)) is not None
         return found == (op == "~=")
     same_kind = (_number(a) and _number(b)) or (isinstance(a, str) and isinstance(b, str))
     if not same_kind:

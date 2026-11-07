@@ -20,7 +20,7 @@ import { entities } from '../../data'
 import { useData } from '../../data/useData'
 import { Button, useToast } from '../../ui/components'
 import { ConfirmDialog } from '../../ui/structured'
-import { attributesOf, displayName } from './attributes'
+import { attributesOf, displayName, statusOf } from './attributes'
 import AttributeLine from './AttributeLine'
 import AddAttributeForm from './AddAttributeForm'
 import { entityPath } from './query'
@@ -55,6 +55,7 @@ export default function EntityNode({
   const expanded = expandedProp ?? ownExpanded
   const setExpanded = (next) => (onExpandedChange ? onExpandedChange(next) : setOwnExpanded(next))
   const result = useData('entities', at ? 'queryEntitiesAt' : 'getEntity', at ? [at, { id }] : [id], { enabled: expanded || !summary })
+  const states = useData('entities', 'getAttributeStatus', [id], { enabled: expanded && !at })
   const [overrides, setOverrides] = useState({})
   const [changed, setChanged] = useState({})
   const [raw, setRaw] = useState(false)
@@ -171,6 +172,7 @@ export default function EntityNode({
   const lineCtx = (name) => ({
     entityId: id, entityType: entity.type, readOnly, refTo, depth, chain: ownChain, headingLevel: level,
     changed: !!changed[name], historyOpen: historyOf === name,
+    recorded: !!statusOf(states.data, name),
     onSaved: saved,
     onHistory: (n) => setHistoryOf((h) => (h === n ? null : n)),
     onDelete: (n, sub) => setDeleting({ name: n, sub }),

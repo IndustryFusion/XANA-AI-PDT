@@ -42,3 +42,12 @@
 
 - [x] 6.1 Run backend and frontend tests, lint and `openspec validate --all --strict`; verify locally and in CI
 - [x] 6.2 Check each scenario in the delta specs and report per scenario in the Pull Request
+
+## 7. Review follow-ups
+
+- [x] 7.1 Make every documented `q` operator work on a real broker, and malformed expressions client errors; verify with a test per operator against a real broker
+- [x] 7.2 Keep remote contexts from the broker, as decision 11 says; verify on import, on edits and in a broker's reasons
+- [x] 7.3 Run patterns on RE2; verify a catastrophic pattern returns at once on a real broker, and that a very long one is refused
+- [x] 7.4 Say when a search or a history stopped early, in the API and on screen, on both sources; verify with API and browser tests
+- [x] 7.5 One read-then-write at a time per entity; verify two adds on a real broker give one success and one conflict
+- [x] 7.6 Fix what else the review found: `like` wildcards, malformed URLs, `..`, the history button, the keyboard race, clock-dependent tests; verify each with a test that failed before

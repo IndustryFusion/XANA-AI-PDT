@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 import httpx
@@ -24,6 +25,12 @@ import httpx
 from app.errors import Refused, bad_gateway, conflict, invalid, not_found, unauthorized
 
 MAX_REASON = 500
+_ADDRESS = re.compile(r"\b[A-Za-z][A-Za-z0-9+.\-]*://[^\s\"'<>]+")
+
+
+def scrubbed(reason: str) -> str:
+    """A service's reason, without any address in it: those can be internal ones."""
+    return _ADDRESS.sub("[address]", reason)[:MAX_REASON]
 
 
 def reason_from(response: httpx.Response) -> str | None:
@@ -37,7 +44,7 @@ def reason_from(response: httpx.Response) -> str | None:
     for key in ("detail", "message", "title"):
         text = body.get(key)
         if isinstance(text, str) and text.strip():
-            return text.strip()[:MAX_REASON]
+            return scrubbed(text.strip())
     return None
 
 

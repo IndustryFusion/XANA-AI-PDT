@@ -27,7 +27,8 @@ from __future__ import annotations
 
 import asyncio
 import re
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import quote
@@ -36,8 +37,8 @@ import httpx
 
 from app.config import Settings
 from app.errors import Refused, bad_gateway, conflict, invalid, not_found
-from app.ngsi.failures import refusal, unreachable
-from app.ngsi.query import compile_pattern, has_dotted_iri, matches, parse
+from app.ngsi.failures import refusal, scrubbed, unreachable
+from app.ngsi.query import broker_can_evaluate, compile_pattern, matches, parse
 from xana_agent.sources.ngsi import context_link
 
 SERVICE = "The context broker"
@@ -50,16 +51,36 @@ CONCURRENT_COUNTS = 8
 RESERVED = {"id", "type", "@context", "scope", "createdAt", "modifiedAt", "deletedAt"}
 VALUE_MEMBERS = ("value", "object", "objectList", "json", "languageMap", "valueList", "vocab")
 _URI = re.compile(r"[A-Za-z][A-Za-z0-9+.\-]*:\S+")
+_CORE_CONTEXT = re.compile(r"https://uri\.etsi\.org/ngsi-ld/v1/ngsi-ld-core-context(-v[0-9.]+)?\.jsonld")
 JSON_TYPE = "application/json"
 LD_TYPE = "application/ld+json"
 
 
+CONTEXT_REFUSED = (
+    "This entity's @context names an address that isn't allowed here: the broker would fetch it from "
+    "inside the platform. Allowed contexts are set with NGSI_ALLOWED_CONTEXTS."
+)
+
+
+class Limited(list):
+    """A list that stopped early. `limited` says how far it got, for the caller and the operator."""
+
+    limited: dict[str, int] | None = None
+
+
+def _checked_identifier(identifier: str) -> str:
+    # Percent-encoding leaves dots alone, and `..` would address the path above.
+    if identifier.strip() in ("", ".", ".."):
+        raise invalid("That is not a valid identifier.")
+    return identifier
+
+
 def _segment(identifier: str) -> str:
-    return quote(identifier, safe=":")
+    return quote(_checked_identifier(identifier), safe=":")
 
 
 def _attribute_segment(name: str) -> str:
-    return quote(name, safe="")
+    return quote(_checked_identifier(name), safe="")
 
 
 def _now() -> str:
@@ -79,8 +100,17 @@ def _checked_limit(limit: int) -> int:
 def _problem(item: Any) -> str:
     error = item.get("error") if isinstance(item, dict) else None
     if isinstance(error, dict):
-        return str(error.get("detail") or error.get("title") or "The broker rejected this entity.")
+        return scrubbed(str(error.get("detail") or error.get("title") or "The broker rejected this entity."))
     return "The broker rejected this entity."
+
+
+def _inner_context(value: Any) -> bool:
+    """Whether a value holds a context of its own anywhere, which the broker would act on."""
+    if isinstance(value, dict):
+        return any(key in ("@context", "@import") or _inner_context(item) for key, item in value.items())
+    if isinstance(value, list):
+        return any(_inner_context(item) for item in value)
+    return False
 
 
 class ContextBroker:
@@ -93,8 +123,45 @@ class ContextBroker:
         self._url = settings.ngsi_url.rstrip("/")
         self._tenant = settings.ngsi_tenant
         self._context = settings.ngsi_context_url
+        self._allowed_contexts = {
+            url.strip() for url in (settings.ngsi_allowed_contexts or "").split(",") if url.strip()
+        } | ({self._context} if self._context else set())
         self._token = token
         self._transport = transport
+        self._entity_locks: dict[str, tuple[asyncio.Lock, int]] = {}
+
+    @asynccontextmanager
+    async def _editing(self, entity_id: str) -> AsyncIterator[None]:
+        """One read-then-write at a time per entity, as the broker can't say that a write came too late.
+
+        This covers this process, which is the only one in a deployment while the session is per process.
+        Another writer can still change an attribute between the read and the write.
+        """
+        lock, users = self._entity_locks.get(entity_id, (asyncio.Lock(), 0))
+        self._entity_locks[entity_id] = (lock, users + 1)
+        try:
+            async with lock:
+                yield
+        finally:
+            lock, users = self._entity_locks[entity_id]
+            if users == 1:
+                del self._entity_locks[entity_id]
+            else:
+                self._entity_locks[entity_id] = (lock, users - 1)
+
+    def _context_allowed(self, context: Any) -> bool:
+        """Only known addresses: the broker fetches a context from inside the platform, unchecked."""
+        if isinstance(context, str):
+            return bool(_CORE_CONTEXT.fullmatch(context)) or context in self._allowed_contexts
+        if isinstance(context, list):
+            return all(self._context_allowed(item) for item in context)
+        return isinstance(context, dict) and not _inner_context(context)
+
+    def _context_problem(self, entity: dict[str, Any]) -> str | None:
+        rest = {key: value for key, value in entity.items() if key != "@context"}
+        if _inner_context(rest) or ("@context" in entity and not self._context_allowed(entity["@context"])):
+            return CONTEXT_REFUSED
+        return None
 
     def headers(self, content_type: str | None = None) -> dict[str, str]:
         headers = {"Accept": "application/json"}
@@ -194,23 +261,43 @@ class ContextBroker:
             params["idPattern"] = id_pattern
         if not entity_type and not entity_id:
             params["type"] = "*"  # the broker refuses an ID pattern or expression alone
-        if has_dotted_iri(tree):
+        if not broker_can_evaluate(tree):
             return await self._filtered(params, tree, limit)
         if tree is not None:
             params["q"] = q
-        found = await self._json("GET", "/entities", params={**params, "limit": limit})
+        try:
+            found = await self._json("GET", "/entities", params={**params, "limit": limit})
+        except Refused as refused:
+            if tree is None or refused.kind not in ("invalid", "unavailable"):
+                raise
+            # The syntax was checked here, so this is the broker failing on it. If the broker is
+            # really down, reading the entities fails too, and that failure is the answer.
+            params.pop("q")
+            return await self._filtered(params, tree, limit)
         return found if isinstance(found, list) else []
 
-    async def _filtered(self, params: dict[str, Any], tree: Any, limit: int) -> list[dict[str, Any]]:
-        """Evaluates the expression here, for names the broker silently fails to match."""
-        matched: list[dict[str, Any]] = []
+    async def _filtered(self, params: dict[str, Any], tree: Any, limit: int) -> Limited:
+        """Evaluates the expression here, over the first `MAX_SCANNED` entities, and says if there were more."""
+        matched = Limited()
+        total = None
         for offset in range(0, MAX_SCANNED, MAX_LIMIT):
-            page = await self._json("GET", "/entities", params={**params, "limit": MAX_LIMIT, "offset": offset})
+            response = await self.send(
+                "GET", "/entities", params={**params, "limit": MAX_LIMIT, "offset": offset, "count": "true"}
+            )
+            try:
+                page = response.json()
+            except ValueError:
+                raise bad_gateway(f"{SERVICE} sent an answer that isn't JSON.") from None
             page = page if isinstance(page, list) else []
+            total = _count_of(response)
             matched.extend(entity for entity in page if matches(entity, tree))
             if len(matched) >= limit or len(page) < MAX_LIMIT:
-                break
-        return matched[:limit]
+                matched[limit:] = []
+                return matched
+        if total is None or total > MAX_SCANNED:
+            matched.limited = {"scanned": MAX_SCANNED, **({"total": total} if total is not None else {})}
+        matched[limit:] = []
+        return matched
 
     async def entity(self, entity_id: str) -> dict[str, Any]:
         found = await self._json("GET", f"/entities/{_segment(entity_id)}")
@@ -229,6 +316,11 @@ class ContextBroker:
     # Editing -----------------------------------------------------------------
 
     async def update_attributes(self, entity_id: str, attributes: dict[str, Any]) -> None:
+        self._refuse_contexts(attributes)
+        async with self._editing(entity_id):
+            await self._update_attributes(entity_id, attributes)
+
+    async def _update_attributes(self, entity_id: str, attributes: dict[str, Any]) -> None:
         current = await self._existing(entity_id)
         merge: dict[str, Any] = {}
         overwrite: dict[str, Any] = {}
@@ -247,7 +339,16 @@ class ContextBroker:
         if overwrite:
             await self.send("POST", f"/entities/{_segment(entity_id)}/attrs", body=overwrite)
 
+    def _refuse_contexts(self, attributes: dict[str, Any]) -> None:
+        if _inner_context(attributes):
+            raise invalid(CONTEXT_REFUSED)
+
     async def append_attributes(self, entity_id: str, attributes: dict[str, Any]) -> None:
+        self._refuse_contexts(attributes)
+        async with self._editing(entity_id):
+            await self._append_attributes(entity_id, attributes)
+
+    async def _append_attributes(self, entity_id: str, attributes: dict[str, Any]) -> None:
         current = await self._existing(entity_id)
         for name, attribute in attributes.items():
             if name in current:
@@ -259,6 +360,10 @@ class ContextBroker:
         )
 
     async def delete_attribute(self, entity_id: str, name: str, sub_attribute: str | None = None) -> None:
+        async with self._editing(entity_id):
+            await self._delete_attribute(entity_id, name, sub_attribute)
+
+    async def _delete_attribute(self, entity_id: str, name: str, sub_attribute: str | None) -> None:
         current = await self._existing(entity_id)
         if name in RESERVED or name not in current:
             raise not_found(f"{entity_id} has no attribute {name}.")
@@ -301,7 +406,7 @@ class ContextBroker:
         results: list[dict[str, Any]] = [{"id": None, "result": "failed", "reason": None} for _ in entities]
         ready: list[int] = []
         for index, entity in enumerate(entities):
-            problem = _import_problem(index, entity)
+            problem = _import_problem(index, entity) or self._context_problem(entity)
             if isinstance(entity, dict) and isinstance(entity.get("id"), str):
                 results[index]["id"] = entity["id"]
             if problem:
@@ -347,7 +452,7 @@ class ContextBroker:
         except Refused as refused:
             # A later batch failing must not hide what earlier batches did.
             for i in indexes:
-                results[i]["reason"] = refused.message
+                results[i]["reason"] = scrubbed(refused.message)
             return
         if response.status_code == 207:
             try:
@@ -402,6 +507,13 @@ class ContextBroker:
             return len(response.json().get("success", []))
         except (ValueError, AttributeError):
             return 0
+
+
+def _count_of(response: httpx.Response) -> int | None:
+    try:
+        return int(response.headers["NGSILD-Results-Count"])
+    except (KeyError, ValueError):
+        return None
 
 
 def _listed(value: Any) -> list[str]:

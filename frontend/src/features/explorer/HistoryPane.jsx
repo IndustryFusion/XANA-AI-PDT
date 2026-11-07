@@ -18,6 +18,7 @@ import { lazy, Suspense, useId, useMemo, useState } from 'react'
 import { useData } from '../../data/useData'
 import { Button, DataView, EmptyState, LoadingState } from '../../ui/components'
 import { formatTime } from '../../ui/format'
+import { statusOf } from './attributes'
 
 // The chart library is loaded only when a history chart is shown.
 const HistoryChart = lazy(() => import('./HistoryChart'))
@@ -30,14 +31,6 @@ export const RANGES = [
   { id: '7d', label: 'Last 7 days', ms: 7 * 24 * HOUR },
   { id: 'custom', label: 'Custom range' },
 ]
-
-/** The latest recorded state of an attribute: by its exact name, or its IRI ending in that name. */
-export function statusOf(states, name) {
-  if (!states) return null
-  if (states[name]) return states[name]
-  const key = Object.keys(states).find((k) => k.endsWith(`/${name}`) || k.endsWith(`#${name}`))
-  return key ? states[key] : null
-}
 
 const toLocalInput = (ms) => {
   const d = new Date(ms - new Date(ms).getTimezoneOffset() * 60_000)
@@ -107,6 +100,7 @@ export default function HistoryPane({ entityId, name, unit, headingLevel = 3, on
                     <HistoryChart points={points} name={name} unit={unit} />
                   </Suspense>
                 )}
+                {points.limited?.newest && <p className="muted" role="status">Only the newest {points.limited.newest} values are shown. Choose a shorter time range to see older ones.</p>}
                 <div className="table-wrap history__table" tabIndex={0} role="region" aria-label={`Values of ${name}`}>
                   <table className="table">
                     <caption>

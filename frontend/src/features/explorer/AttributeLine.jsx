@@ -148,7 +148,7 @@ function Line({ name, sub, inst, ctx, actions, first, onAddSub, addingSub }) {
           )}
           {actions && (
             <span className="attr-line__actions">
-              {!sub && first && hasHistory(inst) && (
+              {!sub && first && hasHistory(inst, !!ctx.recorded) && (
                 <ActionButton label={`History of ${name}`} aria-pressed={ctx.historyOpen} onClick={() => ctx.onHistory(name)}>History</ActionButton>
               )}
               {editable && !editing && <ActionButton label={sub ? `Edit sub-attribute ${sub} of ${name}` : `Edit ${name}`} onClick={() => setEditing(true)}>Edit</ActionButton>}
