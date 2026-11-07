@@ -306,7 +306,7 @@ const capabilityRequest = {
   status: { $enum: REQUEST_STATES }, note: '?string', decidedAt: '?date',
 }
 const ingestJob = { jobId: 'string', name: 'string', pipeline: { $enum: PIPELINES }, status: { $enum: INGEST_STATES }, progress: 'number', error: '?string', chunks: '?number' }
-const serviceSetting = { key: 'string', label: 'string', value: 'string', deploymentValue: 'string', changed: 'boolean' }
+const serviceSetting = { key: 'string', label: 'string', value: 'string', deploymentValue: 'string', changed: 'boolean', editable: { $optional: 'boolean' } }
 
 /** Result shapes of implemented operations, checked by the data-interface tests. */
 export const SHAPES = {
@@ -410,7 +410,7 @@ export const SHAPES = {
     getHealth: {
       overall: { $enum: HEALTH_STATES },
       checkedAt: 'date',
-      checks: [{ id: 'string', label: 'string', status: { $enum: HEALTH_STATES }, latencyMs: '?number', detail: '?string' }],
+      checks: [{ id: 'string', label: 'string', status: { $enum: HEALTH_STATES }, latencyMs: '?number', detail: '?string', probe: { $optional: '?string' }, hint: { $optional: '?string' } }],
       models: [{ name: 'string', role: 'string', provider: 'string', available: 'boolean' }],
     },
     getServiceSettings: [serviceSetting],

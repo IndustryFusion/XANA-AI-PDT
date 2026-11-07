@@ -29,7 +29,21 @@ from fastapi import FastAPI
 from langchain_core.language_models import BaseChatModel
 
 from app.alerta import AlertaClient
-from app.api import alerta, auth, diagnostics, errors, events, gateway, ifric, incidents, ngsi, runs, shacl, stream
+from app.api import (
+    alerta,
+    auth,
+    config,
+    diagnostics,
+    errors,
+    events,
+    gateway,
+    ifric,
+    incidents,
+    ngsi,
+    runs,
+    shacl,
+    stream,
+)
 from app.auth import KeycloakSession
 from app.config import Settings, get_llm, load_settings
 from app.dataspace.connection import GatewayConnection
@@ -285,6 +299,7 @@ def create_app(
 
     app.include_router(auth.router)
     app.include_router(diagnostics.router)
+    app.include_router(config.router)
     app.include_router(runs.router)
     app.include_router(incidents.router)
     app.include_router(ngsi.router)

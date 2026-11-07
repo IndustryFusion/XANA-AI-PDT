@@ -17,7 +17,7 @@
 import { screen } from '@testing-library/react'
 import * as backend from '../../src/data/sources/backend'
 import * as mock from '../../src/data/sources/mock'
-import { areas, KNOWLEDGE_BASE_ENABLED } from '../../src/data'
+import { areas, KNOWLEDGE_BASE_ENABLED, bindArea } from '../../src/data'
 import { AREAS, OPERATIONS } from '../../src/data/interface'
 import { analysis } from '../../src/data/sources/mock/scenarios/stages'
 import { contentFor } from '../../src/data/sources/mock/scenarios/content'
@@ -81,11 +81,12 @@ describe.runIf(KNOWLEDGE_BASE_ENABLED)('knowledge base on', () => {
     expect(import.meta.env.VITE_KNOWLEDGE_BASE).toBe('on')
   })
 
-  test('the data layer has the knowledge base area on both sources', () => {
+  test('the area exists, on the backend source only to say that it is not available', async () => {
     expect(AREAS).toContain('knowledgeBase')
     expect(typeof areas.knowledgeBase.listDocuments).toBe('function')
     expect(typeof mock.knowledgeBase.listDocuments).toBe('function')
-    expect(typeof backend.knowledgeBase.listDocuments).toBe('function')
+    expect(backend.knowledgeBase).toBeUndefined()
+    await expect(bindArea('knowledgeBase', backend.knowledgeBase).listDocuments()).rejects.toMatchObject({ kind: 'unavailable' })
   })
 
   test('the System screen shows the knowledge base', async () => {

@@ -14,10 +14,15 @@
 // limitations under the License.
 //
 
-/** System health served by the backend (`/api/diagnostics`). */
+/** System health (`/api/diagnostics`) and service settings (`/api/config`), which are read-only here. */
+import { DataError } from '../../errors'
 import { request } from './http'
 
 export const system = {
   getHealth: ({ fresh = false } = {}) =>
     request('system', 'GET', '/api/diagnostics', { params: fresh ? { fresh: 'true' } : {} }),
+  getServiceSettings: () => request('system', 'GET', '/api/config'),
+  saveServiceSettings: async () => {
+    throw new DataError('system', 'conflict', 'Service addresses are set at deployment, and can\'t be changed here.')
+  },
 }

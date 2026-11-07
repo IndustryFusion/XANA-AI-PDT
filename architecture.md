@@ -164,7 +164,7 @@ Fields are snake_case. A refused request answers `{"error": {"kind", "message"}}
 | `/api/incidents` | GET | History, filtered by `machine_id`, outcomes (`status=a,b`) and an inclusive closing date range (`from`, `to`) |
 | `/api/incidents/{id}` | GET | Incident detail + full agent trace |
 | `/api/incidents/{id}/reopen` | POST | Start a new run with the incident's machine and issue |
-| `/api/diagnostics` | GET | Live connectivity check: PostgreSQL, TimescaleDB, Scorpio, LLM |
+| `/api/diagnostics` | GET | Live check of every connection, each with where it looked and a hint: memory, time-series store, Scorpio, LLM, Alerta, MQTT, PostgREST, Fuseki, gateway, dataspace connector, IFRIC registry, machine events. A 401 or 403 is a failure |
 | `/ws/run/{run_id}` | WebSocket | Live stream: the run's snapshot first, then step and status events |
 | `/api/agent/conversation-act/{run_id}` | POST | The operator sends `inform`, `request`, `escalate`, `deescalate`, `close` (with an outcome) or `cancel` |
 | `/api/agent/ask/{run_id}` | POST | A question to the incident agent; nothing is sent to the machine builder |
@@ -177,6 +177,7 @@ Fields are snake_case. A refused request answers `{"error": {"kind", "message"}}
 | `/api/alerta/*` | — | Alerts screen: list, count, detail, actions, environments, services, on `ALERTA_URL` only. Actions are for operators; the workflow only reads |
 | `/api/gateway/*` | — | The dataspace connection: `config`, `status`, `connect`, `disconnect`, `token-claims`, `peers`, `peers/{id}/capabilities`, `policies`, `capabilities/requests`, `capabilities/policy`. Answers never hold a token or secret |
 | `/api/ifric/*` | — | The IFRIC registry, with the dataspace token: `config`, `status`, `factory`, `resolve`, `resolve-builders`. For the backend only, and not an agent tool |
+| `/api/config` | GET | Service addresses, read-only, with passwords masked. Addresses are set at deployment |
 | `/events/ngsi` | POST | Webhook for Scorpio's notifications; needs the webhook secret |
 | `/events/alert` | POST | Webhook for alerts, from Alerta through its plugin or `{machine_id, issue}`; needs the webhook secret |
 

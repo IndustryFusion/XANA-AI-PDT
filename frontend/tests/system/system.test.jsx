@@ -34,6 +34,24 @@ async function healthTable() {
 }
 
 describe('dependency health', () => {
+  test('a check shows where it looked, and a hint only if it needs one', async () => {
+    const read = vi.spyOn(areas.system, 'getHealth').mockResolvedValue({
+      overall: 'degraded',
+      checkedAt: new Date().toISOString(),
+      checks: [
+        { id: 'alerta', label: 'Alert manager', status: 'error', latencyMs: 3, detail: 'Alerta refused the key (HTTP 401)', probe: 'http://alerta:8080/api/alerts/count', hint: 'Check ALERTA_API_KEY.' },
+        { id: 'broker', label: 'Context broker', status: 'ok', latencyMs: 3, detail: 'Reachable', probe: 'http://broker:9090', hint: 'Check NGSI_URL.' },
+      ],
+      models: [],
+    })
+    open()
+    await healthTable()
+    expect(within(checkRow('alerta')).getByTestId('check-probe')).toHaveTextContent('http://alerta:8080/api/alerts/count')
+    expect(within(checkRow('alerta')).getByTestId('check-hint')).toHaveTextContent('Check ALERTA_API_KEY.')
+    expect(within(checkRow('broker')).queryByTestId('check-hint')).toBeNull()
+    read.mockRestore()
+  })
+
   test('all healthy: each dependency shows OK with its latency, and overall health is OK', async () => {
     open()
     const health = await healthTable()
@@ -89,6 +107,19 @@ describe('dependency health', () => {
 })
 
 describe('service settings', () => {
+  test('read-only settings show the addresses, and nothing to change them with', async () => {
+    const read = vi.spyOn(areas.system, 'getServiceSettings').mockResolvedValue([
+      { key: 'context_broker', label: 'Context broker', value: 'http://broker:9090', deploymentValue: 'http://broker:9090', changed: false, editable: false },
+    ])
+    open()
+    const settings = await region('Service settings')
+    expect(await within(settings).findByText('http://broker:9090')).toBeVisible()
+    expect(within(settings).getByText(/set at deployment/)).toBeVisible()
+    expect(within(settings).queryByRole('textbox')).toBeNull()
+    expect(within(settings).queryByRole('button', { name: 'Save settings' })).toBeNull()
+    read.mockRestore()
+  })
+
   test('shows the addresses in use, all from the deployment', async () => {
     open()
     const settings = await region('Service settings')

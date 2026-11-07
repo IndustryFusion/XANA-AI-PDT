@@ -42,7 +42,7 @@ With `GATEWAY_URL`, the backend is a participant of the IndustryFusion Dataspace
 
 The client secret is entered on the Dataspace screen or set in `GATEWAY_CLIENT_SECRET`. Once accepted, it is stored encrypted in `gateway_credentials`. If the key changes, the stored secret can't be read, and the screen asks for it again. The token stays in memory. It is checked every 60 seconds and renewed with 120 seconds left, and after 3 failures in a row renewal stops and the screen says so. The backend connects by itself after sign-in, or at startup when sign-in is off, unless the operator disconnected.
 
-The health report's `connector` check reads through the participant's adapter, as the contract offers agents nothing that reaches the connector. A connector failing behind a working adapter doesn't show there.
+The health report's `dataspace_connector` check reads through the participant's adapter, as the contract offers agents nothing that reaches the connector. A connector failing behind a working adapter doesn't show there.
 
 ## Escalation
 
@@ -116,7 +116,7 @@ Check it:
 curl 'http://localhost:8000/api/diagnostics?fresh=true'
 ```
 
-Each of the four checks (memory, time-series store, context broker, language model) should be `ok`. The optional services aren't in this report: each area says when its own service fails. While the model is still downloading, the language model check is `degraded`.
+The memory, time-series store, context broker and language model checks should be `ok`. A service with a default address that isn't running, such as Alerta without its profile, shows as `error`, and overall as `degraded`: a report can't tell one not installed from one that stopped. Each check has its `probe` address and a `hint`. A `401` or `403` is a failure, and an empty ontology dataset `degraded`. While the model is still downloading, the language model check is `degraded`.
 
 **With the UI:** in `frontend/`, run `npm run dev`. The development server forwards `/api` and `/ws` to `XANA_BACKEND_URL` (default `http://localhost:8000`).
 
@@ -126,6 +126,8 @@ Fields are snake_case. A refused request answers `{"error": {"kind", "message"}}
 
 | Endpoint | Method | Purpose |
 |---|---|---|
+| `/api/diagnostics` | GET `?fresh=true` | The health of every connection: `{overall, checked_at, checks: [{id, label, status, latency_ms, detail, probe, hint}], models}` |
+| `/api/config` | GET | Service addresses, read-only, with passwords masked: `[{key, label, value, deployment_value, changed, editable}]`. They are set at deployment, and no route takes an address from a browser |
 | `/api/auth/config` | GET | `{enabled, provider}`: whether sign-in is on |
 | `/api/auth/connect` | POST `{username, password}` | Sign in; answers the session. `unauthorized` (401) for wrong credentials, `unavailable` if the provider can't be reached, `conflict` if sign-in is off |
 | `/api/auth/status` | GET | `{valid, user, factory_id, company_id, token_expires_in_s}` |
@@ -168,6 +170,7 @@ Fields are snake_case. A refused request answers `{"error": {"kind", "message"}}
 
 - **Attachments:** `files` items are `{name, type, size, data_url}`: images, PDF or plain text, at most 5 files of 10 MB each. Only the name, type and size are kept.
 - **Persistence:** every change is stored before the stream reports it. After a restart, open runs are listed again; a round that was in progress runs again from its start.
+- **Archiving:** always an operator's act: a finished run stays listed until then, also after a restart.
 - **Concurrency:** at most `MAX_CONCURRENT_ROUNDS` rounds run at once; others wait in status `running`.
 
 ## Configuration

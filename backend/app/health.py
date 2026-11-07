@@ -13,18 +13,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-"""Health of the backend's dependencies: memory, time-series store, context broker, language model."""
+"""Health of every connection the backend has. Each check says where it looked, and what to look at if it fails."""
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import ssl
 import time
+import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from typing import Literal
+from urllib.parse import urlsplit
 
+import aiomqtt
 import httpx
 import psycopg
 
@@ -34,6 +38,7 @@ from app.errors import Refused
 from app.events.subscription import ACTIVE, DELIVERY_FAILING, NOT_CONFIGURED, WAITING, MachineWatch
 from app.ifric import RegistryClient
 from app.memory.migrate import Migrator
+from app.ngsi.live import MQTT_USER, NOT_AUTHORISED
 from app.redact import mask_url
 
 log = logging.getLogger(__name__)
@@ -45,6 +50,7 @@ UNCONFIRMED = "could not be confirmed, so it is assumed to be available"
 NO_DATASPACE = "No dataspace is configured"
 NO_REGISTRY = "No IFRIC registry is configured"
 NO_EVENTS = "Machine events aren't configured: CALLBACK_BASE_URL is not set"
+ANY_TRIPLE = "ASK { { ?s ?p ?o } UNION { GRAPH ?g { ?s ?p ?o } } }"
 NO_MODEL_LIST = (404, 405, 501)  # an OpenAI-compatible server need not offer a model list
 
 LABELS = {
@@ -53,9 +59,27 @@ LABELS = {
     "broker": "Context broker",
     "llm": "Language model",
     "gateway": "Dataspace gateway",
-    "connector": "Dataspace connector",
+    "alerta": "Alert manager",
+    "mqtt": "Message broker",
+    "pgrest": "History service",
+    "fuseki": "Ontology",
+    "dataspace_connector": "Dataspace connector",
     "ifric": "IFRIC registry",
     "machine_events": "Machine events",
+}
+HINTS = {
+    "memory": "Check POSTGRES_MEMORY_URL, and that the database is running. Runs can't be stored without it.",
+    "timeseries": "Check TIMESCALE_DB_URL and TIMESCALE_TABLE. The agent reads signal history from it.",
+    "broker": "Check NGSI_URL. A refusal means the signed-in operator's token isn't accepted.",
+    "llm": "Check LLM_PROVIDER and LLM_MODEL, and that the model has been downloaded or the key is valid.",
+    "alerta": "Check ALERTA_URL, which ends in /api, and ALERTA_API_KEY. The Alerts screen and alert events use it.",
+    "mqtt": "Check MQTT_BROKER_URL, and that operators have Factory-Admin or Factory-Reader on client scorpio.",
+    "pgrest": "Check PGREST_URL, and that the operator's token carries the role claim. The explorer's history uses it.",
+    "fuseki": "Check FUSEKI_URL and FUSEKI_DATASET, and that shapes and knowledge are loaded. Value hints use it.",
+    "gateway": "Check GATEWAY_URL, and that the dataspace's gateway is running.",
+    "dataspace_connector": "Connect on the Dataspace screen, and check this participant's adapter.",
+    "ifric": "Check IFRIC_URL, with its port, and that it shares a realm with the dataspace.",
+    "machine_events": "Check CALLBACK_BASE_URL, and that the context broker can reach it and an identity is available.",
 }
 
 
@@ -66,6 +90,8 @@ class Check:
     status: Status
     latency_ms: int | None
     detail: str
+    probe: str | None = None
+    hint: str | None = None
 
 
 def overall(statuses: list[Status]) -> Status:
@@ -90,7 +116,9 @@ class HealthService:
         gateway: GatewayClient | None = None,
         registry: RegistryClient | None = None,
         machine_watch: MachineWatch | None = None,
+        mqtt_client: Callable[..., aiomqtt.Client] = aiomqtt.Client,
     ) -> None:
+        self._mqtt_client = mqtt_client
         self._machine_watch = machine_watch
         self._registry = registry
         self._token = token
@@ -105,7 +133,11 @@ class HealthService:
             "broker": self._broker,
             "llm": self._llm,
             "gateway": self._gateway_check,
-            "connector": self._connector_check,
+            "alerta": self._alerta,
+            "mqtt": self._mqtt,
+            "pgrest": self._pgrest,
+            "fuseki": self._fuseki,
+            "dataspace_connector": self._connector_check,
             "ifric": self._ifric_check,
             "machine_events": self._machine_events_check,
         }
@@ -157,7 +189,43 @@ class HealthService:
         if status != "ok":
             log.warning("Health check %s: %s (%s)", cid, status, detail)
         latency = round((time.perf_counter() - start) * 1000)
-        return Check(cid, LABELS.get(cid, cid), status, latency, detail)
+        return Check(cid, LABELS.get(cid, cid), status, latency, detail, self._probe_address(cid), HINTS.get(cid))
+
+    def _probe_address(self, cid: str) -> str | None:
+        """Where a check looks, with any password masked."""
+        s = self._s
+        table = s.timescale_table.rsplit(".", 1)[-1]
+        addresses = {
+            "memory": s.postgres_memory_url.get_secret_value(),
+            "timeseries": s.timescale_db_url.get_secret_value(),
+            "broker": f"{s.ngsi_url.rstrip('/')}/ngsi-ld/v1/types",
+            "llm": self._llm_address(),
+            "alerta": f"{s.alerta_url}/alerts/count",
+            "mqtt": s.mqtt_broker_url,
+            "pgrest": f"{s.pgrest_url.rstrip('/')}/{table}",
+            "fuseki": f"{s.fuseki_url.rstrip('/')}/{s.fuseki_dataset}/sparql",
+            "gateway": f"{s.gateway_url.rstrip('/')}/health" if s.gateway_url else None,
+            "dataspace_connector": f"{s.gateway_url.rstrip('/')}/capabilities/requests" if s.gateway_url else None,
+            "ifric": s.ifric_url,
+            "machine_events": f"{s.callback_base_url.rstrip('/')}/events/ngsi" if s.callback_base_url else None,
+        }
+        address = addresses.get(cid)
+        return mask_url(address) if address else None
+
+    def _llm_address(self) -> str | None:
+        s = self._s
+        match s.llm_provider:
+            case "ollama":
+                return f"{s.ollama_url.rstrip('/')}/api/tags"
+            case "anthropic":
+                return "https://api.anthropic.com/v1/models"
+            case "openai":
+                return f"{(s.openai_base_url or 'https://api.openai.com/v1').rstrip('/')}/models"
+        return None
+
+    def _bearer(self) -> dict[str, str]:
+        token = self._token() if self._token else None
+        return {"Authorization": f"Bearer {token}"} if token else {}
 
     # Probes ------------------------------------------------------------------
 
@@ -206,6 +274,74 @@ class HealthService:
                 return await self._llm_state(client)
             except httpx.ReadTimeout:
                 return "degraded", f"{self._label()} did not list its models in time; the model {UNCONFIRMED}"
+
+    async def _alerta(self) -> tuple[Status, str]:
+        s = self._s
+        headers = {"Authorization": f"Key {s.alerta_api_key.get_secret_value()}"} if s.alerta_api_key else {}
+        async with httpx.AsyncClient(timeout=s.health_timeout_s, transport=self._transport) as client:
+            response = await client.get(f"{s.alerta_url}/alerts/count", params={"status": "open"}, headers=headers)
+        if response.status_code in (401, 403):
+            return "error", f"Alerta refused the key (HTTP {response.status_code})"
+        if response.status_code != 200:
+            return "error", f"Alerta answered HTTP {response.status_code}"
+        return "ok", f"Reachable at {s.alerta_url}"
+
+    async def _mqtt(self) -> tuple[Status, str]:
+        s = self._s
+        parts = urlsplit(s.mqtt_broker_url)
+        secure = parts.scheme in ("mqtts", "ssl", "tls")
+        host, port = parts.hostname or "localhost", parts.port or (8883 if secure else 1883)
+        token = self._token() if self._token else None
+        if s.keycloak_url and not token:
+            _, writer = await asyncio.open_connection(host, port)
+            writer.close()
+            return "degraded", f"Reachable at {host}:{port}; nobody is signed in, so credentials can't be checked"
+        try:
+            async with self._mqtt_client(
+                hostname=host,
+                port=port,
+                username=MQTT_USER if token else None,
+                password=token,
+                identifier=f"xana-health-{uuid.uuid4().hex[:12]}",
+                tls_context=ssl.create_default_context() if secure else None,
+                timeout=s.health_timeout_s,
+            ):
+                pass
+        except aiomqtt.MqttCodeError as error:
+            if getattr(error.rc, "value", error.rc) in NOT_AUTHORISED:
+                return "error", "The MQTT broker refused the credentials"
+            raise
+        return "ok", f"Connected to {host}:{port}"
+
+    async def _pgrest(self) -> tuple[Status, str]:
+        s = self._s
+        table = s.timescale_table.rsplit(".", 1)[-1]
+        url = f"{s.pgrest_url.rstrip('/')}/{table}"
+        async with httpx.AsyncClient(timeout=s.health_timeout_s, transport=self._transport) as client:
+            response = await client.get(url, params={"limit": 1}, headers=self._bearer())
+        if response.status_code in (401, 403):
+            return "error", f"PostgREST refused the token (HTTP {response.status_code})"
+        if response.status_code != 200:
+            return "error", f"PostgREST answered HTTP {response.status_code}"
+        return "ok", f"Reachable at {s.pgrest_url}; table {table} can be read"
+
+    async def _fuseki(self) -> tuple[Status, str]:
+        s = self._s
+        url = f"{s.fuseki_url.rstrip('/')}/{s.fuseki_dataset}/sparql"
+        headers = {"Content-Type": "application/sparql-query", "Accept": "application/sparql-results+json"}
+        async with httpx.AsyncClient(timeout=s.health_timeout_s, transport=self._transport) as client:
+            response = await client.post(url, content=ANY_TRIPLE, headers=headers | self._bearer())
+        if response.status_code in (401, 403):
+            return "error", f"Fuseki refused the token (HTTP {response.status_code})"
+        if response.status_code != 200:
+            return "error", f"Fuseki answered HTTP {response.status_code} for dataset {s.fuseki_dataset}"
+        try:
+            holds_data = response.json()["boolean"] is True
+        except (ValueError, KeyError, TypeError):
+            return "error", "Fuseki sent an answer that can't be read"
+        if not holds_data:
+            return "degraded", f"Dataset {s.fuseki_dataset} is empty, so there are no value hints"
+        return "ok", f"Dataset {s.fuseki_dataset} holds data"
 
     async def _gateway_check(self) -> tuple[Status, str]:
         if self._gateway is None or not self._s.gateway_url:

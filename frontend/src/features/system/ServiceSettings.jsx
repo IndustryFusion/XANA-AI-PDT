@@ -14,24 +14,42 @@
 // limitations under the License.
 //
 
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import { system } from '../../data'
 import { useData } from '../../data/useData'
 import { Button, Card, DataView, StatusBadge, useToast } from '../../ui/components'
 import { addressProblem } from './address'
 
 /**
- * Service addresses in use, editable: values are validated before saving,
- * changed values are marked and can be reset to the deployment value.
+ * Service addresses in use. Where they can be edited, values are validated before saving, and changed values are
+ * marked and can be reset to the deployment value. On a backend they are read-only: they are set at deployment.
  */
 export default function ServiceSettings({ onSaved }) {
   const result = useData('system', 'getServiceSettings')
   return (
     <Card title="Service settings" className="service-settings">
       <DataView result={result} errorTitle="Could not load the service settings">
-        {(settings) => <SettingsForm settings={settings} onSaved={(saved) => { result.refresh(); onSaved(saved) }} />}
+        {(settings) => (settings.every((s) => s.editable === false)
+          ? <SettingsList settings={settings} />
+          : <SettingsForm settings={settings} onSaved={(saved) => { result.refresh(); onSaved(saved) }} />)}
       </DataView>
     </Card>
+  )
+}
+
+function SettingsList({ settings }) {
+  return (
+    <div className="stack">
+      <p className="muted">These addresses are set at deployment, and can&apos;t be changed here.</p>
+      <dl className="details">
+        {settings.map((s) => (
+          <Fragment key={s.key}>
+            <dt>{s.label}</dt>
+            <dd className="mono" data-setting={s.key}>{s.value}</dd>
+          </Fragment>
+        ))}
+      </dl>
+    </div>
   )
 }
 

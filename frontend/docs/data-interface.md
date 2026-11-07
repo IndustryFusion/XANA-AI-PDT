@@ -2,7 +2,7 @@
 
 Screens obtain all data through this interface (`src/data`). A **data source** implements it, and `VITE_DATA_SOURCE` selects it without changing any screen:
 - `mock` (default, `src/data/sources/mock`): everything in the browser;
-- `backend` (`src/data/sources/backend`): the operations the backend provides, with every other operation delegated to the mock (see [Backend source](#backend-source)).
+- `backend` (`src/data/sources/backend`): every operation comes from the backend, and none from the mock (see [Backend source](#backend-source)).
 
 The operation list is defined in `src/data/interface.js` (`OPERATIONS`); result shapes of implemented operations are in `SHAPES` and checked by `tests/data/interface.test.js`. A new data source must pass those tests.
 
@@ -25,7 +25,7 @@ The operation list is defined in `src/data/interface.js` (`OPERATIONS`); result 
 
 ## Backend source
 
-Served by the backend (phase 1):
+Served by the backend. It doesn't use the mock source, and `tests/data/backendSource.test.js` keeps it that way:
 
 | Area | Operations | Backend |
 |---|---|---|
@@ -35,9 +35,9 @@ Served by the backend (phase 1):
 | entities | `getStats`, `listTypes`, `listAttributes`, `queryEntities`, `getEntity`, `updateAttributes`, `appendAttributes`, `deleteAttribute`, `deleteEntity`, `importEntities`, `fetchImportDocument`, `deleteByTypes`, `getAttributeHistory`, `getAttributeStatus`, `listTypesAt`, `queryEntitiesAt`, `subscribeEntities`, `getLiveUpdateHealth`, `getValueHints` | `/api/ngsi/…`, `/api/ngsi/ws`, `/api/shacl/hints` |
 | alerts | `listAlerts`, `countAlerts`, `getAlert`, `applyAlertAction`, `listEnvironments`, `listServices`, `getAlertSettings` | `/api/alerta/…` |
 | dataspace | `getConnection`, `connect`, `disconnect`, `listPeers`, `getPeerCapabilities`, `listCapabilityRequests`, `decideCapabilityRequest`, `setCapabilityPolicy`, `resolveNames`, `resolveBuilders` | `/api/gateway/…`, `/api/ifric/…` |
-| system | `getHealth` | `/api/diagnostics` |
+| system | `getHealth`, `getServiceSettings`, `saveServiceSettings` | `/api/diagnostics`, `/api/config`; saving is refused here as `conflict` |
 
-Every other operation (the optional knowledge base, and service settings) comes from the mock, so the whole UI stays usable. `src/data/sources/backend/index.js` builds each area as `{ ...mock[area], ...backend[area] }` and lists the served operations in `SERVED`; the mock's development controls still apply to the delegated operations.
+The optional knowledge base has no backend: with its build setting on, its operations reject as `unavailable`. There are no development controls on this source. `SERVED` in `src/data/sources/backend/index.js` lists what is served.
 
 - **Stopped backend:** until the backend has answered, `getAuthConfig` reports `backendUnreachable: true` and sign-in as off, so the app opens and each area shows its own state. The session gate checks again every 10 seconds, and applies the real configuration when the backend answers. Once the backend has answered, a failed `getAuthConfig` or `getSession` stays `unavailable`.
 - **Transport:** relative paths (`/api/…`, `/ws/…`), so the development server's proxy reaches the backend (`XANA_BACKEND_URL`). `VITE_BACKEND_BASE` sets another prefix or origin. Requests time out after 15 s.
@@ -52,6 +52,7 @@ Every other operation (the optional knowledge base, and service settings) comes 
 - **Machine events:** a run from an event appears and behaves like any other, with `source` `ngsi` or `alert`, and without a call by the operator. It says so in lists and in the run view.
 - **Escalation:** `escalationPreflight` also has `withheld`: `[{ label, category, reason }]`, what the tier or the builder's access holds back. `escalate` can take minutes, as it sends through the dataspace, so it has a longer limit. It fails with the gateway's reason and leaves the run as it was, and a failed send is an `escalate_failed` step with `{ error, filesSent }`; escalating again doesn't send the files again. An `outbox` entry also has `kind` (`files` or `request`), and `error` when it failed. `delivered` means the receiver accepted the notification.
 - **Conversation:** only an operator's call sends. A `request` naming a capability moves the run to `awaiting_operator_approval`, within the tier or not. An `inform` with a `recommendation` in its payload moves it to `awaiting_recommendation_review`. A message also has `freeText` for a request naming no capability, which `grant` and `deny` can't answer, `capability`, `filesUrl` to download what it brought, and `filesUnavailable`. `outcome` holds the protocol's values, and `not_resolved` is sent as `failed`. The operator's `cancel` is sent as `close` with `withdrawn`. `stopped` data can also have `closePending` and `closeProblem`, when the close couldn't be sent yet; it is repeated until it is accepted. A `grant_failed` step means a failure in granting; with `granted`, the grant went out and its files didn't: approving again sends only the files. Sends and `askAgent` have a longer limit.
+- **System:** a check also has `probe`, where it looked, and `hint`, what to look at. A check of a service that refuses (401, 403) is `error`, and an empty ontology dataset is `degraded`. Service settings have `editable: false`, and the screen shows them read-only: addresses are set at deployment, and none is taken from a browser.
 - **Shapes:** `tests/data/backendShapes.test.js` checks every served operation against `SHAPES` with answers recorded from a real backend (`tests/data/backend-fixtures/`, recorded with `scripts/record-backend-fixtures.mjs`).
 
 ## session — implemented
@@ -217,7 +218,7 @@ Entities are NGSI-LD entities in compacted form: `id`, `type` and one member per
 
 ## knowledgeBase — optional, off by default
 
-This area exists only in a build with `VITE_KNOWLEDGE_BASE=on`, on the mock and backend sources alike. With the default setting, the data layer has no `knowledgeBase` area, the System screen has no knowledge base, health has no knowledge base check and simulated runs have no document retrieval step. The rest of this section applies when it is on.
+This area exists only in a build with `VITE_KNOWLEDGE_BASE=on`. It works on the mock source only: on the backend source its operations reject as `unavailable`. With the default setting, the data layer has no `knowledgeBase` area, the System screen has no knowledge base, health has no knowledge base check and simulated runs have no document retrieval step. The rest of this section applies when it is on.
 
 Documents belong to an ingestion pipeline: `base` (page text, faster) or `structured` (section-aware, better for tables and diagrams). A document name is unique within its pipeline.
 
@@ -237,7 +238,7 @@ Documents belong to an ingestion pipeline: `base` (page text, faster) or `struct
 | Operation | Input | Result | Errors |
 |---|---|---|---|
 | `getHealth({ fresh })` | `fresh`: check anew instead of returning a cached result | `{ overall, checkedAt, checks: [{ id, label, status, latencyMs, detail }], models: [{ name, role, provider, available }] }`; `models` lists the models in use (`role` is `agent`); statuses `ok`, `degraded`, `error`, `unknown`; overall is `degraded` when some and `error` when all checks fail | `unavailable` |
-| `getServiceSettings()` | — | `[{ key, label, value, deploymentValue, changed }]` for the context broker, time-series store, message broker and alert manager: the address in use, the deployment's address, and whether an operator override is in use | `unavailable` |
-| `saveServiceSettings(changes)` | `{ [key]: address \| null }`; `null` (or the deployment value) resets to the deployment value. Addresses are URLs with scheme `http`, `https`, `ws`, `wss` or `mqtt` | settings (as `getServiceSettings`) | `invalid` (with the reason; nothing is saved) |
+| `getServiceSettings()` | — | `[{ key, label, value, deploymentValue, changed, editable? }]`: the address in use, the deployment's address, and whether an operator override is in use. On the mock source, the context broker, time-series store, message broker and alert manager. On the backend source, every service, read-only with `editable: false` | `unavailable` |
+| `saveServiceSettings(changes)` | `{ [key]: address \| null }`; `null` (or the deployment value) resets to the deployment value. Addresses are URLs with scheme `http`, `https`, `ws`, `wss` or `mqtt`. On the mock source only | settings (as `getServiceSettings`) | `invalid` (with the reason; nothing is saved), `conflict` (on the backend source, always) |
 
 **Mock specifics.** Seven dependency checks with fixed latencies, and an eighth for the knowledge base when it is on. Checks of services with a setting report the address in use in `detail`; a host under the reserved `.invalid` domain does not answer, to show a failing dependency. Failures injected for `entities`, `alerts`, `knowledgeBase` or `dataspace`, or an unreachable gateway in the controls, fail the matching check. Overrides are kept in the mock store.

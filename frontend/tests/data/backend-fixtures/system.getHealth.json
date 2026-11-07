@@ -4,35 +4,115 @@
   "status": 200,
   "body": {
     "overall": "ok",
-    "checked_at": "2026-11-07T00:56:26.341744+00:00",
+    "checked_at": "2026-11-07T05:27:59.715957+00:00",
     "checks": [
       {
         "id": "memory",
         "label": "Memory database",
         "status": "ok",
-        "latency_ms": 96,
-        "detail": "Reachable at postgresql://xana@127.0.0.1:25433/memory; schema up to date (3 migrations)"
+        "latency_ms": 69,
+        "detail": "Reachable at postgresql://xana@db:5432/memory; schema up to date (7 migrations)",
+        "probe": "postgresql://xana@db:5432/memory",
+        "hint": "Check POSTGRES_MEMORY_URL, and that the database is running. Runs can't be stored without it."
       },
       {
         "id": "timeseries",
         "label": "Time-series store",
         "status": "ok",
-        "latency_ms": 100,
-        "detail": "Reachable at postgresql://xana@127.0.0.1:25433/tsdb; table attributes present"
+        "latency_ms": 73,
+        "detail": "Reachable at postgresql://xana@db:5432/tsdb; table attributes present",
+        "probe": "postgresql://xana@db:5432/tsdb",
+        "hint": "Check TIMESCALE_DB_URL and TIMESCALE_TABLE. The agent reads signal history from it."
       },
       {
         "id": "broker",
         "label": "Context broker",
         "status": "ok",
-        "latency_ms": 105,
-        "detail": "Reachable at http://127.0.0.1:29091"
+        "latency_ms": 79,
+        "detail": "Reachable at http://broker:9090",
+        "probe": "http://broker:9090/ngsi-ld/v1/types",
+        "hint": "Check NGSI_URL. A refusal means the signed-in operator's token isn't accepted."
       },
       {
         "id": "llm",
         "label": "Language model",
         "status": "ok",
         "latency_ms": 0,
-        "detail": "Scripted answers, no model"
+        "detail": "Scripted answers, no model",
+        "probe": null,
+        "hint": "Check LLM_PROVIDER and LLM_MODEL, and that the model has been downloaded or the key is valid."
+      },
+      {
+        "id": "gateway",
+        "label": "Dataspace gateway",
+        "status": "ok",
+        "latency_ms": 0,
+        "detail": "No dataspace is configured",
+        "probe": null,
+        "hint": "Check GATEWAY_URL, and that the dataspace's gateway is running."
+      },
+      {
+        "id": "alerta",
+        "label": "Alert manager",
+        "status": "ok",
+        "latency_ms": 72,
+        "detail": "Reachable at http://alerta:8080/api",
+        "probe": "http://alerta:8080/api/alerts/count",
+        "hint": "Check ALERTA_URL, which ends in /api, and ALERTA_API_KEY. The Alerts screen and alert events use it."
+      },
+      {
+        "id": "mqtt",
+        "label": "Message broker",
+        "status": "ok",
+        "latency_ms": 29,
+        "detail": "Connected to emqx:1883",
+        "probe": "mqtt://emqx:1883",
+        "hint": "Check MQTT_BROKER_URL, and that operators have Factory-Admin or Factory-Reader on client scorpio."
+      },
+      {
+        "id": "pgrest",
+        "label": "History service",
+        "status": "ok",
+        "latency_ms": 34,
+        "detail": "Reachable at http://pgrest:3000; table attributes can be read",
+        "probe": "http://pgrest:3000/attributes",
+        "hint": "Check PGREST_URL, and that the operator's token carries the role claim. The explorer's history uses it."
+      },
+      {
+        "id": "fuseki",
+        "label": "Ontology",
+        "status": "ok",
+        "latency_ms": 45,
+        "detail": "Dataset iff holds data",
+        "probe": "http://fuseki:3030/iff/sparql",
+        "hint": "Check FUSEKI_URL and FUSEKI_DATASET, and that shapes and knowledge are loaded. Value hints use it."
+      },
+      {
+        "id": "dataspace_connector",
+        "label": "Dataspace connector",
+        "status": "ok",
+        "latency_ms": 0,
+        "detail": "No dataspace is configured",
+        "probe": null,
+        "hint": "Connect on the Dataspace screen, and check this participant's adapter."
+      },
+      {
+        "id": "ifric",
+        "label": "IFRIC registry",
+        "status": "ok",
+        "latency_ms": 0,
+        "detail": "No IFRIC registry is configured",
+        "probe": null,
+        "hint": "Check IFRIC_URL, with its port, and that it shares a realm with the dataspace."
+      },
+      {
+        "id": "machine_events",
+        "label": "Machine events",
+        "status": "ok",
+        "latency_ms": 0,
+        "detail": "Subscribed; notifications go to http://backend:8000/events/ngsi.",
+        "probe": "http://backend:8000/events/ngsi",
+        "hint": "Check CALLBACK_BASE_URL, and that the context broker can reach it and an identity is available."
       }
     ],
     "models": [
