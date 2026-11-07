@@ -26,7 +26,7 @@ There is a second gap: **`/ws/run/{run_id}` doesn't check `Origin`, while `/api/
 Full alternatives are in `design.md`.
 
 1. **Backend-held sessions with a cookie, or the browser sending a bearer token.** Recommended: backend-held, with a cookie.
-2. **How a run continues after the operator who started it signs out.** Recommended: it goes on under the service identity if one is configured, and otherwise waits for an operator.
+2. **How a run continues after the operator who started it signs out.** Recommended: it goes on under the service identity if one is configured, and otherwise without a token, where what it can't read shows as an unavailable source. A paused run waits for an answer as it does today.
 3. **Whether sign-in stays a password grant through the backend, or moves to a browser redirect.** Recommended: it stays, for this change.
 
 ## Capabilities

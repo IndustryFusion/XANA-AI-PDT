@@ -10,6 +10,7 @@
 
 - **`gh-21-keycloak-sign-in`'s requirements "Token for platform services" and "Session after a restart" assume one session.** They are modified here, as that change's design already says this comes next.
 - **`gh-30-machine-event-runs` uses a triggered run's identity for every round,** whoever answers. Decision 2 changes that for a round an operator's answer starts, which closes the gap that change names. Its requirement has to be modified here, or that change adjusted if it merges later.
+- **`gh-30-machine-event-runs` falls back to a signed-in operator's token,** where this design's table gives a triggered run the service identity "or else nothing". That change's requirement "A triggered run while an operator is signed in" and "Not configured", and `service_identity.token() or session.token()` in `app/main.py`, which the subscription uses too, would change: with no service client, a triggered round has no token, and the subscription has no identity unless one is chosen for it. With sessions per operator, "the signed-in operator" no longer means one person. For the subscription this design has no answer of its own: **a maintainer should decide whether it may use an operator's token at all,** or needs a service client.
 - **`architecture.md` lists the API without protection.** It is corrected on implementation.
 
 ## Decisions for a maintainer
