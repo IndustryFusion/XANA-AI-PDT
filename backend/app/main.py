@@ -44,6 +44,7 @@ from app.ngsi.history import AttributeHistory
 from app.ngsi.live import LiveUpdates
 from app.ngsi.stream import ConnectionInScope
 from app.redact import RedactingFilter, Redactor
+from app.runs.escalation import Escalator
 from app.runs.machines import MachineResolver
 from app.runs.manager import RunManager
 from app.tracing import tracing_callbacks
@@ -132,6 +133,15 @@ def create_app(
             alerts=agent.alerts,
         )
 
+    escalator = Escalator(
+        gateway_client,
+        registry,
+        agent.context,
+        agent.history,
+        agent.alerts,
+        settings.data_sharing_policy,
+        lambda: bool(settings.gateway_url),
+    )
     manager = RunManager(
         RunStore(db),
         incident_store,
@@ -140,6 +150,7 @@ def create_app(
         migrator,
         max_concurrent_rounds=settings.max_concurrent_rounds,
         model_problem=health.model_problem,
+        escalator=escalator,
     )
 
     @contextlib.asynccontextmanager

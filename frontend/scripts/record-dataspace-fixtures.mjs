@@ -59,4 +59,17 @@ if (process.env.RECORD_MACHINE) {
   record('dataspace.resolveNames', await call('POST', '/api/ifric/resolve', { ids: [peers[0].id] }))
   record('dataspace.resolveBuilders', await call('POST', '/api/ifric/resolve-builders', { machine_ids: [process.env.RECORD_MACHINE] }))
 }
+// An escalation, if the backend has the sample data and a machine with a builder (RECORD_MACHINE).
+if (process.env.RECORD_MACHINE) {
+  const started = await call('POST', '/api/agent/run', { machine_id: process.env.RECORD_MACHINE, issue: 'Recorded for the fixtures' })
+  const run = started.body.run_id
+  for (let i = 0; i < 100; i += 1) {
+    if ((await call('GET', `/api/agent/status/${run}`)).body.status === 'awaiting_input') break
+    await new Promise((r) => setTimeout(r, 200))
+  }
+  record('runs.escalationPreflight', await call('GET', `/api/agent/escalate-preflight/${run}`))
+  record('runs.escalate', await call('POST', `/api/agent/escalate/${run}`))
+  record('runs.getOutboxStatus', await call('GET', `/api/agent/outbox-status/${run}`))
+  await call('POST', `/api/agent/stop/${run}`, { reason: 'Recorded for the fixtures.' })
+}
 record('dataspace.disconnect', await call('POST', `${gateway}/disconnect`))

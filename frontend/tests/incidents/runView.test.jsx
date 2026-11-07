@@ -328,3 +328,20 @@ describe('outcomes, stop, reopen and archive', () => {
     expect(await screen.findByRole('link', { name: /Stop me/ })).toBeVisible()
   })
 })
+
+describe('delivery of an escalation', () => {
+  test('is read from the data source, as the stream does not carry it, and shows a failure', async () => {
+    const { runs } = await import('../../src/data')
+    const { WaitingPanel } = await import('../../src/features/incidents/panels')
+    const { render, screen: view } = await import('@testing-library/react')
+    const spy = vi.spyOn(runs, 'getOutboxStatus').mockResolvedValue([
+      { messageId: 'm1', status: 'delivered', kind: 'files' },
+      { messageId: 'm2', status: 'failed', kind: 'request', error: 'The receiver is away' },
+    ])
+    render(<WaitingPanel run={{ runId: 'r', escalationRef: 'ESC-1', data: { builder: 'B' }, outbox: [] }} />)
+    expect(await view.findByText('Machine data')).toBeVisible()
+    expect(view.getByText('The receiver is away')).toBeVisible()
+    expect(spy).toHaveBeenCalledWith('r')
+    spy.mockRestore()
+  })
+})

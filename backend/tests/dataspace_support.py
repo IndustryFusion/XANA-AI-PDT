@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import re
 from typing import Any
 from urllib.parse import parse_qs
 
@@ -88,6 +89,12 @@ class Dataspace:
             }
         ]
         self.policies: list[dict[str, Any]] = []
+        self.sent: list[dict[str, Any]] = []  # what was accepted, in order: messages and file bundles
+        self.message_status: dict[str, str] = {}
+        self.fail_status: dict[str, str] = {}
+        self.conversations: dict[str, dict[str, Any]] = {}
+        self.holds: dict[str, asyncio.Event] = {}  # "METHOD path" → waits until set
+        self.reached: dict[str, int] = {}
 
     def transport(self) -> httpx.MockTransport:
         return httpx.MockTransport(self.handle)
@@ -98,7 +105,7 @@ class Dataspace:
         self.requests.append(request)
         if request.url.host == "keycloak.test":
             return self._token(request)
-        return self._gateway(request)
+        return await self._gateway(request)
 
     def calls(self, method: str, path: str) -> list[httpx.Request]:
         return [r for r in self.requests if r.method == method and r.url.path == path]
@@ -118,11 +125,15 @@ class Dataspace:
         self.valid_tokens.add(token)
         return httpx.Response(200, json={"access_token": token, "expires_in": self.expires_in, "token_type": "Bearer"})
 
-    def _gateway(self, request: httpx.Request) -> httpx.Response:
+    async def _gateway(self, request: httpx.Request) -> httpx.Response:
         if self.gateway_down:
             raise httpx.ConnectError("refused")
         path = request.url.path
-        forced = self.status_for.get(f"{request.method} {path}")
+        key = f"{request.method} {path}"
+        self.reached[key] = self.reached.get(key, 0) + 1
+        if key in self.holds:
+            await self.holds[key].wait()
+        forced = self.status_for.get(key)
         if forced:
             return httpx.Response(forced, json={"detail": f"forced {forced}"})
         if path == "/health":
@@ -171,4 +182,50 @@ class Dataspace:
                     "source": source,
                 },
             )  # noqa: E501
+        if path == "/outbox/files":
+            return self._accept_files(request)
+        if path == "/outbox/messages":
+            return self._accept_message(request)
+        if path.startswith("/outbox/messages/"):
+            return self._outbox_read(path)
         return httpx.Response(404, json={"detail": "not found"})
+
+    def _accepted(self, record: dict[str, Any]) -> httpx.Response:
+        record["message_id"] = f"m-{len(self.sent) + 1}"
+        record["conversation_id"] = record.get("conversation_id") or f"c-{len(self.sent) + 1}"
+        self.sent.append(record)
+        self.message_status[record["message_id"]] = "pending"
+        body = {"message_id": record["message_id"], "status": "pending", "applied": True, "conversation_state": "OPEN"}
+        return httpx.Response(202, json=body)
+
+    def _accept_files(self, request: httpx.Request) -> httpx.Response:
+        boundary = request.headers["content-type"].split("boundary=")[1].encode()
+        fields: dict[str, Any] = {"files": {}, "kind": "files"}
+        for part in request.content.split(b"--" + boundary):
+            if b"\r\n\r\n" not in part:
+                continue
+            head, body = part.split(b"\r\n\r\n", 1)
+            body = body.removesuffix(b"\r\n")
+            name = re.search(rb'name="([^"]+)"', head).group(1).decode()
+            filename = re.search(rb'filename="([^"]+)"', head)
+            if filename:
+                fields["files"][filename.group(1).decode()] = json.loads(body)
+            else:
+                fields[name] = body.decode()
+        return self._accepted(fields)
+
+    def _accept_message(self, request: httpx.Request) -> httpx.Response:
+        return self._accepted({**json.loads(request.content), "kind": "message"})
+
+    def _outbox_read(self, path: str) -> httpx.Response:
+        parts = path.split("/")
+        found = next((m for m in self.sent if m["message_id"] == parts[3]), None)
+        if found is None:
+            return httpx.Response(404, json={"detail": "no such message"})
+        if parts[-1] == "status":
+            status = self.message_status[found["message_id"]]
+            error = self.fail_status.get(found["message_id"])
+            return httpx.Response(
+                200, json={"message_id": found["message_id"], "status": status, "error_message": error}
+            )
+        return httpx.Response(200, json=found)

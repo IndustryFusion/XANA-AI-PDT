@@ -57,10 +57,11 @@ function query(params = {}) {
  * Calls the backend and resolves with the mapped JSON result (undefined for an empty answer).
  *   request('runs', 'POST', '/api/agent/run', { body: { machine_id, issue } })
  * With `raw`, keys stay as they are: attribute names are data, and `max_temp` must stay `max_temp`.
+ * `timeoutMs` is for what is slower than other requests by nature, such as sending through the dataspace.
  */
-export async function request(area, method, path, { params, body, raw = false } = {}) {
+export async function request(area, method, path, { params, body, raw = false, timeoutMs = TIMEOUT_MS } = {}) {
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS)
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
   let response
   try {
     response = await fetch(`${basePath()}${path}${query(params)}`, {
@@ -71,7 +72,7 @@ export async function request(area, method, path, { params, body, raw = false } 
     })
   } catch (err) {
     const message = err?.name === 'AbortError'
-      ? `The backend did not answer within ${TIMEOUT_MS / 1000} s.`
+      ? `The backend did not answer within ${timeoutMs / 1000} s.`
       : 'The backend cannot be reached.'
     throw new DataError(area, 'unavailable', message)
   } finally {

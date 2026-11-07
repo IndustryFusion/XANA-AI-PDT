@@ -29,9 +29,15 @@ AWAITING_CONFIRMATION = "awaiting_confirmation"
 COMPLETED = "completed"
 FAILED = "failed"
 STOPPED = "stopped"
+AWAITING_MACHINE_BUILDER = "awaiting_machine_builder"
+AWAITING_OPERATOR_APPROVAL = "awaiting_operator_approval"
+AWAITING_RECOMMENDATION_REVIEW = "awaiting_recommendation_review"
+MB_CLOSED = "mb_closed"
 
-OPEN = (RUNNING, AWAITING_INPUT, AWAITING_CONFIRMATION)
-FINISHED = (COMPLETED, FAILED, STOPPED)
+CONVERSATION = (AWAITING_MACHINE_BUILDER, AWAITING_OPERATOR_APPROVAL, AWAITING_RECOMMENDATION_REVIEW)
+OPEN = (RUNNING, AWAITING_INPUT, AWAITING_CONFIRMATION, *CONVERSATION)
+FINISHED = (COMPLETED, FAILED, STOPPED, MB_CLOSED)
+ESCALATABLE = (AWAITING_INPUT, AWAITING_CONFIRMATION)
 
 # Operation → the statuses that allow it. Anything else is refused as a conflict.
 ALLOWED: dict[str, tuple[str, ...]] = {
@@ -39,6 +45,7 @@ ALLOWED: dict[str, tuple[str, ...]] = {
     "confirm": (AWAITING_CONFIRMATION,),
     "stop": OPEN,
     "archive": FINISHED,
+    "escalate": ESCALATABLE,
 }
 
 # Steps the operator adds. They belong to the round they answer and are kept when a round runs again.
@@ -61,6 +68,10 @@ class RunState:
     clarifications: tuple[str, ...] = ()
     rejected: tuple[dict[str, Any], ...] = ()
     incident_id: int | None = None
+    escalation: dict[str, Any] | None = None
+    outbox: tuple[dict[str, Any], ...] = ()
+    conversation_id: str | None = None
+    attempt: dict[str, Any] | None = None  # how far an escalation that failed got
 
     def summary(self) -> dict[str, Any]:
         return {
@@ -71,7 +82,7 @@ class RunState:
             "status": self.status,
             "started_at": self.started_at.isoformat(),
             "updated_at": self.updated_at.isoformat(),
-            "escalation_ref": None,
+            "escalation_ref": self.escalation["ref"] if self.escalation else None,
         }
 
     def view(self) -> dict[str, Any]:
@@ -79,10 +90,17 @@ class RunState:
         return self.summary() | {
             "data": self.data,
             "steps": list(self.steps),
-            "escalation": None,
-            "outbox": [],
+            "escalation": self.escalation,
+            "outbox": self.outbox_status(),
             "reopenable": False,
         }
+
+    def outbox_status(self) -> list[dict[str, Any]]:
+        """Delivery of what was sent, in the interface's terms."""
+        return [
+            {key: entry[key] for key in ("message_id", "status", "kind", "error") if key in entry}
+            for entry in self.outbox
+        ]
 
     def last_decision(self) -> dict[str, Any] | None:
         """The output of the latest decide step."""

@@ -29,7 +29,15 @@ from datetime import timedelta
 import psycopg
 from psycopg import sql
 
-from xana_agent.sources.base import AttributeChange, Bucket, LifecycleEvent, SignalHistory, SourceUnavailable, trend
+from xana_agent.sources.base import (
+    AttributeChange,
+    Bucket,
+    LifecycleEvent,
+    Observation,
+    SignalHistory,
+    SourceUnavailable,
+    trend,
+)
 
 _NUMBER = r"^\s*[-+]?([0-9]+\.?[0-9]*|\.[0-9]+)([eE][-+]?[0-9]+)?\s*$"
 _IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?$")
@@ -81,6 +89,17 @@ FROM (
 ) AS rows
 WHERE before IS DISTINCT FROM value
 ORDER BY at DESC, entity_id, attribute_id
+LIMIT %(limit)s
+"""
+
+# Every stored value of one entity, numbers or not. An attribute matches by full IRI or by its last segment.
+_OBSERVATIONS = """
+SELECT "entityId", "attributeId", "observedAt", "value", "valueType"
+FROM {table}
+WHERE "entityId" = %(entity)s AND "observedAt" > now() - %(window)s AND "deleted" IS NOT TRUE
+  AND (%(every)s OR "attributeId" = ANY(%(attributes)s::text[])
+       OR regexp_replace("attributeId", '^.*[/#]', '') = ANY(%(attributes)s::text[]))
+ORDER BY "observedAt" DESC, "attributeId"
 LIMIT %(limit)s
 """
 
@@ -158,6 +177,24 @@ class TimescaleHistorySource:
         return [
             Bucket(start=start, minimum=lo, maximum=hi, average=avg, last=last, count=n)
             for start, lo, hi, avg, last, n in rows
+        ]
+
+    async def observations(
+        self, entity_id: str, window: timedelta, attributes: list[str] | None = None, limit: int = 500
+    ) -> list[Observation]:
+        rows = await self._read(
+            _OBSERVATIONS,
+            {
+                "entity": entity_id,
+                "window": window,
+                "every": attributes is None,
+                "attributes": list(attributes or []),
+                "limit": limit,
+            },
+        )
+        return [
+            Observation(entity_id=entity, attribute=short_name(attribute_id), at=at, value=value, value_type=kind)
+            for entity, attribute_id, at, value, kind in rows
         ]
 
     async def changes(self, entity_ids: list[str], window: timedelta, limit: int = 50) -> list[AttributeChange]:

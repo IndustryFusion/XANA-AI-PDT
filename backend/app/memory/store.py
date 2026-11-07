@@ -103,13 +103,17 @@ class RunStore:
             await conn.execute(
                 """
                 INSERT INTO runs (run_id, incident_number, machine_id, issue, status, data, steps, round,
-                                  clarifications, rejected, started_at, updated_at)
+                                  clarifications, rejected, started_at, updated_at,
+                                  escalation, outbox, conversation_id, attempt)
                 VALUES (%(run_id)s, %(incident_id)s, %(machine_id)s, %(issue)s, %(status)s, %(data)s, %(steps)s,
-                        %(round)s, %(clarifications)s, %(rejected)s, %(started_at)s, %(updated_at)s)
+                        %(round)s, %(clarifications)s, %(rejected)s, %(started_at)s, %(updated_at)s,
+                        %(escalation)s, %(outbox)s, %(conversation_id)s, %(attempt)s)
                 ON CONFLICT (run_id) DO UPDATE SET
                     incident_number = EXCLUDED.incident_number, status = EXCLUDED.status, data = EXCLUDED.data,
                     steps = EXCLUDED.steps, round = EXCLUDED.round, clarifications = EXCLUDED.clarifications,
-                    rejected = EXCLUDED.rejected, updated_at = EXCLUDED.updated_at
+                    rejected = EXCLUDED.rejected, updated_at = EXCLUDED.updated_at,
+                    escalation = EXCLUDED.escalation, outbox = EXCLUDED.outbox,
+                    conversation_id = EXCLUDED.conversation_id, attempt = EXCLUDED.attempt
                 """,
                 _run_row(run),
             )
@@ -133,6 +137,10 @@ class RunStore:
                 clarifications=tuple(r["clarifications"]),
                 rejected=tuple(r["rejected"]),
                 incident_id=r["incident_number"],
+                escalation=r["escalation"],
+                outbox=tuple(r["outbox"]),
+                conversation_id=r["conversation_id"],
+                attempt=r["attempt"],
             )
             for r in rows
         ]
@@ -152,6 +160,10 @@ def _run_row(run: RunState) -> dict[str, Any]:
         "rejected": Jsonb(list(run.rejected)),
         "started_at": run.started_at,
         "updated_at": run.updated_at,
+        "escalation": Jsonb(run.escalation) if run.escalation is not None else None,
+        "outbox": Jsonb(list(run.outbox)),
+        "conversation_id": run.conversation_id,
+        "attempt": Jsonb(run.attempt) if run.attempt is not None else None,
     }
 
 
@@ -187,17 +199,20 @@ class IncidentStore:
             cur = await conn.execute(
                 """
                 INSERT INTO incidents (number, run_id, machine_id, machine_type, issue, outcome, root_cause,
-                                       recommended_action, decision, resolution, started_at, closed_at, archived_at)
+                                       recommended_action, decision, resolution, started_at, closed_at, archived_at,
+                                       builder, escalation, conversation_id)
                 VALUES (COALESCE(%(number)s, nextval('incident_number')), %(run_id)s, %(machine_id)s,
                         %(machine_type)s, %(issue)s, %(outcome)s, %(root_cause)s, %(recommended_action)s,
-                        %(decision)s, %(resolution)s, %(started_at)s, %(at)s, %(at)s)
+                        %(decision)s, %(resolution)s, %(started_at)s, %(at)s, %(at)s,
+                        %(builder)s, %(escalation)s, %(conversation_id)s)
                 ON CONFLICT (run_id) DO UPDATE SET
                     number = EXCLUDED.number,
                     machine_type = COALESCE(EXCLUDED.machine_type, incidents.machine_type),
                     outcome = EXCLUDED.outcome, root_cause = EXCLUDED.root_cause,
                     recommended_action = EXCLUDED.recommended_action, decision = EXCLUDED.decision,
                     resolution = EXCLUDED.resolution, closed_at = EXCLUDED.closed_at,
-                    archived_at = EXCLUDED.archived_at
+                    archived_at = EXCLUDED.archived_at, builder = EXCLUDED.builder,
+                    escalation = EXCLUDED.escalation, conversation_id = EXCLUDED.conversation_id
                 RETURNING id
                 """,
                 {
@@ -213,6 +228,9 @@ class IncidentStore:
                     "resolution": resolution_text(run),
                     "started_at": run.started_at,
                     "at": at,
+                    "builder": run.escalation["recipient"]["name"] if run.escalation else None,
+                    "escalation": Jsonb(run.escalation) if run.escalation else None,
+                    "conversation_id": run.conversation_id,
                 },
             )
             incident_id = (await cur.fetchone())["id"]
@@ -270,8 +288,9 @@ class IncidentStore:
         return _incident_summary(row) | {
             "decision": row["decision"],
             "resolution": row["resolution"],
-            "builder": None,
-            "escalation": None,
+            "builder": row["builder"],
+            "escalation": row["escalation"],
+            "conversation_id": row["conversation_id"],
             "conversation": [],
             "trace": trace,
             "run_id": row["run_id"],
@@ -290,8 +309,8 @@ def _incident_summary(row: dict[str, Any]) -> dict[str, Any]:
         "issue": row["issue"],
         "outcome": row["outcome"],
         "root_cause": row["root_cause"],
-        "escalated": False,
-        "escalation_ref": None,
+        "escalated": row["escalation"] is not None,
+        "escalation_ref": row["escalation"]["ref"] if row["escalation"] else None,
         "started_at": row["started_at"].isoformat(),
         "closed_at": row["closed_at"].isoformat(),
         "reopened_run_id": row["reopened_run_id"],

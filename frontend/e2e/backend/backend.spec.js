@@ -106,7 +106,7 @@ test('escalation is not offered: the dialog gives the backend reason', async ({ 
   await page.getByRole('button', { name: 'Escalate to machine builder…' }).click()
   const dialog = page.getByRole('dialog', { name: 'Escalate to the machine builder' })
   await expect(dialog).toContainText('Escalation is not possible.')
-  await expect(dialog).toContainText('Escalation to the machine builder is not available in this version.')
+  await expect(dialog).toContainText('No dataspace is configured for this installation.')
   await expect(dialog.getByRole('button', { name: 'Escalate', exact: true })).toHaveCount(0)
   await dialog.getByRole('button', { name: 'Close', exact: true }).click()
   await expect(dialog).toHaveCount(0)

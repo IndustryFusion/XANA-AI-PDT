@@ -1,12 +1,32 @@
 {
   "method": "GET",
-  "path": "/api/agent/escalate-preflight/0badaa29-2f46-4fb7-9b51-4b383d38e967",
+  "path": "/api/agent/escalate-preflight/277414a3-ce59-4561-bd53-024349f367b7",
   "status": 200,
   "body": {
-    "possible": false,
-    "reason": "Escalation to the machine builder is not available in this version.",
-    "recipient": null,
-    "data": [],
+    "possible": true,
+    "reason": null,
+    "recipient": {
+      "id": "urn:example:xana-builder",
+      "name": "Machine Builder GmbH"
+    },
+    "data": [
+      {
+        "label": "The machine's entity data and active alerts",
+        "category": "twin:direct"
+      }
+    ],
+    "withheld": [
+      {
+        "label": "Related entities and their active alerts",
+        "category": "twin:adjacents",
+        "reason": "The tier minimal doesn't include it."
+      },
+      {
+        "label": "Signal history of the last 24 hours",
+        "category": "twin:history",
+        "reason": "The tier minimal doesn't include it."
+      }
+    ],
     "sharing_tier": "minimal"
   }
 }

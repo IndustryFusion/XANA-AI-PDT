@@ -22,6 +22,9 @@ import { fromBackend, outboundFiles, toBackend } from './map'
 const AREA = 'runs'
 const path = (op, runId) => `/api/agent/${op}/${seg(runId)}`
 
+/** A send through the dataspace may take the gateway's two minutes, and two sends follow one another. */
+export const SEND_TIMEOUT_MS = 300_000
+
 /** Delays before reconnecting a lost stream: 0.5 s, 1 s, 2 s, 4 s, then every 8 s. */
 export const RECONNECT_DELAYS_MS = [500, 1000, 2000, 4000, 8000]
 /** Close code the backend uses for an unknown or archived run. */
@@ -107,7 +110,9 @@ export const runs = {
     request(AREA, 'POST', path('clarify', runId), { body: { text, files: outboundFiles(files) } }),
   confirmResolution: (runId, { confirmed, text = '', files = [] } = {}) =>
     request(AREA, 'POST', path('confirm-resolution', runId), { body: { confirmed: !!confirmed, text, files: outboundFiles(files) } }),
-  escalationPreflight: (runId) => request(AREA, 'GET', path('escalate-preflight', runId)),
+  escalationPreflight: (runId) => request(AREA, 'GET', path('escalate-preflight', runId), { timeoutMs: 60_000 }),
+  escalate: (runId) => request(AREA, 'POST', path('escalate', runId), { timeoutMs: SEND_TIMEOUT_MS }),
+  getOutboxStatus: (runId) => request(AREA, 'GET', path('outbox-status', runId)),
   reopenRun: (runId) => request(AREA, 'POST', path('reopen', runId)),
   stopRun: (runId, { reason } = {}) => request(AREA, 'POST', path('stop', runId), { body: { reason: reason ?? null } }),
   archiveRun: async (runId) => {

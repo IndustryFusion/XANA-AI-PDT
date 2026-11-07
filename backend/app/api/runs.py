@@ -92,8 +92,18 @@ async def archive(run_id: str, request: Request) -> Response:
 
 @router.get("/escalate-preflight/{run_id}")
 async def escalate_preflight(run_id: str, request: Request) -> dict[str, Any]:
-    """Escalation is not available in phase 1; the answer says so."""
+    """Whether escalation is possible, why not, and what would be sent. Sends nothing."""
     return await runs(request).escalation_preflight(run_id)
+
+
+@router.post("/escalate/{run_id}")
+async def escalate(run_id: str, request: Request) -> dict[str, str]:
+    return await runs(request).escalate(run_id)
+
+
+@router.get("/outbox-status/{run_id}")
+async def outbox_status(run_id: str, request: Request) -> list[dict[str, Any]]:
+    return await runs(request).outbox_status(run_id)
 
 
 @router.post("/reopen/{run_id}")

@@ -108,6 +108,31 @@ class GatewayClient:
         if response.status_code != 200:
             raise unavailable(f"{SERVICE} answered HTTP {response.status_code}.")
 
+    # ── Messages ─────────────────────────────────────────────────────────────
+
+    async def send_files(self, receiver: str, files: list[tuple[str, bytes]], **fields: Any) -> dict[str, Any]:
+        """`POST /outbox/files`. The contract's answer, with `message_id`."""
+        form = {"receiver_participant": receiver} | {k: str(v) for k, v in fields.items() if v is not None}
+        parts = [("files", (name, content, "application/json")) for name, content in files]
+        return _accepted(await self._json("POST", "/outbox/files", data=form, files=parts, limit_s=SEND_TIMEOUT_S))
+
+    async def send_message(self, receiver: str, **fields: Any) -> dict[str, Any]:
+        """`POST /outbox/messages`. The contract's answer, with `message_id`."""
+        body = {"receiver_participant": receiver} | {k: v for k, v in fields.items() if v is not None}
+        return _accepted(await self._json("POST", "/outbox/messages", json=body, limit_s=SEND_TIMEOUT_S))
+
+    async def sent_message(self, message_id: str) -> dict[str, Any]:
+        answer = await self._json("GET", f"/outbox/messages/{quote(message_id, safe='')}")
+        if not isinstance(answer, dict) or not answer.get("conversation_id"):
+            raise bad_gateway(f"{SERVICE} sent an unexpected answer.")
+        return answer
+
+    async def message_status(self, message_id: str) -> dict[str, Any]:
+        answer = await self._json("GET", f"/outbox/messages/{quote(message_id, safe='')}/status")
+        if not isinstance(answer, dict) or not isinstance(answer.get("status"), str):
+            raise bad_gateway(f"{SERVICE} sent an unexpected answer.")
+        return answer
+
     # ── Peers ────────────────────────────────────────────────────────────────
 
     async def compatible(self) -> list[dict[str, Any]]:
@@ -215,6 +240,12 @@ class GatewayClient:
         body = {"consumer_id": consumer, "capability": capability, "action": action}
         answer = await self._json("POST", "/capabilities/policy", json=body)
         return {**answer, "status": ACCESS_STATUS.get(answer.get("status"), answer.get("status"))}
+
+
+def _accepted(answer: Any) -> dict[str, Any]:
+    if not isinstance(answer, dict) or not isinstance(answer.get("message_id"), str):
+        raise bad_gateway(f"{SERVICE} sent an unexpected answer.")
+    return answer
 
 
 def _policy(item: dict[str, Any]) -> dict[str, Any]:
