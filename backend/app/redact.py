@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import logging
 import re
-from urllib.parse import parse_qsl, unquote, urlencode, urlsplit, urlunsplit
+from urllib.parse import unquote, urlsplit, urlunsplit
 
 MASK = "***"
 # What may hold a token wherever it appears, known to this process or not.
@@ -28,25 +28,32 @@ _JWT = re.compile(r"\beyJ[\w\-]+\.[\w\-]+(\.[\w\-]*)?")
 _BEARER = re.compile(r"\b(Bearer|Key)\s+[\w\-.~+/=]{8,}")
 
 
-_SECRET_NAME = re.compile("password|passwd|pwd|token|key|secret", re.IGNORECASE)
+_SECRET_WORDS = {"password", "sslpassword", "passwd", "pwd", "token", "key", "apikey", "secret"}
+_NAME_WORD = re.compile(r"[A-Z]?[a-z]+|[A-Z]+")
+_PAIR = re.compile(r"(^|[&;])([^=&;]*)=([^&;]*)")
+
+
+def _names_a_secret(name: str) -> bool:
+    return any(word.lower() in _SECRET_WORDS for word in _NAME_WORD.findall(unquote(name)))
+
+
+def _mask_pairs(text: str) -> str:
+    """Query or fragment text, with the values of pairs named as a secret masked."""
+    return _PAIR.sub(lambda m: f"{m[1]}{m[2]}={MASK}" if _names_a_secret(m[2]) else m[0], text)
 
 
 def mask_url(url: str) -> str:
-    """The URL with its password, and query values that name a secret, replaced by `***`."""
+    """The URL with its password, and query or fragment values named as a secret, replaced by `***`."""
     try:
         parts = urlsplit(url)
-        pairs = parse_qsl(parts.query, keep_blank_values=True)
         password = parts.password
     except ValueError:
         return MASK
-    if any(_SECRET_NAME.search(name) for name, _ in pairs):
-        masked = [(name, MASK if _SECRET_NAME.search(name) else value) for name, value in pairs]
-        parts = parts._replace(query=urlencode(masked, safe="*"))
+    parts = parts._replace(query=_mask_pairs(parts.query), fragment=_mask_pairs(parts.fragment))
     if password is None:
         return urlunsplit(parts)
-    host = parts.hostname or ""
-    if parts.port is not None:
-        host = f"{host}:{parts.port}"
+    # The host part as it is: with several hosts, or an odd port, it can't be read as one host and port.
+    host = parts.netloc.rpartition("@")[2]
     user = f"{parts.username}:" if parts.username else ":"
     return urlunsplit(parts._replace(netloc=f"{user}{MASK}@{host}"))
 

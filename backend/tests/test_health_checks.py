@@ -23,6 +23,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.api.config import service_settings
+from app.events.subscription import MachineWatch
 from app.health import HINTS, LABELS, HealthService
 from app.main import create_app
 from app.memory.migrate import Migrator
@@ -229,6 +230,55 @@ def test_settings_show_addresses_with_passwords_masked_and_no_key():
 )
 def test_a_secret_in_an_address_is_masked_also_in_its_query(url):
     assert PASSWORD not in mask_url(url)
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        f"postgresql://u:{PASSWORD}@h1:5432,h2:5433/db",
+        f"postgresql://u:{PASSWORD}@h:notaport/db",
+        f"http://h/x#token={PASSWORD}",
+        f"http://h/x?a=1;password={PASSWORD}",
+        f"http://h/x?a=1;password={PASSWORD}&b=2",
+        f"http://h/x?accessToken={PASSWORD}",
+        f"http://h/x?pass%77ord={PASSWORD}",
+    ],
+)
+def test_other_forms_of_a_secret_in_an_address(url):
+    assert PASSWORD not in mask_url(url)
+
+
+def test_several_hosts_stay_readable():
+    assert mask_url(f"postgresql://u:{PASSWORD}@h1:5432,h2:5433/db") == "postgresql://u:***@h1:5432,h2:5433/db"
+
+
+@pytest.mark.parametrize("name", ["monkey", "tokenizer", "keyboard", "secretary", "sslmode"])
+def test_only_whole_words_are_masked(name):
+    assert mask_url(f"http://h/x?{name}=shown") == f"http://h/x?{name}=shown"
+
+
+@pytest.mark.parametrize("probe", ["_broker", "_alerta", "_pgrest"])
+@pytest.mark.parametrize("status_code", [200, 401, 500])
+async def test_a_secret_in_a_service_address_stays_out_of_a_checks_detail(probe, status_code):
+    query = f"?token={PASSWORD}"
+    settings = {"ngsi_url": f"http://b/{query}", "alerta_url": "http://a/api", "pgrest_url": f"http://p/{query}"}
+    _, detail = await getattr(service(answering(status_code, []), **settings), probe)()
+    assert PASSWORD not in detail
+
+
+async def test_a_secret_in_the_gateways_and_models_address_stays_out_too():
+    checks = service(answering(200, {"models": []}), ollama_url=f"http://o/?token={PASSWORD}")
+    assert PASSWORD not in (await checks._llm())[1]
+
+
+async def test_a_secret_in_the_callback_stays_out_of_its_check():
+    def broker(request):
+        return httpx.Response(201)
+
+    settings = make_settings(callback_base_url=f"http://x/?token={PASSWORD}", event_webhook_secret="s")
+    watch = MachineWatch(settings, lambda: None, False, transport=httpx.MockTransport(broker))
+    await watch.check()
+    assert PASSWORD not in watch.detail
 
 
 def test_the_rest_of_an_address_stays_as_it_is():

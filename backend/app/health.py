@@ -271,10 +271,10 @@ class HealthService:
         async with httpx.AsyncClient(timeout=self._s.health_timeout_s, transport=self._transport) as client:
             response = await client.get(f"{self._s.ngsi_url.rstrip('/')}/ngsi-ld/v1/types", headers=headers)
         if response.status_code in (401, 403):
-            return "error", f"{self._s.ngsi_url} refused the token (HTTP {response.status_code})"
+            return "error", f"{mask_url(self._s.ngsi_url)} refused the token (HTTP {response.status_code})"
         if response.status_code != 200:
-            return "error", f"{self._s.ngsi_url} answered HTTP {response.status_code}"
-        return "ok", f"Reachable at {self._s.ngsi_url}"
+            return "error", f"{mask_url(self._s.ngsi_url)} answered HTTP {response.status_code}"
+        return "ok", f"Reachable at {mask_url(self._s.ngsi_url)}"
 
     async def _llm(self) -> tuple[Status, str]:
         s = self._s
@@ -297,7 +297,7 @@ class HealthService:
             return "error", f"Alerta refused the key (HTTP {response.status_code})"
         if response.status_code != 200:
             return "error", f"Alerta answered HTTP {response.status_code}"
-        return "ok", f"Reachable at {s.alerta_url}"
+        return "ok", f"Reachable at {mask_url(s.alerta_url)}"
 
     async def _mqtt(self) -> tuple[Status, str]:
         s = self._s
@@ -336,7 +336,7 @@ class HealthService:
             return "error", f"PostgREST refused the token (HTTP {response.status_code})"
         if response.status_code != 200:
             return "error", f"PostgREST answered HTTP {response.status_code}"
-        return "ok", f"Reachable at {s.pgrest_url}; table {table} can be read"
+        return "ok", f"Reachable at {mask_url(s.pgrest_url)}; table {table} can be read"
 
     async def _fuseki(self) -> tuple[Status, str]:
         s = self._s
@@ -360,7 +360,7 @@ class HealthService:
         if self._gateway is None or not self._s.gateway_url:
             return "ok", NO_DATASPACE
         await self._gateway.healthy()
-        return "ok", f"Reachable at {self._s.gateway_url}"
+        return "ok", f"Reachable at {mask_url(self._s.gateway_url)}"
 
     async def _connector_check(self) -> tuple[Status, str]:
         if self._gateway is None or not self._s.gateway_url:
@@ -398,8 +398,11 @@ class HealthService:
             response.raise_for_status()
             names = {m.get("name", "") for m in response.json().get("models", [])}
             if model in names or f"{model}:latest" in names:
-                return "ok", f"{label} at {s.ollama_url}, model {model} available"
-            return "degraded", f"{label} at {s.ollama_url} is reachable, but model {model} is not downloaded yet"
+                return "ok", f"{label} at {mask_url(s.ollama_url)}, model {model} available"
+            return (
+                "degraded",
+                f"{label} at {mask_url(s.ollama_url)} is reachable, but model {model} is not downloaded yet",
+            )
         if s.llm_provider == "anthropic":
             # The list is not searched for the model: it is paged, and aliases aren't listed.
             # A wrong model name shows when the first request fails.

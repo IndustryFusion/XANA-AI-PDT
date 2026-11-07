@@ -31,6 +31,7 @@ from typing import Any
 import httpx
 
 from app.config import Settings
+from app.redact import mask_url
 
 log = logging.getLogger(__name__)
 
@@ -156,7 +157,7 @@ class MachineWatch:
         if _notification_status(response) == "failed":
             self._set(
                 DELIVERY_FAILING,
-                f"The context broker reports that it can't deliver to {self._callback()}. "
+                f"The context broker reports that it can't deliver to {mask_url(self._callback())}. "
                 "Check that it can reach this address.",
             )
         else:
@@ -170,7 +171,7 @@ class MachineWatch:
                 "same context is also subscribed in its default tenant, so machine events may not arrive.",
             )
         else:
-            self._set(ACTIVE, f"Subscribed; notifications go to {self._callback()}.")
+            self._set(ACTIVE, f"Subscribed; notifications go to {mask_url(self._callback())}.")
 
     def _refused(self, status: int) -> None:
         self._ensured = False
