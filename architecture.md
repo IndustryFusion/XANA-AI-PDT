@@ -88,7 +88,7 @@ Built with React 18 + Vite in JavaScript. Structured views, no chat interface. E
 
 **Data layer.** Screens obtain data only through the UI data interface (`src/data`), one module per area: session, runs, incidents, entities, alerts, dataspace, system health, and the optional knowledge base. A data source implements the interface and is selected with `VITE_DATA_SOURCE`:
 - `mock` (default): runs in the browser with deterministic seeded data, a simulated run engine, and development controls for per-area latency and failure. No backend is needed.
-- `backend`: the operations the backend provides (session, runs and their stream, incident history, system health) over REST and WebSocket, with key mapping (snake_case ↔ camelCase), error mapping and stream reconnection. Every other operation is delegated to the mock source (`{ ...mock[area], ...backend[area] }`), so the whole UI stays usable while later phases bring their backends. Attaching it changed no screen.
+- `backend`: the operations the backend provides (session, runs and their stream, incident history, the Data Explorer's entities, system health) over REST and WebSocket, with key mapping (snake_case ↔ camelCase), error mapping and stream reconnection. Every other operation is delegated to the mock source (`{ ...mock[area], ...backend[area] }`), so the whole UI stays usable while later phases bring their backends. Attaching it changed no screen.
 
 The interface is documented in `frontend/docs/data-interface.md`. Lint rules forbid screens from importing a data source or doing network I/O directly.
 
@@ -167,6 +167,7 @@ Fields are snake_case. A refused request answers `{"error": {"kind", "message"}}
 | `/api/agent/escalate/{run_id}` | POST | *Later phase.* Escalate to machine builder via IFF Dataspace |
 | `/api/agent/mb-feedback/{run_id}` | POST | *Later phase.* Process a machine builder reply (called by inbox poller) |
 | `/api/agent/operator-approve/{run_id}` | POST | *Later phase.* Operator approves or declines an out-of-policy data request |
+| `/api/ngsi/*` | — | Data Explorer: query, edit, import, history and time-shift, on `NGSI_URL` and `PGREST_URL` only. For operators; the workflow has no path to it |
 | `/api/gateway/*` | — | *Later phase.* Gateway token management and peer/capability inspection |
 | `/api/ifric/*` | — | *Later phase.* IFRIC registry token management and factory identity |
 | `/events/ngsi` | POST | *Later phase.* Webhook for Scorpio NGSI-LD notifications |
@@ -396,12 +397,15 @@ If the memory database is not reachable, runs cannot be stored: starting a run i
 | **Scorpio (NGSI-LD)** | Live machine context, relationships | HTTP via NGSI-LD v1 API |
 | **TimescaleDB** | Attribute history (signals and telemetry) | SQL via psycopg 3; `time_bucket` for aggregation |
 | **PostgreSQL** | AI memory: incidents + agent traces | SQL via psycopg 3 |
+| **PostgREST** | The Data Explorer's attribute history and time-shift, on TimescaleDB | HTTP with the operator's token; the agent uses SQL |
 | **Alerta** | Active alerts and alarm history | HTTP via Alerta REST API (`Authorization: Key`) |
 
 The backend reads attribute history in the layout the IFF Digital Twin platform writes: one row per observed attribute value, in a table named by `TIMESCALE_TABLE` (default `attributes`):
 ```sql
-attributes ("observedAt" TIMESTAMPTZ, "entityId" TEXT, "attributeId" TEXT, "attributeType" TEXT,
-            "nodeType" TEXT, "value" TEXT, "valueType" TEXT, "datasetId" TEXT, "deleted" BOOLEAN)
+attributes ("id" TEXT, "parentId" TEXT, "observedAt" TIMESTAMPTZ, "modifiedAt" TIMESTAMPTZ, "entityId" TEXT,
+            "attributeId" TEXT, "attributeType" TEXT, "datasetId" TEXT, "nodeType" TEXT, "value" TEXT,
+            "valueType" TEXT, "unitCode" TEXT, "lang" TEXT, "deleted" BOOLEAN)
+entities   ("id" TEXT, "observedAt" TIMESTAMPTZ, "modifiedAt" TIMESTAMPTZ, "type" TEXT, "deleted" BOOLEAN)
 ```
 The local environment creates this table and fills it with 24 hours of sample history ending at load time.
 
@@ -440,7 +444,10 @@ NGSI_URL=http://scorpio.iff-core.svc.cluster.local:9090
 TIMESCALE_DB_URL=postgresql://...
 POSTGRES_MEMORY_URL=postgresql://...
 TIMESCALE_TABLE=attributes           # attribute history table
+TIMESCALE_ENTITY_TABLE=entities      # entity lifecycle table
+PGREST_URL=http://pgrest:3000        # the Data Explorer's history
 NGSI_TENANT=                         # optional NGSILD-Tenant
+NGSI_CONTEXT_URL=                    # Link context; short names need it on data with full IRIs
 ALERTA_URL=http://...
 ALERTA_API_KEY=...                   # secret
 

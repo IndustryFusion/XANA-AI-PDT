@@ -36,7 +36,7 @@ from xana_agent.schemas import (
     ValidationPlan,
 )
 from xana_agent.scripted import ScriptedChatModel, register_example
-from xana_agent.sources.base import Bucket, SignalHistory, SourceUnavailable, trend
+from xana_agent.sources.base import AttributeChange, Bucket, LifecycleEvent, SignalHistory, SourceUnavailable, trend
 from xana_agent.sources.ngsi import relationship_objects
 from xana_agent.steps import normalised
 
@@ -194,6 +194,8 @@ class FakeHistorySource:
         self.series = series
         self.fail = fail
         self.calls: list[tuple[str, Any]] = []
+        self.attribute_changes: list[AttributeChange] = []
+        self.lifecycle_events: list[LifecycleEvent] = []
 
     def _check(self, method: str, args: Any) -> None:
         self.calls.append((method, args))
@@ -223,6 +225,14 @@ class FakeHistorySource:
                 )
             )
         return result
+
+    async def changes(self, entity_ids: list[str], window: timedelta, limit: int = 50) -> list[AttributeChange]:
+        self._check("changes", tuple(entity_ids))
+        return self.attribute_changes[:limit]
+
+    async def lifecycle(self, entity_ids: list[str], window: timedelta, limit: int = 50) -> list[LifecycleEvent]:
+        self._check("lifecycle", tuple(entity_ids))
+        return self.lifecycle_events[:limit]
 
     async def metrics(self, entity_id: str, attribute: str, window: timedelta, bucket: timedelta) -> list[Bucket]:
         self._check("metrics", (entity_id, attribute))

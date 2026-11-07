@@ -107,3 +107,21 @@ async def test_only_get_requests_are_sent():
     ngsi = source(broker)
     await ngsi.related(await ngsi.get(MACHINE_ID), limit=19)
     assert {r.method for r in broker.requests} == {"GET"}
+
+
+async def test_context_goes_in_a_link_header_on_every_read():
+    broker = StubBroker(sample_entities())
+    source = NgsiContextSource(
+        "http://broker.test", context_url="https://contexts.example/c.jsonld", transport=httpx.MockTransport(broker)
+    )
+    machine = await source.get(MACHINE_ID)
+    await source.related(machine, 5)
+    assert broker.requests
+    assert all("https://contexts.example/c.jsonld" in r.headers["Link"] for r in broker.requests)
+
+
+async def test_only_reads_are_sent_with_a_context():
+    broker = StubBroker(sample_entities())
+    source = NgsiContextSource("http://broker.test", context_url="u:c", transport=httpx.MockTransport(broker))
+    await source.related(await source.get(MACHINE_ID), 5)
+    assert {r.method for r in broker.requests} == {"GET"}

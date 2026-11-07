@@ -214,14 +214,20 @@ describe('operations served by the backend', () => {
 })
 
 describe('delegation to the mock', () => {
-  test('the backend serves runs, incidents and health; the mock serves everything else', () => {
+  test('the backend serves runs, incidents, entities and health; the mock serves everything else', () => {
     expect(backend.SERVED).toEqual({
       session: ['getAuthConfig', 'getSession', 'signIn', 'signOut'],
       runs: ['listActiveRuns', 'startRun', 'getRun', 'subscribeRun', 'clarify', 'confirmResolution', 'escalationPreflight', 'reopenRun', 'stopRun', 'archiveRun'],
       incidents: ['listIncidents', 'getIncident', 'reopenIncident'],
+      entities: [
+        'getStats', 'listTypes', 'listAttributes', 'queryEntities', 'getEntity', 'updateAttributes', 'appendAttributes',
+        'deleteAttribute', 'deleteEntity', 'importEntities', 'fetchImportDocument', 'deleteByTypes',
+        'getAttributeHistory', 'getAttributeStatus', 'listTypesAt', 'queryEntitiesAt',
+      ],
       system: ['getHealth'],
     })
-    for (const name of ['entities', 'alerts', 'dataspace']) expect(backend[name]).toEqual(mock[name])
+    for (const name of ['alerts', 'dataspace']) expect(backend[name]).toEqual(mock[name])
+    expect(backend.entities.getValueHints).toBe(mock.entities.getValueHints)
     expect(backend.session.getFactory).toBe(mock.session.getFactory)
     expect(backend.session.signIn).not.toBe(mock.session.signIn)
     expect(backend.info.signInHint).toBeUndefined()
@@ -234,9 +240,53 @@ describe('delegation to the mock', () => {
   test('delegated operations work without a backend', async () => {
     mock.store.reset()
     fakeFetch({})
-    const stats = await bindArea('entities', backend.entities).getStats()
+    const stats = await bindArea('alerts', backend.alerts).countAlerts({})
     expect(stats).toBeTruthy()
     expect(fetch).not.toHaveBeenCalled()
+  })
+})
+
+describe('entities', () => {
+  const entities = bindArea('entities', backend.entities)
+
+  test('attribute names reach the screen exactly as the broker gave them', async () => {
+    const entity = { id: 'urn:m', type: 'T', max_temp: { type: 'Property', value: 1, sub_attr: { type: 'Property', value: 2 } }, 'https://x.example/a_b': { type: 'Property', value: 3 } }
+    fakeFetch({ 'GET /api/ngsi/entities/urn%3Am': { body: entity }, 'GET /api/ngsi/entities': { body: [entity] } })
+    expect(await entities.getEntity('urn:m')).toEqual(entity)
+    expect(await entities.queryEntities({ type: 'T' })).toEqual([entity])
+  })
+
+  test('edits send attribute names unchanged, to the entity encoded as one path segment', async () => {
+    const fn = fakeFetch({ 'PATCH /api/ngsi/entities/urn%3Am%2Fx/attrs': { status: 204 } })
+    await entities.updateAttributes('urn:m/x', { maxTemp_a: { value: 1 } })
+    expect(fn.calls[0].body).toEqual({ maxTemp_a: { value: 1 } })
+  })
+
+  test('query parameters', async () => {
+    const fn = fakeFetch({ 'GET /api/ngsi/entities': { body: [] }, 'GET /api/ngsi/timeshift/entities': { body: [] } })
+    await entities.queryEntities({ type: 'T', idPattern: 'urn:.*', q: 'a==1', limit: 5 })
+    expect(new URLSearchParams(fn.calls[0].search).get('id_pattern')).toBe('urn:.*')
+    await entities.queryEntitiesAt('2026-01-01T00:00:00Z', { type: 'T' })
+    expect(new URLSearchParams(fn.calls[1].search).get('at')).toBe('2026-01-01T00:00:00Z')
+  })
+
+  test('deleting names the attribute as a parameter, as it may be an IRI', async () => {
+    const fn = fakeFetch({ 'DELETE /api/ngsi/entities/urn%3Am/attrs': { status: 204 } })
+    await entities.deleteAttribute('urn:m', 'https://x.example/a', { subAttribute: 'https://x.example/b' })
+    const params = new URLSearchParams(fn.calls[0].search)
+    expect(params.get('name')).toBe('https://x.example/a')
+    expect(params.get('sub_attribute')).toBe('https://x.example/b')
+  })
+
+  test('a partial import (207) is a result, not an error', async () => {
+    const rows = [{ id: 'urn:a', result: 'failed', reason: 'no' }, { id: 'urn:b', result: 'created', reason: null }]
+    fakeFetch({ 'POST /api/ngsi/import': { status: 207, body: rows } })
+    expect(await entities.importEntities([{}, {}])).toEqual(rows)
+  })
+
+  test('a stopped service keeps the backend kind and message', async () => {
+    fakeFetch({ 'GET /api/ngsi/history': { status: 502, body: { error: { kind: 'unavailable', message: 'The history service (PostgREST) cannot be reached (ConnectError).' } } } })
+    await expect(entities.getAttributeHistory('urn:a', 'b')).rejects.toMatchObject({ kind: 'unavailable', message: expect.stringContaining('PostgREST') })
   })
 })
 

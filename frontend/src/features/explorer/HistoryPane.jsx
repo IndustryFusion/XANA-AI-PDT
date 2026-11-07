@@ -18,6 +18,7 @@ import { lazy, Suspense, useId, useMemo, useState } from 'react'
 import { useData } from '../../data/useData'
 import { Button, DataView, EmptyState, LoadingState } from '../../ui/components'
 import { formatTime } from '../../ui/format'
+import { statusOf } from './attributes'
 
 // The chart library is loaded only when a history chart is shown.
 const HistoryChart = lazy(() => import('./HistoryChart'))
@@ -51,6 +52,8 @@ export default function HistoryPane({ entityId, name, unit, headingLevel = 3, on
   }, [range, applied])
   const validCustom = range !== 'custom' || (!Number.isNaN(Date.parse(custom.from)) && !Number.isNaN(Date.parse(custom.to)) && Date.parse(custom.from) < Date.parse(custom.to))
   const result = useData('entities', 'getAttributeHistory', [entityId, name, span])
+  const states = useData('entities', 'getAttributeStatus', [entityId])
+  const state = statusOf(states.data, name)
 
   return (
     <section className="card history" aria-labelledby={ids.title}>
@@ -81,6 +84,7 @@ export default function HistoryPane({ entityId, name, unit, headingLevel = 3, on
           )}
         </div>
         {!validCustom && <p className="field__error">The start of the range must be before its end.</p>}
+        {state?.deleted && <p className="muted" role="status">This attribute was deleted on <time dateTime={state.observedAt}>{formatTime(state.observedAt)}</time>. Its earlier values are shown below.</p>}
         <DataView
           result={result}
           errorTitle="Could not load the history"
@@ -96,6 +100,7 @@ export default function HistoryPane({ entityId, name, unit, headingLevel = 3, on
                     <HistoryChart points={points} name={name} unit={unit} />
                   </Suspense>
                 )}
+                {points.limited?.newest && <p className="muted" role="status">Only the newest {points.limited.newest} values are shown. Choose a shorter time range to see older ones.</p>}
                 <div className="table-wrap history__table" tabIndex={0} role="region" aria-label={`Values of ${name}`}>
                   <table className="table">
                     <caption>
@@ -104,8 +109,8 @@ export default function HistoryPane({ entityId, name, unit, headingLevel = 3, on
                     </caption>
                     <thead><tr><th scope="col">Time</th><th scope="col">Value{unit ? ` (${unit})` : ''}</th></tr></thead>
                     <tbody>
-                      {[...points].reverse().map((p) => (
-                        <tr key={p.at}><td><time dateTime={p.at}>{formatTime(p.at)}</time></td><td>{String(p.value)}</td></tr>
+                      {[...points].reverse().map((p, i) => (
+                        <tr key={`${p.at}-${i}`}><td><time dateTime={p.at}>{formatTime(p.at)}</time></td><td>{String(p.value)}</td></tr>
                       ))}
                     </tbody>
                   </table>

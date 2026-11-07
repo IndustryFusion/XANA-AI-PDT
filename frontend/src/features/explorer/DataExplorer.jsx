@@ -49,9 +49,15 @@ function EntityList({ result, query, standalone, renderNode }) {
       </DataView>
     )
   }
+  const limited = result.data?.limited
   return (
     <Card title="Entities" className="entity-list">
       <div className="stack">
+        {limited && (
+          <p className="muted entity-list__count" role="status">
+            Only the first {limited.scanned}{limited.total ? ` of ${limited.total}` : ''} entities were searched, so there may be more matches. Narrow the query by type or ID.
+          </p>
+        )}
         {standalone && (
           <div className="entity-list__opened stack">
             <p className="muted entity-list__count">Opened entity, not among the query results:</p>

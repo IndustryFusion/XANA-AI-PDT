@@ -18,7 +18,11 @@ import { test, expect } from '@playwright/test'
 import { presetControls, setControls } from './helpers'
 import { machineStatusAt, STATUS_STEP_MS } from '../src/data/sources/mock/history.js'
 
+// The mock's values follow the clock: a fixed moment keeps these tests the same at any time of day.
+const NOW = Date.parse('2026-11-04T10:02:03Z')
+
 test.beforeEach(async ({ page }) => {
+  await page.clock.setFixedTime(NOW)
   await presetControls(page, { authEnabled: false })
 })
 
@@ -28,7 +32,7 @@ const node = (page, id) => page.locator(`[data-entity="${id}"]`).first()
 const attribute = (scope, name) => scope.locator(`[data-attribute="${name}"]`).first()
 const localInput = (ms) => new Date(ms - new Date(ms).getTimezoneOffset() * 60_000).toISOString().slice(0, 16)
 const momentWithStatusOtherThan = (id, status) => {
-  const start = (Math.floor((Date.now() - 3 * 24 * 3600_000) / STATUS_STEP_MS) + 0.5) * STATUS_STEP_MS
+  const start = (Math.floor((NOW - 3 * 24 * 3600_000) / STATUS_STEP_MS) + 0.5) * STATUS_STEP_MS
   for (let t = start; ; t -= STATUS_STEP_MS) if (machineStatusAt(id, t) !== status) return t
 }
 const SENSOR = 'urn:ngsi-ld:Sensor:chiller-01-flow'
@@ -87,22 +91,23 @@ test('edit in place with suggestions, cancel with Escape, then view the past and
   await page.goto('/explorer/urn%3Angsi-ld%3AMachine%3Apress-brake-01?type=Machine')
   const status = attribute(node(page, MACHINE), 'status')
   await status.getByRole('button', { name: /^Value of status:/ }).click()
-  await status.getByRole('listbox', { name: 'Suggested values' }).getByRole('option', { name: 'maintenance' }).click()
-  await expect(status.getByRole('combobox', { name: 'New value of status' })).toHaveValue('maintenance')
+  // `fault` is never a machine's status from the history, so it is always among the suggestions.
+  await status.getByRole('listbox', { name: 'Suggested values' }).getByRole('option', { name: 'fault' }).click()
+  await expect(status.getByRole('combobox', { name: 'New value of status' })).toHaveValue('fault')
   await page.keyboard.press('Enter')
-  await expect(status).toContainText('"maintenance"')
+  await expect(status).toContainText('"fault"')
   await expect(status.getByRole('combobox')).toHaveCount(0)
 
   await status.getByRole('button', { name: 'Edit status' }).click()
-  await status.getByRole('combobox').fill('fault')
+  await status.getByRole('combobox').fill('setup')
   await page.keyboard.press('Escape')
   await expect(status.getByRole('combobox')).toHaveCount(0)
-  await expect(status).toContainText('"maintenance"')
+  await expect(status).toContainText('"fault"')
   await page.reload()
-  await expect(attribute(node(page, MACHINE), 'status')).toContainText('"maintenance"')
+  await expect(attribute(node(page, MACHINE), 'status')).toContainText('"fault"')
 
   // A moment in the past, mid-way through a recorded period, when the machine had another status.
-  const past = momentWithStatusOtherThan(MACHINE, 'maintenance')
+  const past = momentWithStatusOtherThan(MACHINE, 'fault')
   await page.getByLabel('View as of').fill(localInput(past))
   await page.getByRole('button', { name: 'Show', exact: true }).click()
   const banner = page.getByRole('region', { name: 'Historical view' })
@@ -110,13 +115,13 @@ test('edit in place with suggestions, cancel with Escape, then view the past and
   await expect(page).toHaveURL(/[?&]at=/)
   await expect(entities(page).getByRole('button', { name: 'Press brake 01', exact: true })).toHaveAttribute('aria-expanded', 'true')
   await expect(attribute(node(page, MACHINE), 'status')).toContainText(`"${machineStatusAt(MACHINE, past)}"`)
-  await expect(attribute(node(page, MACHINE), 'status')).not.toContainText('maintenance')
+  await expect(attribute(node(page, MACHINE), 'status')).not.toContainText('fault')
   await expect(page.getByRole('button', { name: 'Edit status' })).toHaveCount(0)
   await expect(page.getByLabel('Entity type').locator('option', { hasText: 'Camera' })).toHaveCount(1)
 
   await banner.getByRole('button', { name: 'Return to the present' }).click()
   await expect(banner).toHaveCount(0)
-  await expect(attribute(node(page, MACHINE), 'status')).toContainText('maintenance')
+  await expect(attribute(node(page, MACHINE), 'status')).toContainText('fault')
   await expect(page.getByLabel('Entity type').locator('option', { hasText: 'Camera' })).toHaveCount(0)
 })
 

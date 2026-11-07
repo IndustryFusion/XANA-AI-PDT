@@ -31,6 +31,7 @@ dependencies = [
   "pydantic-settings>=2.4",
   "httpx>=0.27",
   "psycopg[binary,pool]>=3.2",
+  "google-re2>=1.1",
 ]
 
 [project.optional-dependencies]
@@ -51,7 +52,10 @@ sample_data = ["*.json"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests", "agent/tests"]
-markers = ["db: needs PostgreSQL with TimescaleDB (TEST_DATABASE_URL)"]
+markers = [
+  "db: needs PostgreSQL with TimescaleDB (TEST_DATABASE_URL)",
+  "services: needs real platform services, each named by its own TEST_*_URL",
+]
 
 [tool.ruff]
 line-length = 120

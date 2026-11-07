@@ -18,7 +18,7 @@ import { areas } from '../../src/data'
 import { store } from '../../src/data/sources/mock'
 import { writeControls } from '../../src/data/sources/mock/controls'
 import { LIVE_UPDATE_MS, SAMPLE_DOCUMENTS } from '../../src/data/sources/mock/entitiesArea'
-import { parseQuery } from '../../src/data/sources/mock/ngsiQuery'
+import { matches, parseQuery } from '../../src/data/sources/mock/ngsiQuery'
 import { resetMock } from '../helpers'
 
 const { entities } = areas
@@ -245,5 +245,43 @@ describe('live updates', () => {
     entities.subscribeEntities({}, (e) => later.push(e))
     await vi.advanceTimersByTimeAsync(10)
     expect(later[0]).toMatchObject({ type: 'error' })
+  })
+})
+
+describe('attribute status and the search limit', () => {
+  test('a deleted attribute is reported with when it went', async () => {
+    await entities.deleteAttribute(SENSOR, 'value')
+    const states = await entities.getAttributeStatus(SENSOR)
+    expect(states.value.deleted).toBe(true)
+    expect(Date.parse(states.value.observedAt)).not.toBeNaN()
+    expect(await entities.getAttributeStatus('urn:ngsi-ld:Machine:nope')).toEqual({})
+  })
+
+  test('a capped search and a capped history say so', async () => {
+    writeControls({ searchCap: 2 })
+    const found = await entities.queryEntities({ type: 'Sensor', q: 'value>-1000', limit: 1000 })
+    expect(found.limited).toMatchObject({ scanned: 2 })
+    expect(found.limited.total).toBeGreaterThan(2)
+    const points = await entities.getAttributeHistory(SENSOR, 'value', { from: new Date(Date.now() - 3600_000 * 24).toISOString() })
+    expect(points).toHaveLength(2)
+    expect(points.limited).toEqual({ newest: 2 })
+    writeControls({ searchCap: null })
+  })
+})
+
+describe('patterns are the text as written', () => {
+  test.each([
+    ['serial~=20', 'M20-A', true],
+    ['serial!~=20', 'M20-A', false],
+    ['serial~=20.0', 'M20-A', false],
+    ['serial~=true', 'not-true-1', true],
+    ['serial!~=true', 'M20-A', true],
+    ['serial~="M","Z"', 'Z-1', true],
+    ['serial~="M","Z"', 'A-1', false],
+    ['serial!~="M","Z"', 'Z-1', false],
+    ['serial!~="M","Z"', 'A-1', true],
+    ['serial~=1..5', '11115', true],
+  ])('%s on %s', (q, value, found) => {
+    expect(matches({ id: 'urn:e', type: 'T', serial: { type: 'Property', value } }, parseQuery(q))).toBe(found)
   })
 })

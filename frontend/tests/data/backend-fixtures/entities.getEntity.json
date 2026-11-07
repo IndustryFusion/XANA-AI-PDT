@@ -1,0 +1,46 @@
+{
+  "method": "GET",
+  "path": "/api/ngsi/entities/urn%3Angsi-ld%3AMachine%3Alaser-cutter-01",
+  "status": 200,
+  "body": {
+    "id": "urn:ngsi-ld:Machine:laser-cutter-01",
+    "type": "Machine",
+    "configuration": {
+      "type": "JsonProperty",
+      "json": {
+        "firmware": "5.4.2",
+        "maxPowerKw": 6,
+        "assistGases": [
+          "O2",
+          "N2"
+        ],
+        "nozzleChangerSlots": 8
+      }
+    },
+    "machineType": {
+      "type": "Property",
+      "value": "LaserCutter"
+    },
+    "manufacturer": {
+      "type": "Property",
+      "value": "Photonic Cutting Systems"
+    },
+    "name": {
+      "type": "Property",
+      "value": "Laser cutter 01"
+    },
+    "operatingMode": {
+      "type": "VocabProperty",
+      "vocab": "automatic"
+    },
+    "partOf": {
+      "type": "Relationship",
+      "object": "urn:ngsi-ld:ProductionLine:line-a"
+    },
+    "status": {
+      "type": "Property",
+      "value": "running",
+      "observedAt": "2026-11-02T12:00:00.000Z"
+    }
+  }
+}

@@ -21,8 +21,12 @@
 #   docker compose -f backend/compose.yaml up --build
 #   LLM_PROVIDER=scripted docker compose -f backend/compose.yaml up --build   (no model download)
 #
+# Optional services, each under a profile (see backend/README.md):
+#   --profile auth      Keycloak
+#   --profile history   PostgREST, for the explorer's history and time-shift
+#
 # Host ports can be changed with XANA_DB_PORT, XANA_BROKER_PORT, XANA_OLLAMA_PORT,
-# XANA_KEYCLOAK_PORT and XANA_BACKEND_PORT.
+# XANA_KEYCLOAK_PORT, XANA_PGREST_PORT and XANA_BACKEND_PORT.
 
 name: xana-ai-pdt
 
@@ -45,6 +49,9 @@ x-backend-env: &backend-env
   DECISION_CONFIDENCE_THRESHOLD: ${DECISION_CONFIDENCE_THRESHOLD:-0.9}
   MAX_CONCURRENT_ROUNDS: ${MAX_CONCURRENT_ROUNDS:-2}
   NGSI_URL: http://broker:9090
+  NGSI_CONTEXT_URL: ${NGSI_CONTEXT_URL:-}
+  NGSI_ALLOWED_CONTEXTS: ${NGSI_ALLOWED_CONTEXTS:-}
+  PGREST_URL: http://pgrest:3000
   TIMESCALE_DB_URL: postgresql://xana@db:5432/tsdb
   POSTGRES_MEMORY_URL: postgresql://xana@db:5432/memory
   LOG_LEVEL: ${LOG_LEVEL:-INFO}
@@ -79,6 +86,48 @@ services:
       - ./keycloak:/opt/keycloak/data/import:ro
     ports:
       - "127.0.0.1:${XANA_KEYCLOAK_PORT:-8081}:8080"
+
+  # Fetches Keycloak's keys when sign-in is on, as the platform does. Without sign-in nothing
+  # sends a token, so any key will do. A secret of its own for every start, in a volume.
+  pgrest-keys:
+    image: busybox:1.36
+    profiles: [history]
+    environment:
+      KEYCLOAK_URL: ${KEYCLOAK_URL:-}
+      KEYCLOAK_REALM: ${KEYCLOAK_REALM:-iff}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        if [ -z "$$KEYCLOAK_URL" ]; then
+          head -c 48 /dev/urandom | base64 | tr -d '\n' > /keys/jwk.json
+          exit 0
+        fi
+        i=0
+        until wget -q -O /keys/jwk.json "$$KEYCLOAK_URL/realms/$$KEYCLOAK_REALM/protocol/openid-connect/certs"; do
+          i=$$((i + 1)); [ "$$i" -lt 60 ] || exit 1; sleep 3
+        done
+    volumes:
+      - pgrest-keys:/keys
+
+  # The attribute history over HTTP, on the platform's version. An empty XANA_PGREST_ANON_ROLE makes
+  # it refuse requests without a token, as on the platform.
+  pgrest:
+    image: postgrest/postgrest:v12.0.0
+    profiles: [history]
+    environment:
+      PGRST_DB_URI: postgres://xana@db:5432/tsdb
+      PGRST_DB_SCHEMA: public
+      PGRST_DB_ANON_ROLE: ${XANA_PGREST_ANON_ROLE-dbreader}
+      PGRST_JWT_SECRET: "@/keys/jwk.json"
+    volumes:
+      - pgrest-keys:/keys:ro
+    depends_on:
+      db:
+        condition: service_healthy
+      pgrest-keys:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:${XANA_PGREST_PORT:-3000}:3000"
 
   broker:
     image: scorpiobroker/all-in-one-runner:java-latest
@@ -145,3 +194,4 @@ services:
 volumes:
   db-data:
   ollama-models:
+  pgrest-keys:
