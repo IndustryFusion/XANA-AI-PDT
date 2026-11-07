@@ -39,10 +39,10 @@
 
 ## 7. Review follow-ups
 
-- [ ] 7.1 Close a client that stopped reading, and bound the shutdown; verify with a real server and a stalled real socket that it is closed, others get every change, and the subscription goes
-- [ ] 7.2 Leave nothing after a stop during a create, retry a failed sweep, and wait for sign-in after a sign-out; verify with tests and a real broker
-- [ ] 7.3 Treat a refused topic as refused; verify with a real EMQX that denies it
-- [ ] 7.4 Say what health knows about delivery; verify with a wrong notify address on a real broker
-- [ ] 7.5 Compare notified values in the UI, and read again after a lost stream; verify in a browser against real services
-- [ ] 7.6 Refuse other origins; verify at the route, through the development server, and through the frontend's proxy in the `Deployment` workflow
-- [ ] 7.7 Add `tests/test_live_updates_real.py` for rotation, broker restart and role refusal, with a broker that checks like the platform's; verify it runs in CI
+- [x] 7.1 Close a client that stopped reading, and bound the shutdown; verify with a real server and a stalled real socket that it is closed, others get every change, and the subscription goes
+- [x] 7.2 Leave nothing after a stop during a create, retry a failed sweep, and wait for sign-in after a sign-out; verify with tests and a real broker
+- [x] 7.3 Treat a refused topic as refused; verify with a real EMQX that denies it
+- [x] 7.4 Say what health knows about delivery; verify with a wrong notify address on a real broker
+- [x] 7.5 Compare notified values in the UI, and read again after a lost stream; verify in a browser against real services
+- [x] 7.6 Refuse other origins; verify at the route, through the development server, and through the frontend's proxy in the `Deployment` workflow
+- [x] 7.7 Add `tests/test_live_updates_real.py` for rotation, broker restart and role refusal, with a broker that checks like the platform's; verify it runs in CI
