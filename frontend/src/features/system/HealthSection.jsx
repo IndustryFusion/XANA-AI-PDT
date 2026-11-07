@@ -74,7 +74,11 @@ export default function HealthSection({ round, onCheckAgain }) {
                       <th scope="row">{c.label}</th>
                       <td><StatusBadge kind="health" value={c.status} /></td>
                       <td>{c.latencyMs != null ? `${c.latencyMs} ms` : <span className="muted">—</span>}</td>
-                      <td className="health-table__detail">{c.detail ?? <span className="muted">—</span>}</td>
+                      <td className="health-table__detail">
+                        {c.detail ?? <span className="muted">—</span>}
+                        {c.probe && <div className="muted mono" data-testid="check-probe">{c.probe}</div>}
+                        {c.hint && c.status !== 'ok' && <div className="muted" data-testid="check-hint">{c.hint}</div>}
+                      </td>
                     </tr>
                   ))}
                 </tbody>

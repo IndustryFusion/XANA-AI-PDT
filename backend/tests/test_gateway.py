@@ -627,23 +627,23 @@ async def health_of(space, conn):
 async def test_health_when_up():
     space, conn, _ = await connected_client()
     checks = await health_of(space, conn)
-    assert checks["gateway"]["status"] == "ok" and checks["connector"]["status"] == "ok"
-    assert "can't be checked" in checks["connector"]["detail"]
+    assert checks["gateway"]["status"] == "ok" and checks["dataspace_connector"]["status"] == "ok"
+    assert "can't be checked" in checks["dataspace_connector"]["detail"]
     await conn.close()
 
 
 async def test_health_when_not_connected():
     space = Dataspace()
     checks = await health_of(space, connection(space))
-    assert checks["gateway"]["status"] == "ok" and checks["connector"]["status"] == "degraded"
-    assert "Not connected" in checks["connector"]["detail"]
+    assert checks["gateway"]["status"] == "ok" and checks["dataspace_connector"]["status"] == "degraded"
+    assert "Not connected" in checks["dataspace_connector"]["detail"]
 
 
 async def test_health_when_the_gateway_is_down():
     space, conn, _ = await connected_client()
     space.gateway_down = True
     checks = await health_of(space, conn)
-    assert checks["gateway"]["status"] == "error" and checks["connector"]["status"] == "error"
+    assert checks["gateway"]["status"] == "error" and checks["dataspace_connector"]["status"] == "error"
     await conn.close()
 
 
@@ -651,7 +651,7 @@ async def test_health_when_the_adapter_fails():
     space, conn, _ = await connected_client()
     space.status_for["GET /capabilities/requests"] = 503
     checks = await health_of(space, conn)
-    assert checks["gateway"]["status"] == "ok" and checks["connector"]["status"] == "error"
+    assert checks["gateway"]["status"] == "ok" and checks["dataspace_connector"]["status"] == "error"
     await conn.close()
 
 
@@ -662,7 +662,7 @@ async def test_no_dataspace_leaves_the_overall_state_alone(caplog):
         report = await service.report(fresh=True)
     checks = {c["id"]: c for c in report["checks"]}
     assert checks["gateway"]["status"] == "ok" and "No dataspace" in checks["gateway"]["detail"]
-    assert checks["connector"]["status"] == "ok"
+    assert checks["dataspace_connector"]["status"] == "ok"
     assert report["overall"] == "error"  # everything else is down, and these two don't hide that
 
 

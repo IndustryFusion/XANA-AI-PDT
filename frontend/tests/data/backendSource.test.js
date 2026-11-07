@@ -15,7 +15,7 @@
 //
 
 import { afterEach, beforeEach, vi } from 'vitest'
-import { bindArea, DataError } from '../../src/data'
+import { bindArea, DataError, OPERATIONS } from '../../src/data'
 import * as backend from '../../src/data/sources/backend'
 import { TIMEOUT_MS } from '../../src/data/sources/backend/http'
 import { fromBackend, outboundFiles, toBackend } from '../../src/data/sources/backend/map'
@@ -213,8 +213,8 @@ describe('operations served by the backend', () => {
   })
 })
 
-describe('delegation to the mock', () => {
-  test('the backend serves runs, incidents, entities and health; the mock serves everything else', () => {
+describe('without the mock', () => {
+  test('what the backend serves', () => {
     expect(backend.SERVED).toEqual({
       session: ['getAuthConfig', 'getSession', 'signIn', 'signOut', 'getFactory'],
       runs: ['listActiveRuns', 'startRun', 'getRun', 'subscribeRun', 'clarify', 'confirmResolution', 'escalationPreflight', 'escalate', 'getOutboxStatus', 'sendConversationAct', 'askAgent', 'approveDataRequest', 'replyToRecommendation', 'refreshConversationStatus', 'recordMachineBuilderClose', 'reopenRun', 'stopRun', 'archiveRun'],
@@ -226,20 +226,42 @@ describe('delegation to the mock', () => {
       ],
       alerts: ['listAlerts', 'countAlerts', 'getAlert', 'applyAlertAction', 'listEnvironments', 'listServices', 'getAlertSettings'],
       dataspace: ['getConnection', 'connect', 'disconnect', 'listPeers', 'getPeerCapabilities', 'listCapabilityRequests', 'decideCapabilityRequest', 'setCapabilityPolicy', 'resolveNames', 'resolveBuilders'],
-      system: ['getHealth'],
+      system: ['getHealth', 'getServiceSettings', 'saveServiceSettings'],
     })
-    expect(backend.session.signIn).not.toBe(mock.session.signIn)
     expect(backend.info.signInHint).toBeUndefined()
-    expect(backend.system.getServiceSettings).toBe(mock.system.getServiceSettings)
+    expect(backend.session.signIn).not.toBe(mock.session.signIn)
     expect(backend.runs.startRun).not.toBe(mock.runs.startRun)
   })
 
-  test('delegated operations work without a backend', async () => {
-    mock.store.reset()
-    fakeFetch({})
-    const settings = await bindArea('system', backend.system).getServiceSettings()
-    expect(settings.length).toBeGreaterThan(0)
-    expect(fetch).not.toHaveBeenCalled()
+  test('every operation of the interface is served, none by the mock', () => {
+    const expected = Object.fromEntries(Object.entries(OPERATIONS).filter(([area]) => area !== 'knowledgeBase').map(([area, ops]) => [area, [...ops].sort()]))
+    const served = Object.fromEntries(Object.entries(backend.SERVED).map(([area, ops]) => [area, [...ops].sort()]))
+    expect(served).toEqual(expected)
+    for (const [area, ops] of Object.entries(backend.SERVED)) {
+      for (const op of ops) expect(backend[area][op], `${area}.${op}`).not.toBe(mock[area][op])
+    }
+  })
+
+  test('nothing in the backend source imports the mock source', () => {
+    const files = Object.entries(import.meta.glob('../../src/data/sources/backend/*.js', { query: '?raw', import: 'default', eager: true }))
+    expect(files.length).toBeGreaterThan(5)
+    for (const [file, text] of files) expect(text, file).not.toMatch(/from\s+['"][^'"]*mock/)
+  })
+
+  test('no knowledge base and no development controls', async () => {
+    expect(backend.knowledgeBase).toBeUndefined()
+    expect(backend.DevControls).toBeUndefined()
+    await expect(bindArea('system', { ...backend.system, getHealth: undefined }).getHealth()).rejects.toMatchObject({ kind: 'unavailable' })
+  })
+
+  test('service settings come from the backend, read-only', async () => {
+    fakeFetch({ 'GET /api/config': { status: 200, body: [{ key: 'context_broker', label: 'Context broker', value: 'http://b', deployment_value: 'http://b', changed: false, editable: false }] } })
+    const system = bindArea('system', backend.system)
+    const [setting] = await system.getServiceSettings()
+    expect(setting).toMatchObject({ key: 'context_broker', deploymentValue: 'http://b', editable: false })
+    expect(fetch).toHaveBeenCalledTimes(1)
+    await expect(system.saveServiceSettings({ context_broker: 'http://other' })).rejects.toMatchObject({ kind: 'conflict' })
+    expect(fetch).toHaveBeenCalledTimes(1)
   })
 })
 

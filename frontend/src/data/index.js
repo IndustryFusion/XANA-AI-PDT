@@ -17,8 +17,7 @@
 /**
  * Data facade: the only module screens import for data. It exposes every area
  * of the UI data interface (see interface.js), backed by the data source that
- * VITE_DATA_SOURCE selects: `mock` (default) or `backend` (the backend's
- * operations, with every other operation delegated to the mock).
+ * VITE_DATA_SOURCE selects: `mock` (default) or `backend`.
  */
 import { KNOWLEDGE_BASE_ENABLED, OPERATIONS } from './interface'
 import { DataError, toDataError } from './errors'

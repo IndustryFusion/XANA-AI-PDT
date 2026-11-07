@@ -31,6 +31,7 @@ from typing import Any
 import httpx
 
 from app.config import Settings
+from app.redact import mask_url
 
 log = logging.getLogger(__name__)
 
@@ -46,6 +47,7 @@ ACTIVE = "active"
 DELIVERY_FAILING = "delivery_failing"
 FAILED = "failed"
 TENANT_LIMIT = "no_delivery_in_tenant"
+BROKER_UNREACHABLE = "broker_unreachable"
 
 
 class MachineWatch:
@@ -122,7 +124,10 @@ class MachineWatch:
                     await self._verify(client, token)
         except httpx.HTTPError as error:
             self._ensured = False
-            self._set(FAILED, f"The context broker could not be reached ({type(error).__name__}); trying again.")
+            # The broker's own check says it is down. This one only follows from that.
+            self._set(
+                BROKER_UNREACHABLE, f"The context broker could not be reached ({type(error).__name__}); trying again."
+            )
 
     async def _ensure(self, client: httpx.AsyncClient, token: str | None) -> None:
         response = await client.post(self._url, json=self._subscription(), headers=self._headers(token, True))
@@ -152,7 +157,7 @@ class MachineWatch:
         if _notification_status(response) == "failed":
             self._set(
                 DELIVERY_FAILING,
-                f"The context broker reports that it can't deliver to {self._callback()}. "
+                f"The context broker reports that it can't deliver to {mask_url(self._callback())}. "
                 "Check that it can reach this address.",
             )
         else:
@@ -166,7 +171,7 @@ class MachineWatch:
                 "same context is also subscribed in its default tenant, so machine events may not arrive.",
             )
         else:
-            self._set(ACTIVE, f"Subscribed; notifications go to {self._callback()}.")
+            self._set(ACTIVE, f"Subscribed; notifications go to {mask_url(self._callback())}.")
 
     def _refused(self, status: int) -> None:
         self._ensured = False

@@ -106,7 +106,9 @@ async def test_nothing_reachable_real_probes():
     report = await HealthService(s, Migrator(s.postgres_memory_url.get_secret_value())).report()
     assert report["overall"] == "error"
     assert {
-        c["status"] for c in report["checks"] if c["id"] not in ("gateway", "connector", "ifric", "machine_events")
+        c["status"]
+        for c in report["checks"]
+        if c["id"] not in ("gateway", "dataspace_connector", "ifric", "machine_events")
     } == {"error"}
 
 
@@ -182,7 +184,11 @@ def test_app_starts_without_dependencies():
         "broker",
         "llm",
         "gateway",
-        "connector",
+        "alerta",
+        "mqtt",
+        "pgrest",
+        "fuseki",
+        "dataspace_connector",
         "machine_events",
         "ifric",
     }

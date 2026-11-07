@@ -506,3 +506,15 @@ async def test_ollama_down_refuses_within_the_health_timeout(url):
         response = await client.post("/api/agent/run", json={"machine_id": MACHINE, "issue": "noise"})
         assert response.status_code == 503
         assert asyncio.get_running_loop().time() - started < 2
+
+
+async def test_a_finished_run_stays_until_archived_also_after_a_restart(url):
+    async with running(make_app(url)) as client:
+        run_id = await start(client, MACHINE, FAIL)
+        await until(client, run_id, "failed")
+        assert [r["run_id"] for r in (await client.get("/api/agent/runs")).json()] == [run_id]
+    rows(url, "UPDATE runs SET updated_at = now() - interval '400 days' RETURNING 1")
+    async with running(make_app(url)) as client:
+        assert [r["run_id"] for r in (await client.get("/api/agent/runs")).json()] == [run_id]
+        assert (await client.post(f"/api/agent/archive/{run_id}")).status_code == 204
+        assert (await client.get("/api/agent/runs")).json() == []

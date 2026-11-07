@@ -32,6 +32,7 @@ from app.errors import Refused, invalid
 from app.events.identity import ServiceIdentity
 from app.events.subscription import (
     ACTIVE,
+    BROKER_UNREACHABLE,
     DELIVERY_FAILING,
     FAILED,
     SUBSCRIPTION_ID,
@@ -1063,8 +1064,13 @@ async def test_a_broker_that_cant_be_reached():
     fake.answer = httpx.ConnectError("refused")
     subscription = watch(fake)
     await subscription.check()
-    assert subscription.state == FAILED
+    assert subscription.state == BROKER_UNREACHABLE
     assert "could not be reached" in subscription.detail
+    settings = make_settings()
+    service = HealthService(
+        settings, Migrator(settings.postgres_memory_url.get_secret_value()), machine_watch=subscription
+    )
+    assert (await service._machine_events_check())[0] == "degraded", "the broker's own check is the red one"
 
 
 async def test_signed_out_a_subscription_stays_and_isnt_called_without_a_token():

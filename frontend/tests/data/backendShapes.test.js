@@ -52,6 +52,7 @@ const ARGS = {
   'incidents.getIncident': (f) => [f.body.id],
   'incidents.reopenIncident': () => ['1'],
   'system.getHealth': () => [{ fresh: true }],
+  'system.getServiceSettings': () => [],
   'session.getAuthConfig': () => [],
   'session.getSession': () => [],
   'session.signIn': () => [{ username: 'operator', password: 'operator' }],
@@ -108,9 +109,9 @@ function replay(fixture) {
 afterEach(() => vi.unstubAllGlobals())
 
 describe('backend source matches the documented shapes (recorded backend)', () => {
-  test('every operation the backend serves has a recording, except the streams', () => {
+  test('every operation the backend serves has a recording, except the streams and a save, refused without a call', () => {
     const served = Object.entries(backend.SERVED).flatMap(([area, ops]) => ops.map((op) => `${area}.${op}`))
-    const expected = served.filter((op) => !['runs.subscribeRun', 'entities.subscribeEntities'].includes(op)).sort()
+    const expected = served.filter((op) => !['runs.subscribeRun', 'entities.subscribeEntities', 'system.saveServiceSettings'].includes(op)).sort()
     expect(Object.keys(ARGS).sort()).toEqual(expected)
     for (const op of expected) expect(fixtures[op], op).toBeDefined()
   })

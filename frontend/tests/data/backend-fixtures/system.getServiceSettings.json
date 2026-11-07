@@ -1,0 +1,71 @@
+{
+  "method": "GET",
+  "path": "/api/config",
+  "status": 200,
+  "body": [
+    {
+      "key": "context_broker",
+      "label": "Context broker",
+      "value": "http://broker:9090",
+      "deployment_value": "http://broker:9090",
+      "changed": false,
+      "editable": false
+    },
+    {
+      "key": "timeseries_store",
+      "label": "Time-series store",
+      "value": "postgresql://xana@db:5432/tsdb",
+      "deployment_value": "postgresql://xana@db:5432/tsdb",
+      "changed": false,
+      "editable": false
+    },
+    {
+      "key": "memory_database",
+      "label": "Memory database",
+      "value": "postgresql://xana@db:5432/memory",
+      "deployment_value": "postgresql://xana@db:5432/memory",
+      "changed": false,
+      "editable": false
+    },
+    {
+      "key": "message_broker",
+      "label": "Message broker",
+      "value": "mqtt://emqx:1883",
+      "deployment_value": "mqtt://emqx:1883",
+      "changed": false,
+      "editable": false
+    },
+    {
+      "key": "history_service",
+      "label": "History service",
+      "value": "http://pgrest:3000",
+      "deployment_value": "http://pgrest:3000",
+      "changed": false,
+      "editable": false
+    },
+    {
+      "key": "alert_manager",
+      "label": "Alert manager",
+      "value": "http://alerta:8080/api",
+      "deployment_value": "http://alerta:8080/api",
+      "changed": false,
+      "editable": false
+    },
+    {
+      "key": "ontology",
+      "label": "Ontology",
+      "value": "http://fuseki:3030",
+      "deployment_value": "http://fuseki:3030",
+      "changed": false,
+      "editable": false
+    },
+    {
+      "key": "machine_events_callback",
+      "label": "Machine events callback",
+      "value": "http://backend:8000",
+      "deployment_value": "http://backend:8000",
+      "changed": false,
+      "editable": false
+    }
+  ]
+}

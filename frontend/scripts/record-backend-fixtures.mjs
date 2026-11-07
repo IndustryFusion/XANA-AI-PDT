@@ -58,6 +58,7 @@ async function until(runId, status) {
 
 mkdirSync(OUT, { recursive: true })
 record('system.getHealth', await call('GET', '/api/diagnostics?fresh=true'))
+record('system.getServiceSettings', await call('GET', '/api/config'))
 
 const { run_id: runId } = record('runs.startRun', await call('POST', '/api/agent/run', { machine_id: MACHINE, issue: 'Cut edges show burrs since this morning' }))
 record('runs.getRun', await until(runId, 'awaiting_input'))
