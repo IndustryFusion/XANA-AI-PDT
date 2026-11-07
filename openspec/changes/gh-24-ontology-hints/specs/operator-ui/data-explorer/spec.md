@@ -10,5 +10,9 @@ The value editor SHALL show the allowed range of a value, where the data model g
 - **THEN** the range is shown next to the input, saying whether each limit is included
 
 #### Scenario: No hints
-- **WHEN** no hints exist, or they can't be read
+- **WHEN** no hints exist
 - **THEN** the editor works as usual, and no error is shown
+
+#### Scenario: Hints can't be read
+- **WHEN** hints can't be read, for example for a missing role or a wrong graph base
+- **THEN** the editor works as usual, and says why there are no suggestions

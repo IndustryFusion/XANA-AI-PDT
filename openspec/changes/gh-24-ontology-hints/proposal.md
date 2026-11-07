@@ -29,7 +29,7 @@ Operators editing data need to know the allowed values and ranges. These live in
 
 ## Impact
 
-- `backend/`: new `agent/xana_agent/sources/ontology.py`, `app/api/shacl.py`, `sample_data/ontology/`; changes in `app/config.py`, `app/main.py`, `sample_data/`, `compose.yaml`, `pyproject.toml` (a development dependency), `.env.example`, `README.md`.
+- `backend/`: new `agent/xana_agent/sources/ontology.py`, `app/api/shacl.py`, `sample_data/ontology/`; changes in `app/config.py`, `app/main.py`, `sample_data/`, `compose.yaml`, `agent/pyproject.toml` (the runtime dependency `rdflib`), `.env.example`, `README.md`.
 - `frontend/`: `ValueEditor.jsx`, the interface, the mock's hints, backend `entities.js`, `docs/data-interface.md`.
 - `helm/`: Fuseki settings.
 - `architecture.md`: Data sources, Key Variable Groups.

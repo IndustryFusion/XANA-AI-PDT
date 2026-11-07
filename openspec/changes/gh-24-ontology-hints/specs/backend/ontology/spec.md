@@ -30,8 +30,12 @@
 - **THEN** the answer has `hint_type: none`
 
 #### Scenario: Fuseki unavailable
-- **WHEN** Fuseki cannot be reached, or refuses or fails
+- **WHEN** Fuseki cannot be reached, or refuses or fails, or answers something other than a query result, such as a sign-in page or a redirect
 - **THEN** the answer is still successful, with `hint_type: none` and a reason, without an address or token
+
+#### Scenario: Wrong graph base
+- **WHEN** the configured graph holds no shapes at all
+- **THEN** the answer has `hint_type: none`, and a reason that says to check the graph base
 
 ### Requirement: Read functions for the agent
 The backend SHALL offer three read functions for the conversation agent: a SPARQL query, SHACL shapes for an entity type, and knowledge for an entity type. Errors SHALL come back as data, so the caller can continue. No function SHALL write.
@@ -41,15 +45,19 @@ The backend SHALL offer three read functions for the conversation agent: a SPARQ
 - **THEN** the triples of that type's shapes, or its classes and individuals, are returned
 
 #### Scenario: Service failure
-- **WHEN** Fuseki is unavailable or answers an error
-- **THEN** the function returns the error as data and raises nothing
+- **WHEN** Fuseki is unavailable, answers an error, or answers anything that isn't a query result
+- **THEN** the function returns the error as data and raises nothing, and no such answer is returned as a result
 
 #### Scenario: Update refused
 - **WHEN** the query function is given an update
 - **THEN** it returns an error as data, and nothing is sent
 
 #### Scenario: Federated query refused
-- **WHEN** the query function is given a query that calls another service
+- **WHEN** the query function is given a query that calls another service, however it is written
+- **THEN** it returns an error as data, and nothing is sent
+
+#### Scenario: Query that can't be parsed
+- **WHEN** the query function is given what can't be parsed as a query
 - **THEN** it returns an error as data, and nothing is sent
 
 #### Scenario: Large result
