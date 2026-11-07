@@ -101,6 +101,17 @@ Its results SHALL have the shapes the interface documents.
 - **WHEN** the data-interface tests run against the backend data source with a recorded backend
 - **THEN** every operation it serves returns the documented shape
 
+### Requirement: Entities area from the backend
+The backend data source SHALL serve the entities area from the backend: query, edit, import, history and time-shift. Attribute names SHALL reach screens unchanged.
+
+#### Scenario: Explorer on real data
+- **WHEN** an operator uses the Data explorer on the backend data source
+- **THEN** it shows and changes what the context broker holds
+
+#### Scenario: Attribute names unchanged
+- **WHEN** an attribute's name holds an underscore or is an IRI
+- **THEN** the screen receives the name exactly as the broker gave it
+
 ### Requirement: Backend errors in interface terms
 The backend data source SHALL report backend refusals with the backend's error kind and message, and SHALL report a backend that cannot be reached as `unavailable`, affecting only the areas it serves.
 
@@ -133,3 +144,66 @@ The data layer SHALL expose the knowledge base area only while the knowledge bas
 #### Scenario: Backend build shows no mock documents
 - **WHEN** the UI is built with the backend data source and default settings
 - **THEN** no screen shows documents from the mock data source
+
+### Requirement: Live updates from the backend
+The backend data source SHALL serve `subscribeEntities` and `getLiveUpdateHealth` from the backend.
+
+#### Scenario: Events
+- **WHEN** the backend streams a change
+- **THEN** the subscriber receives an `update` event with the entity's ID and its attributes, with names unchanged
+
+#### Scenario: Lost stream
+- **WHEN** the stream closes or cannot open
+- **THEN** the subscriber receives one `error` event of kind `unavailable`, and no further events
+
+#### Scenario: Unsubscribing
+- **WHEN** the screen unsubscribes
+- **THEN** the stream is closed, and no more events arrive
+
+### Requirement: Value hints from the backend
+The backend data source SHALL serve `getValueHints` from the backend, with its result in the documented shape.
+
+#### Scenario: Hints
+- **WHEN** a screen asks for hints of an attribute
+- **THEN** it receives the kind of hint, the allowed values and the limits
+
+### Requirement: Alerts from the backend
+The backend data source SHALL serve the `alerts` area from the backend, with results in the documented shapes.
+
+#### Scenario: Alerts on real data
+- **WHEN** an operator uses the Alerts screen on the backend data source
+- **THEN** it shows and changes what Alerta holds, including the severity bar, filters, bulk actions, detail and automatic refresh
+
+#### Scenario: Partial failure of a bulk action
+- **WHEN** an action fails for some selected alerts
+- **THEN** those stay selected with the reason from the backend
+
+### Requirement: Dataspace from the backend
+The backend data source SHALL serve the connection, peers, capabilities, capability requests and policies of the `dataspace` area from the backend, in the documented shapes.
+
+#### Scenario: Dataspace on real data
+- **WHEN** an operator uses the Dataspace screen on the backend data source
+- **THEN** connecting, disconnecting, peers, capabilities, requests and policies act on the real gateway
+
+#### Scenario: Renewal failing
+- **WHEN** token renewal has failed repeatedly
+- **THEN** the connection section says so
+
+#### Scenario: Policy actions
+- **WHEN** an operator grants, denies or resets a capability for a peer
+- **THEN** the source sends the gateway's approve, deny or reset
+
+### Requirement: Names and the factory from the backend
+The backend data source SHALL serve `dataspace.resolveNames`, `dataspace.resolveBuilders` and `session.getFactory` from the backend, leaving out what the registry didn't return.
+
+#### Scenario: Identifiers stay as they are
+- **WHEN** names are returned by an identifier holding `_`
+- **THEN** the identifier is not changed
+
+#### Scenario: Screens with an empty name
+- **WHEN** a name lookup failed
+- **THEN** the screen shows the identifier
+
+#### Scenario: Factory without an owner
+- **WHEN** the factory has no owner or location
+- **THEN** the user pane and Dataspace screen leave them out

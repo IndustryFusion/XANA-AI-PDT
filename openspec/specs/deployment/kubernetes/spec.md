@@ -83,3 +83,17 @@ Every Pull Request that changes an image or the chart SHALL build both images an
 #### Scenario: Version tag
 - **WHEN** a tag such as `v1.0.0` is pushed
 - **THEN** CI publishes both images with that tag
+
+### Requirement: Dataspace settings in the chart
+The chart SHALL pass the gateway's settings as configuration, and `SETTINGS_ENCRYPTION_KEY` and `GATEWAY_CLIENT_SECRET` as secrets.
+
+#### Scenario: Rendered
+- **WHEN** the chart is rendered with a gateway address and keys from the environment
+- **THEN** the addresses are in the configuration, the key and secret only in the Secret
+
+### Requirement: Registry address in the chart
+The chart SHALL pass `IFRIC_URL` when it is set.
+
+#### Scenario: Rendered
+- **WHEN** the chart is rendered with a registry address
+- **THEN** it is in the configuration, including its port

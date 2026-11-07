@@ -123,3 +123,14 @@ The run view SHALL recover the run's current state after a lost connection witho
 #### Scenario: Connection drops while waiting
 - **WHEN** the live connection drops while the run waits for an external party
 - **THEN** the view indicates reconnection and, once recovered, shows the run's current state including anything that changed meanwhile
+
+### Requirement: Alerts in the observe step
+The run view SHALL show the alerts an observe step found, with severity, resource and text, and link each to its alert.
+
+#### Scenario: Alert shown
+- **WHEN** an observe step holds an alert
+- **THEN** the step shows it, and it opens the alert's detail
+
+#### Scenario: Source unavailable
+- **WHEN** the alert source was unavailable
+- **THEN** the step's sources say so

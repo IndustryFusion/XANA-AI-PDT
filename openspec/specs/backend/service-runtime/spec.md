@@ -21,7 +21,7 @@ The backend SHALL read all of its configuration from environment variables, with
 - **THEN** every variable the backend reads is listed with its meaning and default, and secret variables have no real value
 
 ### Requirement: Secrets stay secret
-The backend SHALL NOT include secret settings (passwords, API keys, tokens) in any response, log line or error message.
+The backend SHALL NOT include secret settings (passwords, API keys, tokens) in any response, log line or error message, including tokens carried in the addresses of subscriptions.
 
 #### Scenario: Secret in a connection address
 - **WHEN** a dependency whose configured address contains a password fails its health check
@@ -30,6 +30,14 @@ The backend SHALL NOT include secret settings (passwords, API keys, tokens) in a
 #### Scenario: Configuration error
 - **WHEN** the backend refuses to start because of an invalid secret setting
 - **THEN** the message names the variable but not its value
+
+#### Scenario: Token in a subscription address
+- **WHEN** a subscription is created, renewed or fails, at any log level
+- **THEN** the token appears in no log line, response or error message
+
+#### Scenario: Library log line
+- **WHEN** a library logs an address with a password or a bearer token
+- **THEN** the log shows it masked
 
 ### Requirement: Language model selection
 The backend SHALL create its language model from configuration. Local Ollama is the default. Anthropic and OpenAI are also selectable, as are OpenAI-compatible servers such as OpenVINO Model Server through a base address, and a scripted provider that gives fixed answers without any model. Changing provider SHALL require no code change.
@@ -131,3 +139,68 @@ The backend SHALL answer a liveness route whether or not its dependencies are re
 #### Scenario: Dependencies down
 - **WHEN** no dependency can be reached, and a client requests the liveness route
 - **THEN** it answers success at once
+
+### Requirement: Encryption key for the gateway
+A backend with `GATEWAY_URL` SHALL have a valid `SETTINGS_ENCRYPTION_KEY`.
+
+#### Scenario: Missing key
+- **WHEN** the backend starts with `GATEWAY_URL` and no key
+- **THEN** it stops with a message naming `SETTINGS_ENCRYPTION_KEY` and how to make one
+
+#### Scenario: Invalid key
+- **WHEN** the key is not a valid key
+- **THEN** it stops with a message naming the variable, never its value
+
+#### Scenario: No gateway
+- **WHEN** the backend starts without `GATEWAY_URL`
+- **THEN** it needs no key
+
+#### Scenario: Secrets are masked
+- **WHEN** the secret or the key would appear in a log
+- **THEN** it is masked
+
+### Requirement: Dataspace health
+The health report SHALL include `gateway` and `connector` checks.
+
+#### Scenario: Gateway up
+- **WHEN** the gateway answers its health route and the token is accepted
+- **THEN** both checks are `ok`, and the connector's detail says how far it could check
+
+#### Scenario: Gateway down
+- **WHEN** the gateway can't be reached
+- **THEN** `gateway` is `error`
+
+#### Scenario: Not connected
+- **WHEN** the gateway is up and there is no valid token
+- **THEN** `gateway` is `ok`, and `connector` is `degraded`, saying that the backend is not connected
+
+#### Scenario: Adapter failing
+- **WHEN** the gateway is up and an authenticated read answers `503`
+- **THEN** `connector` is `error`
+
+#### Scenario: Dataspace not configured
+- **WHEN** no gateway is configured
+- **THEN** both are `ok`, saying so, and the overall state is unchanged
+
+### Requirement: Registry health
+The health report SHALL include an `ifric` check, for which `401` and `403` are failures.
+
+#### Scenario: Works
+- **WHEN** the registry answers for the own company with the dataspace token
+- **THEN** the check is `ok`
+
+#### Scenario: Refused
+- **WHEN** it answers `401` or `403`
+- **THEN** the check is `error`, saying that the registry refused the token
+
+#### Scenario: Down
+- **WHEN** it can't be reached or fails
+- **THEN** the check is `error`
+
+#### Scenario: No token
+- **WHEN** the backend isn't connected to the dataspace
+- **THEN** the check is `degraded`, saying so
+
+#### Scenario: Not configured
+- **WHEN** `IFRIC_URL` is not set
+- **THEN** the check is `ok`, saying so, and doesn't count towards the overall state
