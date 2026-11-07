@@ -41,7 +41,6 @@ dev = [
   "pytest>=8",
   "pytest-asyncio>=0.24",
   "ruff>=0.6",
-  "rdflib>=7",
 ]
 
 [tool.setuptools.packages.find]

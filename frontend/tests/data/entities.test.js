@@ -139,6 +139,7 @@ describe('edit', () => {
     const value = await entities.getValueHints({ entityType: 'Sensor', attribute: 'value' })
     expect(value).toMatchObject({ hintType: 'range', values: [], minimum: -40, maximum: 1000, maximumExclusive: true })
     expect(await entities.getValueHints({ entityType: 'Sensor', attribute: 'name' })).toMatchObject({ hintType: 'none', values: [] })
+    expect(await entities.getValueHints({ entityType: 'Machine', attribute: 'manufacturer' })).toMatchObject({ hintType: 'datatype', datatype: expect.stringContaining('string') })
   })
 })
 

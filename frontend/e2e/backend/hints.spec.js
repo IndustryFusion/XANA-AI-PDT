@@ -49,4 +49,5 @@ test('without hints the editor still works', async ({ page }) => {
   await expect(editor.getByRole('combobox')).toBeVisible()
   await expect(editor.getByRole('alert')).toHaveCount(0)
   await expect(editor.getByRole('listbox')).toHaveCount(0)
+  await expect(editor).toContainText('No suggestions: The ontology service cannot be reached')
 })

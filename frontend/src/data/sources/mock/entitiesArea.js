@@ -40,6 +40,7 @@ const VALUE_HINTS = {
 }
 
 const RANGE_HINTS = { Sensor: { value: { minimum: -40, maximum: 1000, maximumExclusive: true } } }
+const DATATYPE_HINTS = { Machine: { manufacturer: 'http://www.w3.org/2001/XMLSchema#string' } }
 
 /** Sample documents `fetchImportDocument` serves; the mock makes no network requests. */
 export const SAMPLE_DOCUMENTS = {
@@ -368,14 +369,15 @@ export function createEntitiesArea(store) {
     getValueHints: withControls(({ entityType, attribute } = {}) => {
       const values = [...(VALUE_HINTS[entityType]?.[attribute] ?? [])]
       const range = RANGE_HINTS[entityType]?.[attribute]
+      const datatype = DATATYPE_HINTS[entityType]?.[attribute] ?? null
       return {
-        hintType: values.length ? 'enum' : range ? 'range' : 'none',
+        hintType: values.length ? 'enum' : range ? 'range' : datatype ? 'datatype' : 'none',
         values,
         minimum: range?.minimum ?? null,
         maximum: range?.maximum ?? null,
         minimumExclusive: false,
         maximumExclusive: range?.maximumExclusive ?? false,
-        datatype: null,
+        datatype,
         detail: null,
       }
     }),

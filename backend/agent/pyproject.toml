@@ -31,6 +31,7 @@ dependencies = [
   "langgraph>=0.2",
   "psycopg[binary]>=3.2",
   "pydantic>=2.7",
+  "rdflib>=7",
 ]
 
 [project.optional-dependencies]

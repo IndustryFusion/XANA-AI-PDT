@@ -167,7 +167,7 @@ Entities are NGSI-LD entities in compacted form: `id`, `type` and one member per
   - `https://samples.example.org/ngsi-ld/line-d.json`: a new production line with a machine and a sensor (created);
   - `https://samples.example.org/ngsi-ld/machine-names.json`: new names for two laser cutters (updated);
   - `https://samples.example.org/ngsi-ld/incomplete.json`: an entity without a type (the preview reports it).
-- *Value hints:* machine `status`, `operatingMode` and `machineType`, and line `shifts`; a range for sensor `value`.
+- *Value hints:* machine `status`, `operatingMode` and `machineType`, and line `shifts`; a range for sensor `value`, and a data type for machine `manufacturer`.
 
 ## alerts — implemented
 

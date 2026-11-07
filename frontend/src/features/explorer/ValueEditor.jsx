@@ -117,6 +117,7 @@ export default function ValueEditor({ label, initial, entityType, attribute, onS
         </ul>
       )}
       {range && <p className="muted value-editor__range">{range}</p>}
+      {hints.data?.hintType === 'none' && hints.data.detail && <p className="muted value-editor__range">No suggestions: {hints.data.detail}</p>}
       {error && <p id={ids.error} className="form-error value-editor__error" role="alert">Not saved: {error.message}</p>}
     </div>
   )

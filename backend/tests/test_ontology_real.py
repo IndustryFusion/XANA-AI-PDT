@@ -82,7 +82,7 @@ async def test_the_default_base_does_not_find_graphs_loaded_elsewhere(base):
     assert hint["hint_type"] in ("none", "range")
     other = await FusekiOntologySource(URL, graph_base="http://other.example/x").hints("Sensor", "value")
     assert other["hint_type"] == "none"
-    assert other["detail"] is None
+    assert "FUSEKI_GRAPH_BASE" in other["detail"]
 
 
 async def test_shapes_and_knowledge(source):
@@ -115,6 +115,28 @@ async def test_hostile_input_finds_nothing_in_a_real_store(source, hostile):
     assert (await source.hints("Machine", hostile))["detail"] is None
     assert (await source.shapes(hostile))["rows"] == []
     assert (await source.knowledge(hostile))["rows"] == []
+
+
+async def test_a_service_hidden_from_a_lexer_is_refused_and_a_real_store_is_not_asked(source):
+    """Fuseki would call this address; the listener on it would see the request."""
+    for query in (
+        "PREFIX ex: <http://ex/> SELECT * WHERE { VALUES ?v { ex:b\\# } SERVICE <http://127.0.0.1:9/x> { ?s ?p ?o } }",
+        "SELECT * WHERE { SE\\u0052VICE <http://127.0.0.1:9/x> { ?s ?p ?o } }",
+    ):
+        answer = await source.query(query)
+        assert answer["ok"] is False
+        assert "not allowed" in answer["error"]
+
+
+async def test_the_queries_the_platforms_notes_use_are_not_refused(source, base):
+    for query in (
+        f"SELECT ?shape WHERE {{ GRAPH <{base}/shacl.ttl> {{ ?shape a <http://www.w3.org/ns/shacl#NodeShape> }} }} "
+        "LIMIT 10",
+        f"SELECT ?cls WHERE {{ GRAPH <{base}/knowledge.ttl> {{ ?cls a <http://www.w3.org/2002/07/owl#Class> }} }}",
+        f"CONSTRUCT {{ ?s ?p ?o }} WHERE {{ GRAPH <{base}/knowledge.ttl> {{ ?s ?p ?o }} }}",
+        f"ASK {{ GRAPH <{base}/shacl.ttl> {{ ?s ?p ?o }} }}",
+    ):
+        assert (await source.query(query))["ok"] is True, query
 
 
 async def test_a_plain_query_reads_and_refused_ones_change_nothing(source, base):
