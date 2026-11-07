@@ -49,9 +49,15 @@ function EntityList({ result, query, standalone, renderNode }) {
       </DataView>
     )
   }
+  const limited = result.data?.limited
   return (
     <Card title="Entities" className="entity-list">
       <div className="stack">
+        {limited && (
+          <p className="muted entity-list__count" role="status">
+            Only the first {limited.scanned}{limited.total ? ` of ${limited.total}` : ''} entities were searched, so there may be more matches. Narrow the query by type or ID.
+          </p>
+        )}
         {standalone && (
           <div className="entity-list__opened stack">
             <p className="muted entity-list__count">Opened entity, not among the query results:</p>
@@ -141,7 +147,7 @@ export default function DataExplorer() {
   const settled = !hasCriteria(query) || list.data !== undefined || list.status === 'error'
   const standalone = entityId && settled && !listed.some((e) => e.id === entityId) ? entityId : null
   const shownIds = [...listed.map((e) => e.id), ...(standalone ? [standalone] : [])].filter((id) => expanded.has(id))
-  const live = useLiveUpdates({ enabled: liveOn && !at, ids: shownIds })
+  const live = useLiveUpdates({ enabled: liveOn && !at, ids: shownIds, onResync: refresh })
 
   const listError = list.status === 'error' && list.error?.kind === 'invalid' ? list.error : null
   const typesError = types.status === 'error' && types.error?.kind === 'invalid' ? types.error : null
@@ -175,6 +181,7 @@ export default function DataExplorer() {
       onExpandedChange={(open) => setNodeExpanded(id, open)}
       current={id === entityId}
       listen={live.listen}
+      refreshKey={refreshKey}
       onChanged={refresh}
       onDeleted={() => deleted(id)}
     />

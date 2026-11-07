@@ -45,7 +45,11 @@ The backend SHALL delete its subscription on sign-out and on shutdown, and SHALL
 
 #### Scenario: Earlier process
 - **WHEN** a process ended without deleting its subscription
-- **THEN** the next start after sign-in removes it, and exactly one remains
+- **THEN** the next start after sign-in removes it, and exactly one remains, also if the first attempt to list subscriptions fails
+
+#### Scenario: Sign-out or shutdown during a create
+- **WHEN** the operator signs out, or the backend stops, while a subscription is being created
+- **THEN** no subscription stays in the broker
 
 ### Requirement: Stream to the browser
 `/api/ngsi/ws` SHALL send each change as the changed entity's ID and attributes, filtered by the type or IDs the client states. Attribute names SHALL be unchanged.
@@ -64,18 +68,38 @@ The backend SHALL delete its subscription on sign-out and on shutdown, and SHALL
 
 #### Scenario: Slow client
 - **WHEN** one client stops reading
-- **THEN** the others are not held up, and that client is closed rather than silently losing changes
+- **THEN** the others are not held up, and that client is closed rather than silently losing changes, also when its socket is full and nothing can be sent to it
+
+#### Scenario: Shutdown with a client that stopped reading
+- **WHEN** the backend is told to stop while a client has stopped reading
+- **THEN** it stops within 30 seconds, and the subscription is deleted
+
+#### Scenario: Page from another origin
+- **WHEN** a web page from another origin than the backend's, and not configured as allowed, opens the stream
+- **THEN** it is refused
+
+#### Scenario: The UI's own page
+- **WHEN** the UI opens the stream through the development server, or through its own proxy
+- **THEN** it is accepted
 
 #### Scenario: Not a notification
 - **WHEN** a malformed message arrives on the topic
 - **THEN** it is dropped and streaming continues
 
 ### Requirement: State of live updates
-`/api/ngsi/subscription-health` SHALL report whether updates can be delivered, the state and a readable reason. It SHALL NOT hold the endpoint or a token.
+`/api/ngsi/subscription-health` SHALL report what the backend knows about delivery, the state and a readable reason. `ok` means that the backend is connected and subscribed, and that no change is known to have gone missing. The context broker reports nothing about MQTT failures, so the report SHALL say whether delivery has been confirmed by a change arriving. It SHALL NOT hold the endpoint or a token.
 
 #### Scenario: Working
 - **WHEN** the subscription is active and the backend is connected
-- **THEN** the status is `ok`, with the expiry
+- **THEN** the status is `ok`, with the expiry, and until a change has arrived the reason says that delivery isn't confirmed
+
+#### Scenario: Context broker can't reach the MQTT broker
+- **WHEN** a change made through this backend doesn't arrive within 15 seconds
+- **THEN** the status is `unavailable`, and the reason names what to check
+
+#### Scenario: Topic refused
+- **WHEN** the MQTT broker accepts the connection and refuses the topic
+- **THEN** the status is `unavailable`, and the reason says so
 
 #### Scenario: Broker unavailable
 - **WHEN** the MQTT broker cannot be reached
@@ -88,6 +112,10 @@ The backend SHALL delete its subscription on sign-out and on shutdown, and SHALL
 #### Scenario: Refused
 - **WHEN** the broker refuses the operator's token
 - **THEN** the status is `unavailable`, and the reason names the role that is needed
+
+#### Scenario: After sign-out
+- **WHEN** the operator has signed out
+- **THEN** the state says it is waiting for sign-in
 
 #### Scenario: Context broker unavailable
 - **WHEN** the subscription cannot be created or renewed

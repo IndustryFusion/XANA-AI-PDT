@@ -21,7 +21,7 @@ From the platform's chart, Makefile, tests and API notes, and a real Fuseki.
 
 An IRI is checked against the characters SPARQL allows in `<...>`; anything else is not placed in a query, and the answer is `none` or an error as data. A short name goes in as a string literal, with `\` and quotes escaped. A value with a control character or a `\u` code point escape is not placed at all, because SPARQL decodes those escapes before its grammar applies. A short name is compared with the local part of IRIs in the graph, so short names work on the sample data. Tests parse the resulting queries with a SPARQL parser, and check that hostile input yields the same query structure as a harmless name. They also run hostile input against a real Fuseki.
 
-**Alternative:** parameterised queries: SPARQL over HTTP has none. `rdflib` is added as a development dependency only, for the parser.
+**Alternative:** parameterised queries: SPARQL over HTTP has none.
 
 ### 2. Hint shape
 
@@ -32,6 +32,10 @@ An IRI is checked against the characters SPARQL allows in `<...>`; anything else
 ### 3. Read functions
 
 In the agent package (`FusekiOntologySource`), for #29: `query(sparql)`, `shapes(entity_type)` and `knowledge(entity_type)`. They answer `{"ok": true, ...}` or `{"ok": false, "error": ...}` and never raise for a failing service. `query` accepts SELECT, ASK, CONSTRUCT and DESCRIBE, refuses updates and `SERVICE`, and caps results at 1000 rows and the answer at 5 MB. No HTTP route exposes it.
+
+**`query` decides on the parsed query,** with `rdflib`'s parser, a new runtime dependency of the agent package. What can't be parsed isn't sent. A list of refused words over text with strings and comments removed was tried first, and `ex:b\#` got past it, because the lexer took the rest of the line for a comment: Fuseki called the address. **Limits:** `rdflib` follows SPARQL 1.1, so an extension that only Jena knows is refused, and the two parsers could disagree in a way not found here. The queries this code uses, and those in the platform's notes, are accepted.
+
+Every path of the read functions gives data, whatever Fuseki sends. Only SPARQL result forms count as results, because a sign-in page also answers 200. When no hints are found and the graph holds no shapes at all, the reason says to check `FUSEKI_GRAPH_BASE`, and the value editor shows it, so that a missing role or a wrong base doesn't look like "no hints".
 
 ### 4. Graph base
 

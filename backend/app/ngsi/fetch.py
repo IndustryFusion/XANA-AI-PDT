@@ -73,13 +73,16 @@ def _checked_url(url: str) -> tuple[str, int, httpx.URL]:
         port = parts.port
     except ValueError:
         raise invalid("Enter a complete URL, for example https://…") from None
-    if parts.scheme not in ("http", "https"):
+    if not isinstance(url, str) or parts.scheme not in ("http", "https"):
         raise invalid("Only http and https URLs can be imported.")
     if not parts.hostname:
         raise invalid("Enter a complete URL, for example https://…")
     if parts.username or parts.password:
         raise invalid("A URL with a user name or password can't be imported.")
-    return parts.hostname, port or (443 if parts.scheme == "https" else 80), httpx.URL(url.strip())
+    try:
+        return parts.hostname, port or (443 if parts.scheme == "https" else 80), httpx.URL(url.strip())
+    except (httpx.InvalidURL, ValueError):
+        raise invalid("Enter a complete URL, for example https://…") from None
 
 
 async def _public_address(host: str, port: int, resolver: Resolver) -> str:
@@ -87,6 +90,8 @@ async def _public_address(host: str, port: int, resolver: Resolver) -> str:
         addresses = await resolver(host, port)
     except OSError:
         raise bad_gateway(f"{SOURCE} could not be resolved.") from None
+    except UnicodeError:
+        raise invalid("Enter a complete URL, for example https://…") from None
     if not addresses or not all(is_public(address) for address in addresses):
         raise invalid(REFUSED)
     return addresses[0]
@@ -105,9 +110,12 @@ async def fetch_document(
             host, port, target = _checked_url(current)
             address = await _public_address(host, port, resolver)
             headers = {"Host": target.netloc.decode("ascii"), "Accept": "application/json, application/ld+json"}
-            request = client.build_request(
-                "GET", target.copy_with(host=address), headers=headers, extensions={"sni_hostname": host}
-            )
+            try:
+                request = client.build_request(
+                    "GET", target.copy_with(host=address), headers=headers, extensions={"sni_hostname": host}
+                )
+            except (httpx.InvalidURL, ValueError, UnicodeError):
+                raise invalid("Enter a complete URL, for example https://…") from None
             try:
                 response = await client.send(request, stream=True)
             except httpx.HTTPError as error:

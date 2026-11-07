@@ -20,7 +20,7 @@ import { entities } from '../../data'
 import { useData } from '../../data/useData'
 import { Button, useToast } from '../../ui/components'
 import { ConfirmDialog } from '../../ui/structured'
-import { attributesOf, displayName } from './attributes'
+import { attributesOf, displayName, sameValue, statusOf } from './attributes'
 import AttributeLine from './AttributeLine'
 import AddAttributeForm from './AddAttributeForm'
 import { entityPath } from './query'
@@ -47,15 +47,17 @@ const count = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`
  */
 export default function EntityNode({
   id, summary, depth = 0, chain = [], query, expanded: expandedProp, onExpandedChange,
-  current = false, listen, onChanged, onDeleted, standalone = false,
+  current = false, listen, onChanged, onDeleted, standalone = false, refreshKey = 0,
 }) {
   const at = query.at || null
   const readOnly = !!at
   const [ownExpanded, setOwnExpanded] = useState(true)
   const expanded = expandedProp ?? ownExpanded
   const setExpanded = (next) => (onExpandedChange ? onExpandedChange(next) : setOwnExpanded(next))
-  const result = useData('entities', at ? 'queryEntitiesAt' : 'getEntity', at ? [at, { id }] : [id], { enabled: expanded || !summary })
+  const result = useData('entities', at ? 'queryEntitiesAt' : 'getEntity', at ? [at, { id }] : [id], { enabled: expanded || !summary, refreshKey })
+  const states = useData('entities', 'getAttributeStatus', [id], { enabled: expanded && !at })
   const [overrides, setOverrides] = useState({})
+  const shownRef = useRef(null)
   const [changed, setChanged] = useState({})
   const [raw, setRaw] = useState(false)
   const [adding, setAdding] = useState(false)
@@ -76,8 +78,11 @@ export default function EntityNode({
     const timers = new Set()
     let seq = 0
     const stop = listen(id, (attributes) => {
+      // The broker sends the whole entity, so only what differs from what is shown counts as changed.
+      const shown = shownRef.current ?? {}
+      const names = Object.keys(attributes).filter((name) => !sameValue(shown[name], attributes[name]))
+      if (names.length === 0) return
       const mark = ++seq
-      const names = Object.keys(attributes)
       setOverrides((o) => ({ ...o, ...attributes }))
       setChanged((c) => ({ ...c, ...Object.fromEntries(names.map((n) => [n, mark])) }))
       const timer = setTimeout(() => {
@@ -119,6 +124,7 @@ export default function EntityNode({
 
   const base = loaded ?? summary
   const entity = base ? { ...base, ...overrides } : null
+  shownRef.current = entity
   const title = (entity && displayName(entity)) ?? entityLabel(id)
   const attributes = entity ? attributesOf(entity) : []
   const refTo = (target) => entityPath(target, query)
@@ -165,12 +171,13 @@ export default function EntityNode({
   const deleteTitle = deleting?.entity ? 'Delete this entity?' : deleting?.sub ? `Delete the sub-attribute ${deleting.sub}?` : `Delete the attribute ${deleting?.name}?`
 
   const renderNested = (target) => (
-    <EntityNode id={target} depth={depth + 1} chain={ownChain} query={query} listen={listen} onChanged={onChanged} />
+    <EntityNode id={target} depth={depth + 1} chain={ownChain} query={query} listen={listen} onChanged={onChanged} refreshKey={refreshKey} />
   )
 
   const lineCtx = (name) => ({
     entityId: id, entityType: entity.type, readOnly, refTo, depth, chain: ownChain, headingLevel: level,
     changed: !!changed[name], historyOpen: historyOf === name,
+    recorded: !!statusOf(states.data, name),
     onSaved: saved,
     onHistory: (n) => setHistoryOf((h) => (h === n ? null : n)),
     onDelete: (n, sub) => setDeleting({ name: n, sub }),

@@ -25,12 +25,16 @@ SPARQL over HTTP has no parameters, so what comes from outside is placed in a qu
 
 from __future__ import annotations
 
+import functools
 import json
 import re
 from collections.abc import Callable
 from typing import Any
 
 import httpx
+from pyparsing import ParseBaseException, ParseResults
+from rdflib.plugins.sparql.parser import parseQuery
+from rdflib.plugins.sparql.parserutils import CompValue
 
 NS = """PREFIX sh: <http://www.w3.org/ns/shacl#>
 PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
@@ -39,25 +43,14 @@ PREFIX ngsi-ld: <https://uri.etsi.org/ngsi-ld/>
 """
 MAX_ROWS = 1000
 MAX_BYTES = 5 * 1024 * 1024
+MAX_QUERY = 100_000
+READ_FORMS = {"SelectQuery", "AskQuery", "ConstructQuery", "DescribeQuery"}
+GRAPH_ANSWERS = ("text/turtle", "application/n-triples", "application/ld+json", "application/rdf+xml")
 SERVICE = "The ontology service"
 
 _SCHEME = re.compile(r"[A-Za-z][A-Za-z0-9+.\-]*:")
 # What SPARQL's grammar excludes from `<...>`, and spaces and control characters.
 _NOT_IN_IRI = re.compile(r'[\x00-\x20<>"{}|\\^`\x7f-\x9f]')
-_NOISE = re.compile(
-    r'"""(?:[^"\\]|\\.|"(?!""))*"""'
-    r"|'''(?:[^'\\]|\\.|'(?!''))*'''"
-    r'|"(?:[^"\\\n]|\\.)*"'
-    r"|'(?:[^'\\\n]|\\.)*'"
-    r'|<[^<>"{}|\\^`\s]*>'
-    r"|#[^\n]*",
-    re.DOTALL,
-)
-_REFUSED_WORDS = re.compile(
-    r"(?<![:\w?$])(SERVICE|INSERT|DELETE|LOAD|CLEAR|DROP|CREATE|ADD|MOVE|COPY|WITH)(?![:\w])", re.IGNORECASE
-)
-_PROLOGUE = re.compile(r"\s*(PREFIX\s+[^\s:]*:\s*|BASE\s*)", re.IGNORECASE)
-_READ_FORMS = re.compile(r"\s*(SELECT|ASK|CONSTRUCT|DESCRIBE)(?![:\w])", re.IGNORECASE)
 _LITERAL_ESCAPES = {
     "\\": "\\\\",
     '"': '\\"',
@@ -102,19 +95,50 @@ def names(variable: str, value: str) -> str:
     return f'REPLACE(STR({variable}), "^.*[/#]", "") = {literal(value)}'
 
 
+def _holds_service(node: Any) -> bool:
+    """Whether a parsed query calls another service, at any depth."""
+    if isinstance(node, CompValue) and node.name == "ServiceGraphPattern":
+        return True
+    if isinstance(node, dict):
+        return any(_holds_service(item) for item in node.values())
+    if isinstance(node, list | tuple | ParseResults):
+        return any(_holds_service(item) for item in node)
+    return False
+
+
 def refusal_of(query: str) -> str | None:
-    """Why a query must not be sent, or None. Strings, IRIs and comments can't hide a keyword or trip this."""
-    stripped = _NOISE.sub(" ", query)
-    word = _REFUSED_WORDS.search(stripped)
-    if word:
-        kind = "calls another service" if word.group(1).upper() == "SERVICE" else "would change data"
-        return f"The query is not allowed: it {kind} ({word.group(1).upper()})."
-    position = 0
-    while prologue := _PROLOGUE.match(stripped, position):
-        position = prologue.end()
-    if not _READ_FORMS.match(stripped, position):
+    """Why a query must not be sent, or None. Decides on the parsed query: what can't be parsed isn't sent."""
+    if len(query) > MAX_QUERY:
+        return f"The query is not allowed: it is longer than {MAX_QUERY} characters."
+    try:
+        parsed = parseQuery(query)
+    except (ParseBaseException, ValueError, TypeError, RecursionError):
+        return "The query is not allowed: it could not be parsed, or it would change data."
+    if parsed[1].name not in READ_FORMS:
         return "The query is not allowed: only SELECT, ASK, CONSTRUCT and DESCRIBE are."
+    if _holds_service(parsed):
+        return "The query is not allowed: it calls another service."
     return None
+
+
+def _as_data(failure: Callable[[str], dict[str, Any]]) -> Callable[..., Any]:
+    """Whatever happens in a read function comes back as data, so that a caller can go on."""
+
+    def wrap(function: Callable[..., Any]) -> Callable[..., Any]:
+        @functools.wraps(function)
+        async def guarded(*args: Any, **kwargs: Any) -> dict[str, Any]:
+            try:
+                return await function(*args, **kwargs)
+            except Exception as error:  # noqa: BLE001 - the point of this function
+                return failure(f"{SERVICE} gave an answer that can't be used ({type(error).__name__}).")
+
+        return guarded
+
+    return wrap
+
+
+def _error(message: str) -> dict[str, Any]:
+    return {"ok": False, "error": message}
 
 
 class FusekiOntologySource:
@@ -137,6 +161,7 @@ class FusekiOntologySource:
 
     # The three read functions --------------------------------------------------------------
 
+    @_as_data(_error)
     async def query(self, sparql: str) -> dict[str, Any]:
         """A read-only SPARQL query. `{"ok": True, "rows", "truncated"}` or `{"ok": False, "error"}`."""
         problem = refusal_of(sparql)
@@ -144,6 +169,7 @@ class FusekiOntologySource:
             return {"ok": False, "error": problem}
         return await self._send(sparql)
 
+    @_as_data(_error)
     async def shapes(self, entity_type: str) -> dict[str, Any]:
         """What the SHACL shapes say about an entity type, as `node`, `p`, `o` rows."""
         parents = await self._parents(entity_type)
@@ -163,6 +189,7 @@ class FusekiOntologySource:
 }}"""
         )
 
+    @_as_data(_error)
     async def knowledge(self, entity_type: str) -> dict[str, Any]:
         """The entity type's class, its parents and its individuals, as `s`, `p`, `o` rows."""
         parents = await self._parents(entity_type)
@@ -184,6 +211,7 @@ class FusekiOntologySource:
 
     # Hints ---------------------------------------------------------------------------------
 
+    @_as_data(lambda message: no_hints(message))
     async def hints(self, entity_type: str, attribute: str) -> dict[str, Any]:
         """Allowed values and ranges. `hint_type` is `none` when nothing is known or Fuseki can't say."""
         parents = await self._parents(entity_type)
@@ -214,9 +242,23 @@ class FusekiOntologySource:
         )
         if not found["ok"]:
             return no_hints(found["error"])
+        if not found["rows"]:
+            return no_hints(await self._why_no_shapes())
         return await self._combine(found["rows"])
 
+    async def _why_no_shapes(self) -> str | None:
+        """Nothing about this attribute is normal. No shapes at all means the graph name is probably wrong."""
+        loaded = await self._send(f"ASK {{ GRAPH {self._shacl} {{ ?s ?p ?o }} }}")
+        if not loaded["ok"]:
+            return loaded["error"]
+        if loaded.get("boolean") is False:
+            return (
+                "No shapes were found in the configured graph. Check FUSEKI_GRAPH_BASE, and that the shapes are loaded."
+            )
+        return None
+
     async def _combine(self, rows: list[dict[str, Any]]) -> dict[str, Any]:
+        rows = [row for row in rows if isinstance(row, dict)]
         values = {row["allowed"] for row in rows if row.get("allowed") is not None}
         classes = {row["class"] for row in rows if row.get("class")}
         datatypes = sorted({row["datatype"] for row in rows if row.get("datatype")})
@@ -281,7 +323,7 @@ class FusekiOntologySource:
         try:
             async with httpx.AsyncClient(timeout=self._timeout, transport=self._transport) as client:
                 async with client.stream("POST", self._endpoint, content=sparql.encode(), headers=headers) as response:
-                    if response.status_code >= 400:
+                    if response.status_code >= 300:
                         return _failure(response.status_code)
                     async for chunk in response.aiter_bytes():
                         received += chunk
@@ -343,16 +385,31 @@ def _failure(status: int) -> dict[str, Any]:
 
 
 def _parsed(body: bytes, content_type: str) -> dict[str, Any]:
-    if "json" not in content_type:
-        text = body.decode("utf-8", errors="replace")
-        lines = text.splitlines()
+    """An answer in a form SPARQL gives, or an error. A sign-in page also answers 200."""
+    if any(kind in content_type for kind in GRAPH_ANSWERS):
+        lines = body.decode("utf-8", errors="replace").splitlines()
         return {"ok": True, "rows": lines[:MAX_ROWS], "truncated": len(lines) > MAX_ROWS}
+    unusable = {
+        "ok": False,
+        "error": f"{SERVICE} answered something other than a query result. Check FUSEKI_URL and the operator's roles.",
+    }
+    if "json" not in content_type:
+        return unusable
     try:
         answer = json.loads(body)
     except ValueError:
         return {"ok": False, "error": f"{SERVICE} sent an answer that can't be read."}
-    if "boolean" in answer:
+    if not isinstance(answer, dict):
+        return unusable
+    if isinstance(answer.get("boolean"), bool):
         return {"ok": True, "boolean": answer["boolean"], "rows": [], "truncated": False}
-    bindings = answer.get("results", {}).get("bindings", [])
-    rows = [{name: cell.get("value") for name, cell in row.items()} for row in bindings[:MAX_ROWS]]
+    results = answer.get("results")
+    bindings = results.get("bindings") if isinstance(results, dict) else None
+    if not isinstance(bindings, list):
+        return unusable
+    rows = [
+        {name: cell.get("value") for name, cell in row.items() if isinstance(cell, dict)}
+        for row in bindings[:MAX_ROWS]
+        if isinstance(row, dict)
+    ]
     return {"ok": True, "rows": rows, "truncated": len(bindings) > MAX_ROWS}

@@ -13,8 +13,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
+import asyncio
 import json
 import logging
+import time
 
 import httpx
 import pytest
@@ -22,9 +24,12 @@ from fastapi.testclient import TestClient
 
 from app.errors import Refused
 from app.ngsi import query as q
+from app.ngsi.broker import ContextBroker
+from tests.conftest import make_settings
 from tests.explorer_support import IRI, MACHINE, TOKEN, Broker, app_with
 
 ENTITY = f"/api/ngsi/entities/{MACHINE}"
+CORE = "https://uri.etsi.org/ngsi-ld/v1/ngsi-ld-core-context.jsonld"
 
 
 @pytest.fixture
@@ -121,11 +126,232 @@ def test_syntax_errors_name_the_reason(expression, reason):
     assert reason in caught.value.message
 
 
-def test_dotted_iri_is_recognised_and_plain_paths_are_not():
-    assert q.has_dotted_iri(q.parse(f'{IRI}state=="ON"'))
-    assert not q.has_dotted_iri(q.parse('status.accuracy==1;a=="b"'))
-    assert not q.has_dotted_iri(q.parse('https://example/state=="ON"'))
-    assert not q.has_dotted_iri(None)
+@pytest.mark.parametrize(
+    ("expression", "sent"),
+    [
+        ('status=="a"', True),
+        ("status.accuracy==1", True),
+        ('a=="b";c>1|d<2', True),
+        ("status", True),
+        ('status=="a","b"', True),
+        ('https://example/state=="ON"', True),
+        (f'{IRI}state=="ON"', False),
+        ("!status", False),
+        ('status~="a"', False),
+        ('status!~="a"', False),
+        ("value==1..5", False),
+        ('a=="b";!c', False),
+        ('a=="b"|c~="d"', False),
+    ],
+)
+def test_what_goes_to_the_broker_and_what_is_evaluated_here(expression, sent):
+    assert q.broker_can_evaluate(q.parse(expression)) is sent
+
+
+def test_no_expression_needs_no_evaluation():
+    assert q.broker_can_evaluate(None) is True
+
+
+@pytest.mark.parametrize("bad", ["a=={", "a==}", "a==[", "a==<", "a=={x}", "a==$", "(", "a b"])
+def test_values_the_broker_fails_on_are_refused_as_syntax_errors(client, broker, bad):
+    answer = client.get("/api/ngsi/entities", params={"type": "T", "q": bad})
+    assert answer.status_code == 422
+    assert broker.requests == []
+
+
+def test_a_broker_failing_on_an_expression_falls_back_to_evaluating_here():
+    calls = []
+
+    def fails_with_q(request):
+        calls.append(request)
+        if "q" in request.url.params:
+            return httpx.Response(500, json={"title": "Internal error"})
+        return httpx.Response(200, json=[{"id": "urn:a", "type": "T", "a": {"type": "Property", "value": 1}}])
+
+    answer = TestClient(app_with(fails_with_q)).get("/api/ngsi/entities", params={"type": "T", "q": "a==1"})
+    assert answer.status_code == 200
+    assert [e["id"] for e in answer.json()] == ["urn:a"]
+    assert ["q" in r.url.params for r in calls] == [True, False]
+
+
+def test_a_broker_that_is_really_down_stays_502_with_an_expression():
+    def down(request):
+        raise httpx.ConnectError("x", request=request)
+
+    assert TestClient(app_with(down)).get("/api/ngsi/entities", params={"type": "T", "q": "a==1"}).status_code == 502
+
+
+def test_a_catastrophic_pattern_returns_at_once(client, broker):
+    broker.entities["urn:r"] = {"id": "urn:r", "type": "T", "a": {"type": "Property", "value": "a" * 5000 + "!"}}
+    started = time.perf_counter()
+    answer = client.get("/api/ngsi/entities", params={"type": "T", "q": 'a~="(a+)+$"'})
+    assert answer.status_code == 200
+    assert answer.json() == []
+    assert time.perf_counter() - started < 2
+
+
+@pytest.mark.parametrize("pattern", ["(?=a)b", "("])
+def test_patterns_re2_cannot_run_are_refused(client, pattern):
+    answer = client.get("/api/ngsi/entities", params={"type": "T", "q": f'a~="{pattern}"'})
+    assert answer.status_code == 422
+    assert "regular expression" in answer.json()["error"]["message"]
+
+
+def test_back_references_are_refused_as_re2_cannot_run_them():
+    with pytest.raises(Refused, match="back-references"):
+        q.compile_pattern("(a)\\1", "The pattern")
+
+
+def test_a_very_long_pattern_is_refused(client, broker):
+    long = "a" * (q.MAX_PATTERN + 1)
+    assert client.get("/api/ngsi/entities", params={"type": "T", "q": f'a~="{long}"'}).status_code == 422
+    assert client.get("/api/ngsi/entities", params={"type": "T", "id_pattern": long}).status_code == 422
+    assert broker.requests == []
+    fine = "a" * q.MAX_PATTERN
+    assert client.get("/api/ngsi/entities", params={"type": "T", "q": f'a~="{fine}"'}).status_code == 200
+
+
+def test_a_search_that_stopped_early_says_so_in_a_header_and_otherwise_does_not(broker):
+    for i in range(5300):
+        broker.entities[f"urn:b:{i:05d}"] = {
+            "id": f"urn:b:{i:05d}",
+            "type": "Big",
+            "n": {"type": "Property", "value": i},
+        }
+    client_ = TestClient(app_with(broker))
+    far = client_.get("/api/ngsi/entities", params={"type": "Big", "q": '!nothing;n~="^52..$"', "limit": 1000})
+    assert far.json() == []
+    assert far.headers["X-Results-Limited"] == "scanned=5000, total=5300"
+    near = client_.get("/api/ngsi/entities", params={"type": "Big", "q": "!nothing", "limit": 5})
+    assert len(near.json()) == 5
+    assert "X-Results-Limited" not in near.headers
+    plain = client_.get("/api/ngsi/entities", params={"type": "Big", "limit": 5})
+    assert "X-Results-Limited" not in plain.headers
+
+
+def test_all_entities_below_the_cap_are_not_called_limited(broker):
+    for i in range(1500):
+        broker.entities[f"urn:b:{i}"] = {"id": f"urn:b:{i}", "type": "Mid"}
+    answer = TestClient(app_with(broker)).get(
+        "/api/ngsi/entities", params={"type": "Mid", "q": "!nothing", "limit": 1000}
+    )
+    assert "X-Results-Limited" not in answer.headers
+
+
+@pytest.mark.parametrize(
+    "context",
+    [
+        "http://169.254.169.254/latest/meta-data",
+        "http://keycloak:8080/realms/iff",
+        "https://example.org/c.jsonld",
+        ["https://uri.etsi.org/ngsi-ld/v1/ngsi-ld-core-context.jsonld", "http://internal/c"],
+        {"@import": "http://internal/c"},
+        {"term": {"@id": "urn:t", "@context": "http://internal/c"}},
+        [{"@context": "http://internal/c"}],
+    ],
+)
+def test_import_never_passes_on_a_context_that_is_not_allowed(client, broker, context):
+    answer = client.post("/api/ngsi/import", json=[{"@context": context, "id": "urn:c:1", "type": "T"}])
+    assert answer.status_code == 207
+    assert answer.json()[0]["result"] == "failed"
+    assert "internal" not in answer.json()[0]["reason"]
+    assert "169.254" not in answer.json()[0]["reason"]
+    assert not any(r.url.path.endswith("upsert") for r in broker.requests)
+
+
+def test_a_context_inside_an_attribute_is_refused_on_import_and_on_edits(client, broker):
+    inner = {"type": "Property", "value": 1, "@context": "http://internal/c"}
+    assert client.post("/api/ngsi/import", json=[{"id": "urn:c:1", "type": "T", "a": inner}]).status_code == 207
+    assert not any(r.url.path.endswith("upsert") for r in broker.requests)
+    assert client.post(f"{ENTITY}/attrs", json={"a": inner}).status_code == 422
+    assert client.patch(f"{ENTITY}/attrs", json={attrs(): {"@context": "http://internal/c"}}).status_code == 422
+    assert all(r.method == "GET" for r in broker.requests)
+
+
+@pytest.mark.parametrize(
+    "context",
+    [
+        "https://uri.etsi.org/ngsi-ld/v1/ngsi-ld-core-context.jsonld",
+        "https://uri.etsi.org/ngsi-ld/v1/ngsi-ld-core-context-v1.7.jsonld",
+        "https://contexts.example/mine.jsonld",
+        "https://contexts.example/configured.jsonld",
+        {"term": "urn:t"},
+    ],
+)
+def test_known_contexts_and_plain_inline_ones_reach_the_broker(broker, context):
+    client_ = TestClient(
+        app_with(
+            broker,
+            ngsi_context_url="https://contexts.example/configured.jsonld",
+            ngsi_allowed_contexts="https://other.example/x, https://contexts.example/mine.jsonld",
+        )
+    )
+    answer = client_.post("/api/ngsi/import", json=[{"@context": context, "id": "urn:c:1", "type": "T"}])
+    assert answer.status_code == 200
+    assert answer.json()[0]["result"] == "created"
+
+
+def test_addresses_in_a_brokers_reasons_are_taken_out(client, broker):
+    def rejecting(request):
+        if request.url.path.endswith("upsert"):
+            detail = "Failed to load http://inner-host:8080/secret/context.jsonld for this"
+            errors_ = [{"entityId": "urn:n:1", "error": {"detail": detail}}]
+            return httpx.Response(207, json={"success": [], "errors": errors_})
+        if "q" in request.url.params:
+            return httpx.Response(400, json={"detail": "bad value at http://inner-host:8080/x"})
+        return httpx.Response(200, json=[])
+
+    client_ = TestClient(app_with(rejecting))
+    rows = client_.post("/api/ngsi/import", json=[{"id": "urn:n:1", "type": "T"}]).json()
+    assert "inner-host" not in rows[0]["reason"]
+    assert "[address]" in rows[0]["reason"]
+
+
+@pytest.mark.parametrize("identifier", ["..", ".", "%2e%2e"])
+def test_dots_cannot_climb_out_of_the_entities_path(client, broker, identifier):
+    answer = client.delete("/api/ngsi/entities/urn:x/attrs", params={"name": identifier.replace("%2e", ".")})
+    assert answer.status_code in (404, 422)
+    with pytest.raises(Refused):
+        asyncio.run(client.app.state.broker.entity(identifier.replace("%2e", ".")))
+    assert not any(r.url.raw_path.startswith(b"/ngsi-ld/v1/entities/..") for r in broker.requests)
+
+
+async def test_concurrent_adds_of_one_attribute_give_one_winner_and_one_conflict():
+    broker = Broker()
+    configured = make_settings(ngsi_url="http://broker.test:9090")
+    client_ = ContextBroker(configured, lambda: None, transport=httpx.MockTransport(broker))
+    body = {"new": {"type": "Property", "value": 1}}
+    answers = await asyncio.gather(
+        client_.append_attributes(MACHINE, body), client_.append_attributes(MACHINE, body), return_exceptions=True
+    )
+    assert sorted(type(a).__name__ for a in answers) == ["NoneType", "Refused"]
+    assert next(a for a in answers if a is not None).kind == "conflict"
+    assert client_._entity_locks == {}
+
+
+async def test_edits_on_different_entities_do_not_wait_for_each_other():
+    release = asyncio.Event()
+    order = []
+
+    class Slow(httpx.AsyncBaseTransport):
+        async def handle_async_request(self, request):
+            order.append(request.url.path)
+            if request.url.path.endswith("urn:a"):
+                await release.wait()
+            return httpx.Response(200, json={"id": "x", "type": "T", "a": {"type": "Property", "value": 1}})
+
+    client_ = ContextBroker(make_settings(ngsi_url="http://b.test"), lambda: None, transport=Slow())
+    first = asyncio.create_task(client_.update_attributes("urn:a", {"a": {"value": 2}}))
+    await asyncio.sleep(0)
+    await asyncio.wait_for(client_.update_attributes("urn:b", {"a": {"value": 2}}), 2)
+    assert first.done() is False
+    release.set()
+    await first
+
+
+def test_delete_by_types_sends_no_wildcard_query(client, broker):
+    client.post("/api/ngsi/delete-by-types", json={"types": ["*"]})
+    assert not any(r.url.params.get("type") == "*" for r in broker.requests)
 
 
 def test_sub_attribute_of_iris():
@@ -335,7 +561,7 @@ def test_import_partial_failure_is_207_with_reasons_in_input_order(client):
 
 
 def test_import_splits_entities_with_their_own_context(client, broker):
-    body = [{"id": "urn:n:1", "type": "T"}, {"@context": "https://c.example/c", "id": "urn:n:2", "type": "T"}]
+    body = [{"id": "urn:n:1", "type": "T"}, {"@context": CORE, "id": "urn:n:2", "type": "T"}]
     answer = client.post("/api/ngsi/import", json=body)
     assert answer.status_code == 200
     posts = [r for r in broker.requests if r.url.path.endswith("upsert")]
@@ -345,7 +571,7 @@ def test_import_splits_entities_with_their_own_context(client, broker):
 def test_import_context_body_gets_no_link_header():
     fake = Broker()
     client_ = TestClient(app_with(fake, ngsi_context_url="https://contexts.example/c.jsonld"))
-    client_.post("/api/ngsi/import", json=[{"@context": "https://c.example/c", "id": "urn:n:2", "type": "T"}])
+    client_.post("/api/ngsi/import", json=[{"@context": CORE, "id": "urn:n:2", "type": "T"}])
     post = next(r for r in fake.requests if r.url.path.endswith("upsert"))
     assert "Link" not in post.headers
 

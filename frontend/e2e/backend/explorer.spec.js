@@ -51,6 +51,13 @@ test('types and attributes come from the broker, and a query lists its machines'
   await expect(entities(page).locator('[data-entity="urn:ngsi-ld:Machine:press-brake-01"]')).toHaveCount(0)
 })
 
+test('pattern, range and missing conditions work on a real broker', async ({ page }) => {
+  for (const q of ['machineType~="^Laser"', 'machineType!~="^Press"', '!nothing', 'name;!nothing']) {
+    await page.goto(`/explorer?type=Machine&limit=100&q=${encodeURIComponent(q)}`)
+    await expect(node(page, MACHINE)).toBeVisible()
+  }
+})
+
 test('an invalid expression is explained next to the query bar', async ({ page }) => {
   await page.goto(`/explorer?type=Machine&q=${encodeURIComponent('((')}`)
   await expect(page.getByRole('alert').filter({ hasText: 'position' })).toBeVisible()
@@ -97,6 +104,17 @@ test('import from an internal address is refused with the reason', async ({ page
   await page.getByLabel('Document URL').fill('http://169.254.169.254/latest/meta-data')
   await page.getByRole('button', { name: 'Fetch' }).click()
   await expect(page.getByRole('alert').filter({ hasText: 'internal address' })).toBeVisible()
+})
+
+test('import refuses a context that is not allowed, and says why, without the address', async ({ page }) => {
+  await page.goto('/explorer')
+  await page.getByRole('button', { name: 'Import…' }).click()
+  const document = [{ '@context': 'http://169.254.169.254/x.jsonld', id: `urn:ngsi-ld:E2e:${tag()}`, type: 'E2e' }]
+  await page.getByLabel(/File with NGSI-LD entities/).setInputFiles({ name: 'e.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(document)) })
+  await page.getByRole('button', { name: 'Import 1 entities' }).click()
+  const results = page.getByRole('region', { name: 'Import results' })
+  await expect(results).toContainText("isn't allowed")
+  await expect(results).not.toContainText('169.254')
 })
 
 test('history of a signal, through PostgREST', async ({ page }) => {

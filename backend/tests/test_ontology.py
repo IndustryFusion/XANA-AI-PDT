@@ -22,7 +22,15 @@ from rdflib.plugins.sparql.parser import parseQuery
 from rdflib.plugins.sparql.processor import translateQuery
 
 from app.config import Settings
-from xana_agent.sources.ontology import FusekiOntologySource, UnsafeTerm, iri_ref, literal, names, refusal_of
+from xana_agent.sources.ontology import (
+    MAX_BYTES,
+    FusekiOntologySource,
+    UnsafeTerm,
+    iri_ref,
+    literal,
+    names,
+    refusal_of,
+)
 
 BASE = "https://uri.etsi.org/ngsi-ld/default-context/"
 TYPE = f"{BASE}Machine"
@@ -67,11 +75,10 @@ class Fuseki:
         self.headers.append(request.headers)
         rows = self.answer(query)
         bindings = [{k: {"type": "literal", "value": v} for k, v in row.items()} for row in rows]
-        return httpx.Response(
-            200,
-            json={"head": {"vars": []}, "results": {"bindings": bindings}},
-            headers={"Content-Type": "application/sparql-results+json"},
-        )
+        answer = {"head": {"vars": []}, "results": {"bindings": bindings}}
+        if query.lstrip().startswith("ASK"):
+            answer = {"head": {}, "boolean": True}
+        return httpx.Response(200, json=answer, headers={"Content-Type": "application/sparql-results+json"})
 
 
 def source(fuseki, **kwargs):
@@ -221,6 +228,16 @@ def test_names_uses_equality_for_iris_and_local_part_for_short_names():
         "SELECT * WHERE { SERVICE <http://169.254.169.254/> { ?s ?p ?o } }",
         "select * where { service <http://internal/> { ?s ?p ?o } }",
         "SELECT * WHERE { SERVICE\n# comment\n<http://internal/> { ?s ?p ?o } }",
+        "PREFIX ex: <http://ex/> SELECT * WHERE { VALUES ?v { ex:b\\# } SERVICE <http://internal/> { ?s ?p ?o } }",
+        "PREFIX ex: <http://ex/> SELECT * WHERE { BIND(ex:b\\# AS ?v) SERVICE <http://internal/> { ?s ?p ?o } }",
+        "PREFIX ex: <http://ex/> SELECT * WHERE { VALUES ?v { ex:b\\' } "
+        "SERVICE <http://i/> { ?s ?p ?o } VALUES ?w { ex:c\\' } }",
+        "SELECT * WHERE { SE\\u0052VICE <http://internal/> { ?s ?p ?o } }",
+        "SELECT * WHERE { SERVICE SILENT <http://internal/> { ?s ?p ?o } }",
+        "SELECT * WHERE { ?a ?b ?c . { SELECT * WHERE { OPTIONAL { SERVICE ?x { ?s ?p ?o } } } } }",
+        'SELECT * WHERE { ?a ?b "x" SERVICE <http://internal/> { ?s ?p ?o } }',
+        "SELECT nonsense {{{",
+        "a" * 100_001,
         "PREFIX a: <urn:a> SERVICE",
         "# only a comment",
         "",
@@ -242,6 +259,14 @@ async def test_query_refuses_what_is_not_a_plain_read_with_nothing_sent(query):
         "# DELETE is only in a comment\nASK { ?s ?p ?o }",
         "BASE <urn:b> PREFIX a: <urn:a> CONSTRUCT { ?s ?p ?o } WHERE { ?s ?p ?o }",
         "DESCRIBE <urn:SERVICE>",
+        "SELECT ?shape WHERE { GRAPH <http://fuseki.local/iff/shacl.ttl> "
+        "{ ?shape a <http://www.w3.org/ns/shacl#NodeShape> } } LIMIT 10",
+        "SELECT ?cls WHERE { GRAPH <http://fuseki.local/iff/knowledge.ttl> "
+        "{ ?cls a <http://www.w3.org/2002/07/owl#Class> } }",
+        "CONSTRUCT { ?s ?p ?o } WHERE { GRAPH <http://fuseki.local/iff/knowledge.ttl> { ?s ?p ?o } }",
+        "PREFIX sh: <http://www.w3.org/ns/shacl#> SELECT DISTINCT ?n WHERE { ?shape sh:property/sh:path ?n . "
+        '?shape (<urn:a>|!<urn:a>)* ?x . FILTER(REPLACE(STR(?n), "^.*[/#]", "") = "a") }',
+        "SELECT (COUNT(*) AS ?n) WHERE { GRAPH ?g { ?s ?p ?o } } GROUP BY ?g HAVING (COUNT(*) > 1) ORDER BY ?n",
     ],
 )
 def test_query_allows_plain_reads_whatever_their_text_holds(query):
@@ -252,6 +277,84 @@ async def test_query_reports_truncation_at_the_limit():
     many = Fuseki(lambda q: [{"s": str(i)} for i in range(1200)])
     answer = await source(many).query("SELECT ?s WHERE { ?s ?p ?o }")
     assert answer["ok"] and answer["truncated"] and len(answer["rows"]) == 1000
+
+
+async def test_too_long_an_answer_stops_and_comes_back_as_data():
+    def huge(request):
+        return httpx.Response(
+            200, content=b"x" * (MAX_BYTES + 1), headers={"Content-Type": "application/sparql-results+json"}
+        )
+
+    answer = await source(huge).query("SELECT * WHERE { ?s ?p ?o }")
+    assert answer["ok"] is False
+    assert "more than" in answer["error"]
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        httpx.Response(200, text="<html>sign in</html>", headers={"Content-Type": "text/html"}),
+        httpx.Response(302, text="moved", headers={"Content-Type": "text/html", "Location": "http://kc/login"}),
+        httpx.Response(200, json=[1, 2]),
+        httpx.Response(200, json={"results": []}),
+        httpx.Response(200, json={"results": {"bindings": "x"}}),
+        httpx.Response(200, json={"results": {"bindings": [1, {"a": 2}]}}),
+        httpx.Response(200, text="not json", headers={"Content-Type": "application/json"}),
+        httpx.Response(200, text="plain"),
+    ],
+)
+async def test_unexpected_answers_never_raise_and_never_look_like_results(answer):
+    fuseki = source(lambda request: answer)
+    for result in (
+        await fuseki.query("SELECT * WHERE { ?s ?p ?o }"),
+        await fuseki.shapes("Machine"),
+        await fuseki.knowledge("Machine"),
+    ):
+        assert result.get("rows", []) in ([], [{}]) or result["ok"] is False
+    hint = await fuseki.hints("Machine", "status")
+    assert hint["hint_type"] == "none"
+
+
+async def test_html_is_not_a_query_result():
+    html = httpx.Response(200, text="<html>sign in</html>", headers={"Content-Type": "text/html"})
+    answer = await source(lambda request: html).query("SELECT * WHERE { ?s ?p ?o }")
+    assert answer["ok"] is False
+    assert "other than a query result" in answer["error"]
+
+
+async def test_a_redirect_says_so():
+    moved = httpx.Response(302, headers={"Location": "http://kc/login"})
+    hint = await source(lambda request: moved).hints("Machine", "status")
+    assert "HTTP 302" in hint["detail"]
+
+
+async def test_a_crash_inside_comes_back_as_data(monkeypatch):
+    fuseki = source(Fuseki())
+
+    async def broken(*args, **kwargs):
+        raise TypeError("surprise")
+
+    monkeypatch.setattr(fuseki, "_send", broken)
+    assert (await fuseki.query("SELECT * WHERE { ?s ?p ?o }"))["ok"] is False
+    assert (await fuseki.shapes("Machine"))["ok"] is False
+    assert (await fuseki.hints("Machine", "status"))["hint_type"] == "none"
+
+
+async def test_an_empty_graph_says_to_check_the_base_and_a_loaded_one_does_not():
+    def empty(query):
+        return []
+
+    hint = await source(Fuseki(empty)).hints("Machine", "status")
+    assert hint["hint_type"] == "none"
+    assert hint["detail"] is None  # the graph holds something (ASK says true), just nothing on this
+
+    def nothing(request):
+        body = request.content.decode()
+        answer = {"boolean": False} if body.startswith("ASK") else {"results": {"bindings": []}}
+        return httpx.Response(200, json=answer)
+
+    hint = await source(nothing).hints("Machine", "status")
+    assert "FUSEKI_GRAPH_BASE" in hint["detail"]
 
 
 @pytest.mark.parametrize(

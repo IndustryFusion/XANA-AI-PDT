@@ -52,13 +52,13 @@ Data and models are kept in Docker volumes between runs. `docker compose -f back
 
 **With the explorer's history and time-shift:** add `--profile history`, which starts PostgREST (v12, as on the platform) on the sample history. An existing database gains the platform's columns when the sample data loads. To refuse requests without a token, as the platform does, set `XANA_PGREST_ANON_ROLE=` and use the `auth` profile too, with `KEYCLOAK_URL=http://keycloak:8080`.
 
-**With live updates:** add `--profile live`, which starts EMQX (5.8, as on the platform). Here it takes any client; the platform checks a token and a role. See [Data Explorer](#data-explorer).
+**With live updates:** add `--profile live`, which starts EMQX (5.8, as on the platform). Here it takes any client; the platform checks a token and a role. See [Data Explorer](#data-explorer). `--profile platform-mqtt` starts another EMQX that checks like the platform, for tests: it needs the `auth` profile, and `emqx/mqtt_auth.py` has the rules.
 
 **With value hints:** add `--profile ontology`, which starts Fuseki and loads sample shapes and knowledge from `sample_data/ontology/`.
 
 **With alerts:** add `--profile alerts`, which starts Alerta (9.0.4, as on the platform, with its severities) and sends sample alerts in the form the platform's rules give them. The key is `local-development-only-key` unless `ALERTA_API_KEY` is set. Without the profile, the Alerts screen says that Alerta is unavailable, and runs show that source as unavailable.
 
-**Ports in use:** if a host port is taken, set `XANA_DB_PORT`, `XANA_BROKER_PORT`, `XANA_OLLAMA_PORT`, `XANA_KEYCLOAK_PORT`, `XANA_PGREST_PORT`, `XANA_MQTT_PORT`, `XANA_MQTT_MGMT_PORT`, `XANA_FUSEKI_PORT`, `XANA_ALERTA_PORT` or `XANA_BACKEND_PORT`.
+**Ports in use:** if a host port is taken, set `XANA_DB_PORT`, `XANA_BROKER_PORT`, `XANA_OLLAMA_PORT`, `XANA_KEYCLOAK_PORT`, `XANA_PGREST_PORT`, `XANA_MQTT_PORT`, `XANA_MQTT_MGMT_PORT`, `XANA_MQTT_PLATFORM_PORT`, `XANA_FUSEKI_PORT`, `XANA_ALERTA_PORT` or `XANA_BACKEND_PORT`.
 
 The local environment is for development only. The database trusts local connections, and every port is bound to `127.0.0.1`.
 
@@ -68,7 +68,7 @@ Check it:
 curl 'http://localhost:8000/api/diagnostics?fresh=true'
 ```
 
-Every check (memory, time-series store, context broker, language model) should be `ok`. While the model is still downloading, the language model check is `degraded`.
+Each of the four checks (memory, time-series store, context broker, language model) should be `ok`. The optional services aren't in this report: each area says when its own service fails. While the model is still downloading, the language model check is `degraded`.
 
 **With the UI:** in `frontend/`, run `npm run dev`. The development server forwards `/api` and `/ws` to `XANA_BACKEND_URL` (default `http://localhost:8000`).
 
@@ -105,7 +105,7 @@ Fields are snake_case. A refused request answers `{"error": {"kind", "message"}}
 | `/api/ngsi/attr-status` | GET `?entity_id` | The latest recorded state per attribute: `{name: {deleted, observedAt}}` |
 | `/api/ngsi/timeshift/types` | GET `?at` | Types at a past moment |
 | `/api/ngsi/timeshift/entities` | GET `?at&type&id&id_pattern&q&limit` | Entities as they were at a past moment |
-| `/api/ngsi/ws` | WebSocket `?type&ids=a,b` | Changes as they happen: `{type: "update", entity_id, entity_type, attributes}`, and `keepalive` every 20 s while quiet. A client that falls behind is closed with code 1013 |
+| `/api/ngsi/ws` | WebSocket `?type&ids=a,b` | Changes as they happen: `{type: "update", entity_id, entity_type, attributes}`, with the whole entity's attributes as the broker notifies them, and `keepalive` every 20 s while quiet. A client that falls behind is closed with code 1013, and one that stops reading is reset after 10 s. A page from another origin is refused, unless `WS_ALLOWED_ORIGINS` lists it |
 | `/api/shacl/hints` | GET `?entity_type&attribute` | `{hint_type, values, minimum, maximum, minimum_exclusive, maximum_exclusive, datatype, detail}`. Always answers: `none` with a reason when Fuseki can't |
 | `/api/alerta/alerts` | GET `?status=a,b&severity&environment&service&text&sort&page&page_size` | `{alerts, total, bySeverity, page, pageSize}`. Default: open and acknowledged, most severe and newest first |
 | `/api/alerta/alerts/count` | GET `?status=a,b` | `{total, bySeverity}` |
@@ -113,7 +113,7 @@ Fields are snake_case. A refused request answers `{"error": {"kind", "message"}}
 | `/api/alerta/alert/{id}/action` | PUT `{action, text}` | `ack`, `unack`, `shelve`, `unshelve`, `close` or `open`; answers the updated alert |
 | `/api/alerta/environments`, `services` | GET | Names |
 | `/api/alerta/config` | GET | `{refresh_interval_s}` |
-| `/api/ngsi/subscription-health` | GET | `{status, state, detail, expires_at}` of live updates |
+| `/api/ngsi/subscription-health` | GET | `{status, state, detail, expires_at, delivery}` of live updates |
 | `/ws/run/{run_id}` | WebSocket | `snapshot` first, then `step` and `status` events; `keepalive` every 20 s while quiet; `error` and close code 4404 for an unknown or archived run |
 
 - **Attachments:** `files` items are `{name, type, size, data_url}`: images, PDF or plain text, at most 5 files of 10 MB each. Only the name, type and size are kept.
@@ -151,11 +151,14 @@ To check sign-in in a browser, run `XANA_E2E_SIGNIN=1 XANA_E2E_BACKEND=1 npx pla
 
 Routes under `/api/ngsi` reach only `NGSI_URL` and `PGREST_URL`, with the session's token. No route takes an address. They are for operators: the diagnostic workflow has no path to them, and only reads.
 
-- **Names on platform data:** attributes are full IRIs, and answers keep them. A short name in `q` silently matches nothing unless `NGSI_CONTEXT_URL` names a context that maps it. The same goes for the agent's lookups through `partOf` and `measures`. An IRI with a dot in `q`, which the broker can't evaluate, is filtered by the backend over up to 5000 entities.
+- **Names on platform data:** attributes are full IRIs, and answers keep them. A short name in `q` silently matches nothing unless `NGSI_CONTEXT_URL` names a context that maps it. The same goes for the agent's lookups through `partOf` and `measures`. What the broker can't evaluate in `q` (`~=`, `!~=`, `!attr`, ranges and IRIs with a dot) is evaluated by the backend over up to 5000 entities, and the header `X-Results-Limited: scanned=5000, total=5300` says when there were more. Patterns run on RE2, so look-around and back-references are refused.
+- **Contexts:** an imported entity may name only the ETSI core context, `NGSI_CONTEXT_URL`, or what `NGSI_ALLOWED_CONTEXTS` lists, because the broker fetches a context from inside the platform.
+- **Concurrent edits:** one read-then-write at a time per entity, so two adds of one attribute give one `conflict`. Another writer can still change an attribute in between.
 - **History:** PostgREST needs `TIMESCALE_TABLE` and `TIMESCALE_ENTITY_TABLE` in the platform's layout. On the platform, the operator's token must carry the `role` claim, which the `scorpio` client's `pgrest_role` scope adds.
 - **Import from a URL:** refuses every internal address, also after a redirect, and connects only to the address it checked. 10 MB and 10 s at most.
 - **Live updates:** one subscription of 24 hours in the context broker, with an MQTT endpoint on `MQTT_BROKER_NOTIFY_URL`, starting after sign-in. It is renewed when the token rotates and an hour before it expires, and deleted on sign-out and shutdown. If the process dies, it runs out by itself, and the next start removes it.
   - **On the platform,** each operator needs `Factory-Admin` or `Factory-Reader` on client `scorpio`, or EMQX refuses the token and the state says so.
+  - **What `ok` means:** connected and subscribed. Scorpio reports nothing about failed MQTT deliveries, so `delivery` says whether a change has arrived yet, and a change made here that doesn't arrive in 15 s gives `delivery_failed`.
   - **The token is in the subscription's address,** as the broker has no other way to take MQTT credentials. It isn't logged or returned here, but anyone who may read subscriptions from the broker can read it until it expires.
 - **While the session is shared:** anyone who can reach the backend can edit, delete and import, using the signed-in operator's token. See [Sign-in](#sign-in).
 
@@ -173,7 +176,7 @@ The machine ontology and SHACL shapes are read from Fuseki (`FUSEKI_URL`, `FUSEK
 
 - **Graph names** start with `FUSEKI_GRAPH_BASE`: `<base>/shacl.ttl` and `<base>/knowledge.ttl`. On the platform that is `http://<Fuseki's external host>/<realm>`, which differs from the service's address, so it must be set.
 - **Tokens:** the operator's token is sent. Through the platform's ingress, operators need `Factory-Admin` or `Factory-Reader` on client `fuseki`; the service `fuseki:3030` itself doesn't check.
-- **For the agent (#29):** `xana_agent.sources.FusekiOntologySource` has `query`, `shapes` and `knowledge`, which only read and give errors as data. `query` refuses updates and `SERVICE`, because Fuseki would call any address in a query.
+- **For the agent (#29):** `xana_agent.sources.FusekiOntologySource` has `query`, `shapes` and `knowledge`, which only read and give errors as data. `query` decides on the parsed query, and refuses updates, `SERVICE` (Fuseki would call any address in a query) and what can't be parsed.
 - **Query input:** entity types and attributes go into queries only escaped. Tests parse the resulting queries, and try hostile input against a real Fuseki (`TEST_FUSEKI_URL`).
 
 ## Language model
@@ -200,6 +203,7 @@ cd backend
 - **Database tests:** tests marked `db` need PostgreSQL with TimescaleDB. Point `TEST_DATABASE_URL` at a server where the user may create databases, for example `TEST_DATABASE_URL=postgresql://xana@localhost:5432/postgres .venv/bin/pytest`. Without it they are skipped.
 - **Real services:** `tests/test_explorer_real.py` runs against a real broker and PostgREST, with `TEST_BROKER_URL`, `TEST_PGREST_URL` and `TEST_TSDB_URL`. Without them it is skipped. It writes rows in the platform's table layout.
 - **Real Fuseki:** `tests/test_ontology_real.py` needs `TEST_FUSEKI_URL`; `tests/test_live_updates_real.py` needs `TEST_MQTT_URL` too.
+- **Real MQTT:** `tests/test_live_updates_real.py` needs `TEST_BROKER_URL`, `TEST_MQTT_URL` and `TEST_MQTT_NOTIFY_URL`, and for tokens, roles and rotation `TEST_MQTT_PLATFORM_URL`, `TEST_MQTT_PLATFORM_NOTIFY_URL` and `TEST_KEYCLOAK_URL`. `TEST_MQTT_CONTAINER` and `TEST_MQTT_PLATFORM_CONTAINER` name the containers it restarts. Without them those tests are skipped.
 - **CI:** the `Backend` workflow runs linting, the formatting check, all tests including the database tests, and a check of `compose.yaml` on every pull request that touches `backend/`. Its `integration` job starts the local environment with `LLM_PROVIDER=scripted` and runs the UI's end-to-end tests on the backend data source (`frontend/e2e/backend/`); it also runs when the UI's data layer changes.
 
 ## Sample data

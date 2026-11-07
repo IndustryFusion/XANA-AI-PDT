@@ -44,6 +44,9 @@ export const DEFAULT_CONTROLS = {
   // Live entity updates (available | unavailable) and occasional new alerts.
   liveUpdates: 'available',
   newAlerts: true,
+  // How many items a search looks through before it stops and says so (null: no limit), as the
+  // backend does on a large installation.
+  searchCap: null,
 }
 
 /** Playback speeds offered in the controls (multiples of real time). */

@@ -27,8 +27,10 @@ from starlette.websockets import WebSocketDisconnect
 from app.api import auth, errors, ngsi
 from app.auth import KeycloakSession
 from app.main import configure_logging
+from app.ngsi import live as live_module
 from app.ngsi.broker import ContextBroker
 from app.ngsi.live import QUEUE_SIZE, RENEW_BEFORE_S, SUBSCRIPTION_NAME, LiveUpdates, Refusal, parse_notification
+from app.ngsi.stream import TRANSPORT, ConnectionInScope, origin_allowed
 from app.redact import Redactor
 from tests.conftest import make_settings
 
@@ -290,7 +292,187 @@ async def test_stop_deletes_the_subscription(world):
     await world.settled()
     await world.live.stop()
     assert world.broker.subscriptions == {}
-    assert world.live.health()["state"] == "stopped"
+
+
+async def test_after_sign_out_it_waits_for_sign_in_and_with_sign_in_off_it_is_stopped():
+    signed = World()
+    signed.live.start()
+    await signed.settled()
+    await signed.live.stop()
+    assert signed.live.health()["state"] == "waiting_for_sign_in"
+    open_ = World(token=None, sign_in=False)
+    open_.live.start()
+    await open_.settled()
+    await open_.live.stop()
+    assert open_.live.health()["state"] == "stopped"
+
+
+class DelayedPost(FakeBroker):
+    """A broker whose answer to creating a subscription is slow; the create takes effect at once."""
+
+    def __init__(self, delay: float) -> None:
+        super().__init__()
+        self.delay = delay
+
+    async def handle(self, request: httpx.Request) -> httpx.Response:
+        answer = self(request)
+        if request.method == "POST":
+            await asyncio.sleep(self.delay)
+        return answer
+
+
+def world_with_delay(delay: float) -> World:
+    made = World()
+    made.broker = DelayedPost(delay)
+    broker = ContextBroker(made.settings, lambda: made.token, transport=httpx.MockTransport(made.broker.handle))
+    made.live._broker = broker
+    return made
+
+
+async def test_stop_during_a_create_leaves_nothing_with_the_token_in_it():
+    made = world_with_delay(0.2)
+    made.live.start()
+    for _ in range(300):
+        if made.broker.subscriptions:
+            break
+        await asyncio.sleep(0.005)
+    assert made.live._exists is False  # the answer hasn't come yet
+    await made.live.stop()
+    assert made.broker.subscriptions == {}
+    assert made.live.health()["state"] == "waiting_for_sign_in"
+
+
+async def test_stop_with_a_create_that_never_answers_still_tries_to_delete(monkeypatch):
+    monkeypatch.setattr(live_module, "STOP_TIMEOUT_S", 0.05)
+    monkeypatch.setattr(live_module, "LATE_CREATE_S", 0.01)
+    made = world_with_delay(30)
+    made.live.start()
+    for _ in range(300):
+        if made.broker.subscriptions:
+            break
+        await asyncio.sleep(0.005)
+    await asyncio.wait_for(made.live.stop(), 5)
+    assert made.broker.subscriptions == {}
+    assert sum(r.method == "DELETE" for r in made.broker.requests) == 2
+
+
+async def test_delete_after_a_failed_create_ignores_not_found(world):
+    world.live._maybe_exists = True
+    await world.live.stop()
+    assert world.live.health()["state"] == "waiting_for_sign_in"
+
+
+async def test_a_failed_sweep_is_tried_again_and_exactly_one_remains():
+    made = World()
+    made.broker.subscriptions["urn:old"] = {"id": "urn:old", "subscriptionName": SUBSCRIPTION_NAME}
+    real = made.broker.__call__
+    failures = [True]
+
+    def failing_once(request):
+        if request.method == "GET" and failures:
+            failures.pop()
+            return httpx.Response(500)
+        return real(request)
+
+    made.live._broker = ContextBroker(made.settings, lambda: made.token, transport=httpx.MockTransport(failing_once))
+    made.live.start()
+    await made.settled()
+    assert list(made.broker.subscriptions) == [made.live._id]
+    await made.live.stop()
+
+
+async def test_the_sweep_leaves_its_own_subscription(world):
+    world.live.start()
+    await world.settled()
+    world.live._swept = False
+    await world.live._sweep()
+    assert world.live._id in world.broker.subscriptions
+
+
+async def test_session_lost_stops_listening():
+    made = World()
+    made.live.start()
+    await made.settled()
+    listener = made.live._listener
+    made.token = None
+    await made.settled("waiting_for_sign_in")
+    assert listener.done()
+    assert made.live._listener is None
+    await made.live.stop()
+
+
+async def test_a_change_here_that_never_arrives_shows_as_a_failed_delivery(world):
+    world.live.start()
+    await world.settled()
+    assert "isn't confirmed" in world.live.health()["detail"]
+    assert world.live.health()["delivery"] == "unconfirmed"
+    world.live.expect_delivery()
+    world.clock.now += 16
+    await world.settled("delivery_failed")
+    health = world.live.health()
+    assert health["status"] == "unavailable"
+    assert "MQTT_BROKER_NOTIFY_URL" in health["detail"]
+    await world.mqtt.queue.put(notification())
+    await world.settled("active")
+    assert world.live.health()["delivery"] == "confirmed"
+
+
+async def test_a_change_during_an_outage_is_not_expected_afterwards(world):
+    world.live.start()
+    await world.settled()
+    world.live.expect_delivery()
+    world.mqtt.failure = OSError("down")
+    await world.mqtt.queue.put(OSError("dropped"))
+    await world.settled("broker_unavailable")
+    world.live.expect_delivery()
+    world.clock.now += 100
+    world.mqtt.failure = None
+    await world.settled("active")
+    await asyncio.sleep(0.05)
+    assert world.live.health()["status"] == "ok"
+
+
+async def test_a_change_that_arrives_in_time_is_no_failure(world):
+    world.live.start()
+    await world.settled()
+    world.live.expect_delivery()
+    await world.mqtt.queue.put(notification())
+    for _ in range(100):
+        if world.live.health()["delivery"] == "confirmed":
+            break
+        await asyncio.sleep(0.01)
+    world.clock.now += 100
+    await asyncio.sleep(0.05)
+    assert world.live.health()["status"] == "ok"
+
+
+def test_only_writes_that_the_broker_notifies_expect_a_delivery():
+    made = World()
+    seen = []
+    client = ContextBroker(
+        made.settings, lambda: None, transport=httpx.MockTransport(lambda r: httpx.Response(200, json=[]))
+    )
+    client.on_write = lambda: seen.append(1)
+
+    async def scenario():
+        await client.send("GET", "/entities")
+        await client.send("POST", "/subscriptions", body={})
+        await client.send("PATCH", "/subscriptions/x", body={})
+        await client.send("POST", "/entityOperations/delete", body=[])
+        await client.send("DELETE", "/entities/urn:a")
+        assert seen == []
+        await client.send("PATCH", "/entities/urn:a", body={})
+        await client.send("POST", "/entities/urn:a/attrs", body={})
+        await client.send("POST", "/entityOperations/upsert", body=[])
+        assert len(seen) == 3
+
+    asyncio.run(scenario())
+
+
+def test_a_refused_topic_counts_as_refused():
+    assert live_module._refused_code(128) is True
+    assert live_module._refused_code(1) is False
+    assert live_module._refused_code(type("C", (), {"is_failure": True})()) is True
 
 
 async def test_stop_succeeds_when_deleting_fails(world):
@@ -298,7 +480,7 @@ async def test_stop_succeeds_when_deleting_fails(world):
     await world.settled()
     world.broker.down = True
     await world.live.stop()
-    assert world.live.health()["state"] == "stopped"
+    assert world.live.health()["state"] == "waiting_for_sign_in"
 
 
 async def test_session_lost_stops_listening_and_a_new_sign_in_cleans_up(world):
@@ -407,6 +589,7 @@ async def test_many_watchers_each_get_all_of_their_changes_in_order(world):
 def app_for(made: World) -> FastAPI:
     app = FastAPI()
     app.state.live = made.live
+    app.state.settings = made.settings
     app.state.stream_keepalive_s = 0.05
     errors.install(app)
     app.include_router(ngsi.router)
@@ -448,6 +631,101 @@ def test_slow_client_is_closed_after_what_it_had():
     assert closed.value.code == 1013
 
 
+@pytest.mark.parametrize(
+    ("origin", "host", "allowed", "expected"),
+    [
+        (None, "h:1", None, True),
+        ("http://h:1", "h:1", None, True),
+        ("https://h:1", "h:1", None, True),
+        ("https://evil.example", "h:1", None, False),
+        ("http://h:2", "h:1", None, False),
+        ("http://h:1.evil.example", "h:1", None, False),
+        ("null", "h:1", None, False),
+        ("https://ui.example", "h:1", "https://other, https://ui.example", True),
+        ("https://ui.example.evil", "h:1", "https://ui.example", False),
+        ("http://h:1", None, None, False),
+    ],
+)
+def test_who_may_open_the_stream(origin, host, allowed, expected):
+    assert origin_allowed(origin, host, allowed) is expected
+
+
+def test_a_page_from_elsewhere_is_refused_and_its_own_and_a_listed_one_are_not():
+    made = World()
+    with TestClient(app_for(made)) as client:
+        with pytest.raises(WebSocketDisconnect) as refused:
+            with client.websocket_connect("/api/ngsi/ws", headers={"Origin": "https://evil.example"}):
+                pass
+        assert refused.value.code == 4403
+        assert made.live._watchers == set()
+        with client.websocket_connect("/api/ngsi/ws", headers={"Origin": "http://testserver"}) as socket:
+            assert socket.receive_json() == {"type": "keepalive"}
+    listed = World(ws_allowed_origins="https://ui.example")
+    with (
+        TestClient(app_for(listed)) as client,
+        client.websocket_connect("/api/ngsi/ws", headers={"Origin": "https://ui.example"}) as socket,
+    ):
+        assert socket.receive_json() == {"type": "keepalive"}
+
+
+class StalledSocket:
+    """A connection that takes one message and then never finishes a send."""
+
+    def __init__(self) -> None:
+        self.scope = {TRANSPORT: self}
+        self.aborted = False
+        self.closed = []
+
+    async def send_json(self, message):
+        await asyncio.sleep(3600)
+
+    async def close(self, code):
+        self.closed.append(code)
+        await asyncio.sleep(3600)
+
+    def abort(self):
+        self.aborted = True
+
+    def get_extra_info(self, name):
+        return None
+
+
+async def test_a_send_that_never_finishes_drops_the_connection():
+    socket = StalledSocket()
+    watcher = World().live.watch()
+    watcher.queue.put_nowait({"type": "update"})
+    await asyncio.wait_for(ngsi._send(socket, watcher, keepalive=10, send_timeout=0.01), 2)
+    assert socket.aborted is True
+
+
+async def test_a_close_that_never_finishes_drops_the_connection():
+    socket = StalledSocket()
+    watcher = World().live.watch()
+    watcher.overflowed = True
+    await asyncio.wait_for(ngsi._send(socket, watcher, keepalive=10, send_timeout=0.01), 2)
+    assert socket.closed == [1013]
+    assert socket.aborted is True
+
+
+def test_the_transport_is_kept_only_for_websockets():
+    scopes = []
+
+    async def inner(scope, receive, send):
+        scopes.append(scope)
+
+    class Protocol:
+        transport = "the transport"
+
+        async def asgi_send(self, message):
+            pass
+
+    wrapped = ConnectionInScope(inner)
+    asyncio.run(wrapped({"type": "websocket"}, None, Protocol().asgi_send))
+    asyncio.run(wrapped({"type": "http"}, None, Protocol().asgi_send))
+    assert scopes[0][TRANSPORT] == "the transport"
+    assert TRANSPORT not in scopes[1]
+
+
 def test_health_route_never_holds_the_endpoint():
     async def scenario():
         made = World()
@@ -458,7 +736,7 @@ def test_health_route_never_holds_the_endpoint():
         return answer
 
     answer = asyncio.run(scenario())
-    assert set(answer) == {"status", "state", "detail", "expires_at"}
+    assert set(answer) == {"status", "state", "detail", "expires_at", "delivery"}
     assert "mqtt://" not in json.dumps(answer)
     assert "token" not in json.dumps(answer)
 

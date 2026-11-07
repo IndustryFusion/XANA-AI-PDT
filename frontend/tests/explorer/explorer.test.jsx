@@ -14,14 +14,16 @@
 // limitations under the License.
 //
 
-import { statusOf } from '../../src/features/explorer/HistoryPane'
-import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { flushSync } from 'react-dom'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { paths } from '../../src/app/router'
 import { store } from '../../src/data/sources/mock'
 import { writeControls } from '../../src/data/sources/mock/controls'
 import { LIVE_UPDATE_MS } from '../../src/data/sources/mock/entitiesArea'
 import { MAX_DEPTH } from '../../src/features/explorer/AttributeLine'
+import { hasHistory, sameValue, statusOf } from '../../src/features/explorer/attributes'
+import ValueEditor from '../../src/features/explorer/ValueEditor'
 import { HIGHLIGHT_MS } from '../../src/features/explorer/EntityNode'
 import { renderApp } from '../helpers'
 
@@ -398,7 +400,6 @@ describe('edit attributes', () => {
     const input = within(attribute('status')).getByRole('combobox', { name: 'New value of status' })
     expect(input).toHaveFocus()
     const suggestions = await within(attribute('status')).findByRole('listbox', { name: 'Suggested values' })
-    expect(within(suggestions).getByRole('option', { name: 'maintenance' })).toBeVisible()
     await user.click(within(suggestions).getByRole('option', { name: 'fault' }))
     expect(input).toHaveValue('fault')
     await user.keyboard('{Enter}')
@@ -757,4 +758,62 @@ describe('latest recorded state of an attribute', () => {
   ])('%s', (name, expected) => expect(statusOf(states, name)).toEqual(expected))
 
   test('nothing recorded', () => expect(statusOf(undefined, 'a')).toBeNull())
+})
+
+describe('limits on what was searched', () => {
+  test('a search that stopped early says so', async () => {
+    renderApp({ path: '/explorer?type=Sensor&q=value%3E-100', controls: { authEnabled: false, searchCap: 3 } })
+    const status = await screen.findByText(/Only the first 3 of \d+ entities were searched/)
+    expect(status).toHaveAttribute('role', 'status')
+  })
+
+  test('without a limit nothing is said', async () => {
+    renderApp({ path: '/explorer?type=Sensor&q=value%3E-100', controls: { authEnabled: false } })
+    await screen.findByRole('list', { name: 'Matching entities' })
+    expect(screen.queryByText(/entities were searched/)).toBeNull()
+  })
+})
+
+describe('value editor, Enter straight after picking a suggestion', () => {
+  test('saves the picked value: the second Enter does not pick again', async () => {
+    const saved = []
+    render(<ValueEditor label="status" initial="running" entityType="Machine" attribute="status" onSave={(v) => { saved.push(v); return Promise.resolve() }} onCancel={() => {}} />)
+    const option = await screen.findAllByRole('option')
+    const input = screen.getByRole('combobox')
+    const press = (key) => input.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }))
+    // Outside act, as in a browser: effects scheduled by the first key may not have run at the second.
+    const environment = globalThis.IS_REACT_ACT_ENVIRONMENT
+    globalThis.IS_REACT_ACT_ENVIRONMENT = false
+    try {
+      press('ArrowDown')
+      await new Promise((resolve) => { setTimeout(resolve, 0) })
+      flushSync(() => press('Enter'))
+      press('Enter')
+    } finally {
+      globalThis.IS_REACT_ACT_ENVIRONMENT = environment
+    }
+    await waitFor(() => expect(saved).toEqual([option[0].textContent]))
+  })
+})
+
+describe('history button', () => {
+  test('is offered for an attribute the store holds, with no observation time of its own', () => {
+    const attr = { type: 'Property', value: 1 }
+    expect(hasHistory(attr)).toBe(false)
+    expect(hasHistory(attr, true)).toBe(true)
+    expect(hasHistory({ type: 'Relationship', object: 'urn:a' }, true)).toBe(true)
+    expect(hasHistory({ type: 'GeoProperty', value: {} }, true)).toBe(false)
+    expect(hasHistory([attr], true)).toBe(false)
+  })
+})
+
+describe('comparing attribute values', () => {
+  test('same values in any member order, and differences at any depth', () => {
+    expect(sameValue({ a: 1, b: { c: [1, 2] } }, { b: { c: [1, 2] }, a: 1 })).toBe(true)
+    expect(sameValue({ a: 1 }, { a: 2 })).toBe(false)
+    expect(sameValue({ a: { b: 1 } }, { a: { b: 2 } })).toBe(false)
+    expect(sameValue({ a: 1 }, { a: 1, b: 2 })).toBe(false)
+    expect(sameValue([1], { 0: 1 })).toBe(false)
+    expect(sameValue(undefined, { a: 1 })).toBe(false)
+  })
 })

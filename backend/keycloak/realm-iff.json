@@ -62,6 +62,20 @@
   ],
   "users": [
     {
+      "username": "visitor",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Sample",
+      "lastName": "Visitor",
+      "email": "visitor@example.org",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "visitor"
+        }
+      ]
+    },
+    {
       "username": "operator",
       "enabled": true,
       "emailVerified": true,
