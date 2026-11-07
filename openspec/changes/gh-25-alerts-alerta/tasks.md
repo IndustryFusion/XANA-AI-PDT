@@ -36,6 +36,6 @@
 
 ## 7. Review follow-ups
 
-- [ ] 7.1 Show that a search stopped early, on both sources; verify the API and the screen
-- [ ] 7.2 Answer a page past the end, and refuse what can't be an ID; verify on a real Alerta
-- [ ] 7.3 Make the browser test of the note prove that it reached the history; verify in a browser
+- [x] 7.1 Show that a search stopped early, on both sources; verify the API and the screen
+- [x] 7.2 Answer a page past the end, and refuse what can't be an ID; verify on a real Alerta
+- [x] 7.3 Make the browser test of the note prove that it reached the history; verify in a browser
