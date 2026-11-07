@@ -174,7 +174,15 @@ def test_app_starts_without_dependencies():
     assert response.status_code == 200
     body = response.json()
     assert body["overall"] == "error"
-    assert {c["id"] for c in body["checks"]} == {"memory", "timeseries", "broker", "llm", "gateway", "connector", "ifric"}
+    assert {c["id"] for c in body["checks"]} == {
+        "memory",
+        "timeseries",
+        "broker",
+        "llm",
+        "gateway",
+        "connector",
+        "ifric",
+    }
 
 
 def openai_models(status=200, models=("m1",)):
