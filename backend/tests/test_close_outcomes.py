@@ -257,3 +257,36 @@ async def test_the_agent_gets_the_diagnosis_in_its_turn(url):
         run = app.state.runs.record(s.run_id)
         turn = app.state.runs.desk._turn(run.state, "What did you diagnose?")
     assert turn.diagnosis and turn.diagnosis["root_cause"] and turn.diagnosis["confidence"] is not None
+
+
+# ── Within one time ─────────────────────────────────────────────────────────
+
+
+async def test_a_slow_gateway_keeps_an_escalated_close_within_its_time(url, monkeypatch):
+    monkeypatch.setattr(desk, "ESCALATED_CLOSE_S", 1.0)
+    monkeypatch.setattr(desk, "CLOSE_SEND_AT_LEAST_S", 0.2)
+    app, space = make(url)
+    space.status_on_accept["escalate"] = "notified"
+    space.slow_accept["close"] = 5  # the gateway hangs on the close
+    async with running(app) as client:
+        s = await scene(client, app, space)
+        started = asyncio.get_running_loop().time()
+        answer = await s.act("close", outcome="escalated")
+        took = asyncio.get_running_loop().time() - started
+        run = await s.run()
+    assert took < 2, took
+    assert answer.status_code == 503 and run["status"] != "stopped"
+    assert s.sent_acts()[-1] == "escalate"
+
+
+async def test_too_little_time_left_sends_no_close(url, monkeypatch):
+    monkeypatch.setattr(desk, "ESCALATED_CLOSE_S", 1.0)
+    monkeypatch.setattr(desk, "CLOSE_SEND_AT_LEAST_S", 0.8)
+    app, space = make(url)
+    space.status_on_accept["escalate"] = "notified"
+    space.slow_accept["escalate"] = 0.4
+    async with running(app) as client:
+        s = await scene(client, app, space)
+        answer = await s.act("close", outcome="escalated")
+    assert answer.status_code == 409 and "Close again" in answer.json()["error"]["message"]
+    assert "close" not in s.sent_acts()

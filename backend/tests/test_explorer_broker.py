@@ -878,3 +878,12 @@ def test_has_attribute_with_the_backends_own_evaluation(client, broker):
     found = client.get("/api/ngsi/entities", params={"type": "T", "q": 'b~=".*"', "has_attr": "a"}).json()
     assert [e["id"] for e in found] == ["urn:p:0", "urn:p:2", "urn:p:4", "urn:p:6"]
     assert all("b" in e for e in found)
+
+
+def test_has_attribute_reads_a_large_page_in_chunks_in_order(client, broker):
+    for n in range(250):
+        broker.entities[f"urn:q:{n:03d}"] = {"id": f"urn:q:{n:03d}", "type": "Q", "a": {"type": "Property", "value": n}}
+    found = client.get("/api/ngsi/entities", params={"type": "Q", "has_attr": "a", "limit": 1000}).json()
+    assert [e["id"] for e in found] == [f"urn:q:{n:03d}" for n in range(250)]
+    reads = [r for r in broker.requests if r.url.params.get("type") == "*" and "id" in r.url.params]
+    assert [len(r.url.params["id"].split(",")) for r in reads] == [100, 100, 50]

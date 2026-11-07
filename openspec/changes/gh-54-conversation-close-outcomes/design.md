@@ -30,6 +30,10 @@ Each turn gets a "diagnosis" block, from the run's stored state: root cause, con
 
 Alternative: let the agent read the diagnosis through a tool. The question is common and the block is small, so a tool call each time costs a turn of the 6 allowed.
 
+### All within one time
+
+Found in review: in the worst case the steps of an escalated close add up to more than the UI waits for a send (300 s): the `escalate` (up to 130 s), the wait (60 s) and the `close` (up to 130 s), with reads between. So all of an escalated close runs within 290 s: each gateway call ends by then, and the `close` is sent only with at least 60 s left. Otherwise the operator is told that the conversation is escalated and to close again, and nothing more is sent.
+
 ## Risks
 
 - The diagnosis may hold more than the run's sharing tier lets XANA send. It reaches the model only; a suggestion the agent drafts from it is shown to the operator, who decides what to send, as for any suggestion now.

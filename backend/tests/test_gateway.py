@@ -300,14 +300,16 @@ async def test_stops_after_three_failures_and_then_shows_expired():
         assert status["state"] == "connected" and status["renewal_failures"] == attempt
         assert "It is tried again" in status["detail"]
     await conn.check()
+    await asyncio.sleep(0.05)  # connecting again starts at once, and then waits a check interval
     status = await conn.status()
-    assert status["renewal_failures"] == MAX_RENEW_FAILURES and "no longer tried" in status["detail"]
+    assert status["renewal_failures"] == MAX_RENEW_FAILURES and "renewal stopped" in status["detail"]
+    assert "tried every minute" in status["detail"]
     tried = len(space.requests)
-    await conn.check()  # stopped: nothing more is sent
+    await conn.check()  # renewal stopped: nothing more is sent by it
     assert len(space.requests) == tried
     clock.now += 101
     status = await conn.status()
-    assert status["state"] == "expired" and conn.token() is None and "no longer tried" in status["detail"]
+    assert status["state"] == "expired" and conn.token() is None and "tried every minute" in status["detail"]
     # Connecting again starts afresh.
     space.provider_status = None
     status = await conn.connect()
