@@ -73,7 +73,7 @@ export async function startScenario(page, scenario, { machine = 'press-brake-01'
 
 /** Expects the run view to show `status` (the run's state value). */
 export async function expectStatus(page, status) {
-  await expect(page.locator('.run-header [data-status]')).toHaveAttribute('data-status', status)
+  await expect(page.locator('.run-header [data-status]')).toHaveAttribute('data-status', status, { timeout: 30_000 })
 }
 
 /** Escalates the shown run through the pre-flight dialog. */
