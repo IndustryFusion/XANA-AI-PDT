@@ -70,6 +70,27 @@ if (process.env.RECORD_MACHINE) {
   record('runs.escalationPreflight', await call('GET', `/api/agent/escalate-preflight/${run}`))
   record('runs.escalate', await call('POST', `/api/agent/escalate/${run}`))
   record('runs.getOutboxStatus', await call('GET', `/api/agent/outbox-status/${run}`))
+  const conversationAct = record('runs.sendConversationAct', await call('POST', `/api/agent/conversation-act/${run}`, { act: 'inform', text: 'Recorded for the fixtures.' }))
+  console.log(conversationAct.status)
+  record('runs.askAgent', await call('POST', `/api/agent/ask/${run}`, { message: 'What did they say?' }))
+  record('runs.refreshConversationStatus', await call('POST', `/api/agent/refresh-conversation/${run}`))
+  // A data request and a recommendation need the builder's messages, which RECORD_WAIT_MS gives time for.
+  const until = async (status) => {
+    for (let i = 0; i < 600; i += 1) {
+      const current = (await call('GET', `/api/agent/status/${run}`)).body.status
+      if (current === status) return
+      await new Promise((r) => setTimeout(r, 500))
+    }
+    throw new Error(`The run did not become ${status}.`)
+  }
+  if (process.env.RECORD_BUILDER_ACTS) {
+    await until('awaiting_operator_approval')
+    record('runs.approveDataRequest', await call('POST', `/api/agent/approve-data-request/${run}`, { approved: true, note: 'Recorded' }))
+    await until('awaiting_recommendation_review')
+    record('runs.replyToRecommendation', await call('POST', `/api/agent/recommendation-reply/${run}`, { action: 'still_failing', message: 'Recorded' }))
+  }
+  record('runs.recordMachineBuilderClose', await call('POST', `/api/agent/record-close/${run}`, { outcome: 'resolved', reason: 'Recorded' }))
+  record('runs.reopenRun', await call('POST', `/api/agent/reopen/${run}`))
   await call('POST', `/api/agent/stop/${run}`, { reason: 'Recorded for the fixtures.' })
 }
 record('dataspace.disconnect', await call('POST', `${gateway}/disconnect`))

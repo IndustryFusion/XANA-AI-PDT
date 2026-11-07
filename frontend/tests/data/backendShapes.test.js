@@ -39,6 +39,13 @@ const ARGS = {
   'runs.escalationPreflight': () => ['r'],
   'runs.escalate': () => ['r'],
   'runs.getOutboxStatus': () => ['r'],
+  'runs.sendConversationAct': () => ['r', { act: 'inform', text: 'Recorded' }],
+  'runs.askAgent': () => ['r', 'A question'],
+  'runs.approveDataRequest': () => ['r', { approved: true }],
+  'runs.replyToRecommendation': () => ['r', { action: 'still_failing' }],
+  'runs.refreshConversationStatus': () => ['r'],
+  'runs.recordMachineBuilderClose': () => ['r', { outcome: 'resolved', reason: 'Recorded' }],
+  'runs.reopenRun': () => ['r'],
   'runs.stopRun': () => ['r'],
   'runs.archiveRun': () => ['r'],
   'incidents.listIncidents': () => [{}],
@@ -101,9 +108,9 @@ function replay(fixture) {
 afterEach(() => vi.unstubAllGlobals())
 
 describe('backend source matches the documented shapes (recorded backend)', () => {
-  test('every operation the backend serves has a recording, except the streams and reopenRun', () => {
+  test('every operation the backend serves has a recording, except the streams', () => {
     const served = Object.entries(backend.SERVED).flatMap(([area, ops]) => ops.map((op) => `${area}.${op}`))
-    const expected = served.filter((op) => !['runs.subscribeRun', 'runs.reopenRun', 'entities.subscribeEntities'].includes(op)).sort()
+    const expected = served.filter((op) => !['runs.subscribeRun', 'entities.subscribeEntities'].includes(op)).sort()
     expect(Object.keys(ARGS).sort()).toEqual(expected)
     for (const op of expected) expect(fixtures[op], op).toBeDefined()
   })

@@ -75,6 +75,7 @@ class Settings(BaseSettings):
     settings_encryption_key: SecretStr | None = None
     data_sharing_policy: Literal["minimal", "adjacent", "timeseries"] = "minimal"
     ifric_url: str | None = None
+    inbox_poll_interval_s: float = Field(15, gt=0)
 
     ngsi_url: str = "http://localhost:9090"
     ngsi_tenant: str | None = None

@@ -92,7 +92,9 @@ class RunState:
             "steps": list(self.steps),
             "escalation": self.escalation,
             "outbox": self.outbox_status(),
-            "reopenable": False,
+            "reopenable": self.status in (STOPPED, MB_CLOSED)
+            and bool(self.conversation_id)
+            and self.data.get("reopenable") is not False,
         }
 
     def outbox_status(self) -> list[dict[str, Any]]:

@@ -44,3 +44,4 @@ include = ["xana_agent*"]
 
 [tool.setuptools.package-data]
 "xana_agent.prompts" = ["*.md"]
+"xana_agent.conversation" = ["*.json"]

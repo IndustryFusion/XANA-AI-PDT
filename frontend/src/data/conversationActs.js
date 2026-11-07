@@ -52,8 +52,18 @@ export const CLOSE_OUTCOMES = {
   escalated: 'Escalated to direct contact',
 }
 
+/** Every outcome a conversation can have, as the machine builder can close with the protocol's others. */
+export const OUTCOME_LABELS = {
+  ...CLOSE_OUTCOMES,
+  failed: 'Not resolved',
+  withdrawn: 'Withdrawn',
+  rejected: 'Rejected',
+  timed_out: 'Timed out',
+  superseded: 'Superseded',
+}
+
 /** Outcomes after which a closed run cannot be reopened. */
-export const FINAL_OUTCOMES = ['escalated']
+export const FINAL_OUTCOMES = ['escalated', 'superseded']
 
 /** Run states in which the conversation accepts acts. */
 export const CONVERSATION_STATUSES = ['awaiting_machine_builder', 'awaiting_operator_approval', 'awaiting_recommendation_review']
@@ -98,6 +108,7 @@ export function conversationState(steps = []) {
 export function pendingRequest(steps = []) {
   const messages = messagesOf(steps)
   const answered = new Set(messages.filter((m) => m.act === 'grant' || m.act === 'deny').map((m) => m.inReplyTo))
-  const open = messages.filter((m) => m.sender === 'machine_builder' && m.act === 'request' && !m.dataRequest && !answered.has(m.messageId))
+  // A request in free text names no capability, so the protocol has no grant or deny for it.
+  const open = messages.filter((m) => m.sender === 'machine_builder' && m.act === 'request' && !m.dataRequest && !m.freeText && !answered.has(m.messageId))
   return open[open.length - 1] ?? null
 }

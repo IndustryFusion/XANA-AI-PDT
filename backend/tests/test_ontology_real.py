@@ -16,6 +16,7 @@
 """Hints and read functions against a real Fuseki (TEST_FUSEKI_URL), loaded under their own graph base."""
 
 import asyncio
+import json
 import os
 import uuid
 
@@ -23,11 +24,15 @@ import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from langchain_ollama import ChatOllama
 
 from app.api import shacl
 from sample_data.loader import load_ontology
 from tests.conftest import make_settings
+from xana_agent.conversation import ConversationAgent, ConversationInput
 from xana_agent.sources import FusekiOntologySource
+from xana_agent.sources.memory import InMemoryIncidentMemory
+from xana_agent.testing import FakeContextSource, FakeHistorySource, sample_entities, sample_history
 
 pytestmark = [
     pytest.mark.services,
@@ -207,6 +212,67 @@ async def test_a_real_store_calls_out_for_these_queries_and_the_query_function_n
                 break
             await asyncio.sleep(0.1)
         assert "/cr" in listener.paths[0] and "/uq" in listener.paths[1]
+
+
+class StandInOllama:
+    """Answers as an Ollama server does, with the actions it is given: a model writing what a test wants."""
+
+    def __init__(self, actions: list[dict]) -> None:
+        self.actions = list(actions)
+        self.asked: list[str] = []
+
+    async def handle(self, reader, writer) -> None:
+        head = await reader.readuntil(b"\r\n\r\n")
+        length = next(
+            (int(line.split(b":")[1]) for line in head.split(b"\r\n") if line.lower().startswith(b"content-length")), 0
+        )
+        body = await reader.readexactly(length)
+        self.asked.append(body.decode())
+        content = json.dumps(self.actions.pop(0))
+        line = {"model": "stand-in", "message": {"role": "assistant", "content": content}, "done": True}
+        line |= {"done_reason": "stop", "created_at": "2026-01-01T00:00:00Z"}
+        answer = json.dumps(line).encode() + b"\n"
+        writer.write(b"HTTP/1.1 200 OK\r\nContent-Type: application/x-ndjson\r\nConnection: close\r\n")
+        writer.write(f"Content-Length: {len(answer)}\r\n\r\n".encode() + answer)
+        await writer.drain()
+        writer.close()
+
+    async def __aenter__(self):
+        self.server = await asyncio.start_server(self.handle, "127.0.0.1", 0)
+        self.url = f"http://127.0.0.1:{self.server.sockets[0].getsockname()[1]}"
+        return self
+
+    async def __aexit__(self, *exc) -> None:
+        self.server.close()
+
+
+@needs_callback
+async def test_a_query_the_model_writes_reaches_nothing_through_the_agents_real_path(source):
+    """A real Ollama client, the real agent and a real Fuseki with a listener: only the model is a stand-in."""
+    async with Listener() as listener:
+        address = f"http://{CALLBACK}:{listener.port}"
+        written = list(proofs(address).values())
+        actions = [{"tool": "ontology_query", "arguments": {"sparql": query}} for query in written]
+        actions.append({"tool": "ontology_query", "arguments": {"sparql": "ASK { ?s ?p ?o }"}})
+        actions.append({"tool": "set_response", "arguments": {"text": "Done."}})
+        async with StandInOllama(actions) as model:
+            agent = ConversationAgent(
+                ChatOllama(model="stand-in", base_url=model.url),
+                FakeContextSource(sample_entities()),
+                FakeHistorySource(sample_history()),
+                InMemoryIncidentMemory(),
+                ontology=source,
+                llm_timeout_s=10,
+            )
+            turn = ConversationInput("urn:m", "Issue", "Look it up", [], ["urn:m"])
+            reply = await agent.answer(turn)
+        assert reply.reply == "Done."
+        assert reply.tools == ["ontology_query"] * (len(written) + 1) + ["set_response"]
+        await asyncio.sleep(1)
+        assert listener.paths == []
+        # The model read each refusal, and the plain query's answer.
+        last = model.asked[-1]
+        assert last.count("not allowed") >= len(written) and '\\"ok\\": true' in last
 
 
 def _client(source_):

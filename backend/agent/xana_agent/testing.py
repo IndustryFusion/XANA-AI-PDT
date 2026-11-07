@@ -28,6 +28,7 @@ from datetime import UTC, datetime, timedelta
 from statistics import fmean, pstdev
 from typing import Any, Literal
 
+from xana_agent.conversation import AgentAction
 from xana_agent.schemas import (
     Decision,
     HypothesisList,
@@ -88,10 +89,21 @@ class StepScript:
             ValidatedHypothesisList: self.validated,
             Question: self.question,
             Decision: self.decision,
+            AgentAction: self.conversation_action,
         }
 
     def model(self) -> ScriptedChatModel:
         return ScriptedChatModel(answers=self.answers())
+
+    def conversation_action(self, prompt: Any) -> dict[str, Any]:
+        """The incident agent without a model: looks at what arrived, and says what it saw."""
+        self.calls.append("AgentAction")
+        done = section(prompt, "earlier_actions") or []
+        if not done:
+            return {"tool": "open_inbox", "arguments": {}}
+        received = done[0].get("result") or []
+        last = received[-1]["text"] if received else "nothing yet"
+        return {"tool": "set_response", "arguments": {"text": f"Scripted answer. The latest from them: {last}"}}
 
     def hypotheses(self, prompt: Any) -> dict[str, Any]:
         self.calls.append("HypothesisList")
