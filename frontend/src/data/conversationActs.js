@@ -49,6 +49,8 @@ export const CONVERSATION_STATES = ['open', 'direct_contact_operator', 'direct_c
 export const CLOSE_OUTCOMES = {
   resolved: 'Resolved',
   not_resolved: 'Not resolved',
+  rejected: 'Rejected',
+  timed_out: 'Timed out',
   escalated: 'Escalated to direct contact',
 }
 
@@ -57,8 +59,6 @@ export const OUTCOME_LABELS = {
   ...CLOSE_OUTCOMES,
   failed: 'Not resolved',
   withdrawn: 'Withdrawn',
-  rejected: 'Rejected',
-  timed_out: 'Timed out',
   superseded: 'Superseded',
 }
 
@@ -82,11 +82,13 @@ export function allowedActs(convState, { requestPending = false } = {}) {
   return acts
 }
 
-/** Close outcomes the operator may choose in a conversation state. */
+/**
+ * Close outcomes the operator may choose in a conversation state: every one in an open conversation and in one
+ * the operator escalated (closing as escalated from open sends the escalation first). None while the machine
+ * builder has escalated, as only it may close then.
+ */
 export function closeOutcomes(convState) {
-  return convState === 'direct_contact_operator'
-    ? Object.keys(CLOSE_OUTCOMES)
-    : Object.keys(CLOSE_OUTCOMES).filter((o) => o !== 'escalated')
+  return convState === 'open' || convState === 'direct_contact_operator' ? Object.keys(CLOSE_OUTCOMES) : []
 }
 
 /** Message steps of a run, in time order. */
