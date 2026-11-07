@@ -110,6 +110,12 @@ def check_machine_events_settings(chart: str) -> None:
     assert set(rendered["Secret/x-backend"]["stringData"]) >= {"EVENT_WEBHOOK_SECRET", "KEYCLOAK_SERVICE_CLIENT_SECRET"}
 
 
+def check_auto_archive_setting(chart: str) -> None:
+    config = render(chart, "config.AUTO_ARCHIVE_AFTER_S=0")["ConfigMap/x-backend"]["data"]
+    assert config["AUTO_ARCHIVE_AFTER_S"] == "0"
+    assert "AUTO_ARCHIVE_AFTER_S" not in render(chart)["ConfigMap/x-backend"]["data"]  # the backend's default
+
+
 def check_database_ca(chart: str) -> None:
     without = render(chart)
     assert "POSTGRES_SSLROOTCERT" not in without["ConfigMap/x-backend"]["data"]
@@ -143,6 +149,7 @@ CHECKS = (
     check_values_only,
     check_no_secret_in_a_config_map,
     check_machine_events_settings,
+    check_auto_archive_setting,
     check_database_ca,
     check_restricted_pods,
 )

@@ -228,7 +228,7 @@ Step content uses the field names of the UI's data interface, in snake_case; the
 
 **Sign-in.** With `KEYCLOAK_URL` set, the backend signs in to Keycloak for the operator with the password grant, keeps the token fresh in memory, and sends it to the context broker. There is one session per backend process, and the backend's own API is not protected, so network access to it must be limited. With nobody signed in, broker requests carry no token. These are open decisions, recorded in the `gh-21-keycloak-sign-in` design.
 
-**Dataspace connection.** With `GATEWAY_URL`, the backend holds a `client_credentials` token of the dataspace realm, separate from the operator's, in memory. It is checked every 60 seconds and renewed with 120 seconds left, and renewal stops after 3 failures in a row, which the operator sees. The client secret is stored encrypted in `gateway_credentials`, with no plaintext fallback. The `gateway` and `connector` health checks read the gateway and, through it, the participant's adapter.
+**Dataspace connection.** With `GATEWAY_URL`, the backend holds a `client_credentials` token of the dataspace realm, separate from the operator's, in memory. It is checked every 60 seconds and renewed with 120 seconds left, and renewal stops after 3 failures in a row, which the operator sees. The client secret is stored encrypted in `gateway_credentials`, with no plaintext fallback. The `gateway` and `connector` health checks read the gateway and, through it, the participant's adapter. The backend connects at startup whenever a client and secret are configured, with sign-in on or off, so the inbox is polled with nobody signed in, and while the dataspace can't be reached it tries again every 60 seconds.
 
 **IFRIC registry.** Company names, machine builders and factory details, for the backend only. A machine's builder is asked for with its entity ID; machine names come from the context broker. Not found, a refusal and an outage are told apart: a name is left out or empty, a builder comes with a reason, and in the health report `401` and `403` are failures.
 
@@ -416,7 +416,7 @@ agent_traces (
 )
 ```
 
-`runs` is the persistence backing for every run that is not archived; the UI lists finished runs until the operator archives them. Each step and status change is written in one transaction before it is published to watchers, so a watcher never sees an event that would be missing after a restart. At startup the backend restores all rows. A run in `running` drops the steps of its current round and runs that round again; if the round was the `act` after a confirmation, only `act` runs again (storing is idempotent by run).
+`runs` is the persistence backing for every run that is not archived; the UI lists finished runs until the operator archives them, or until they are archived automatically after `AUTO_ARCHIVE_AFTER_S` seconds without a change (3600 by default, `0` off; never with a close still to go out). Each step and status change is written in one transaction before it is published to watchers, so a watcher never sees an event that would be missing after a restart. At startup the backend restores all rows. A run in `running` drops the steps of its current round and runs that round again; if the round was the `act` after a confirmation, only `act` runs again (storing is idempotent by run).
 
 `incidents` serves two purposes. `act` stores a confirmed diagnosis through `PostgresIncidentMemory`, the workflow's `IncidentMemory`; `similar()` returns confirmed rows of the same machine first, then of the same machine type, newest first. Archiving writes the history record (outcome, decision, resolution, close time and full trace) and removes the `runs` row in one transaction; the history lists rows with `archived_at` set.
 
@@ -474,6 +474,7 @@ LANGFUSE_HOST=
 # Agent behaviour
 DECISION_CONFIDENCE_THRESHOLD=0.9   # runs below this ask for clarification
 MAX_CONCURRENT_ROUNDS=2             # analysis rounds at the same time; others wait
+AUTO_ARCHIVE_AFTER_S=3600           # finished runs archived after this long unchanged; 0 off
 DATA_SHARING_POLICY=minimal          # minimal | adjacent | timeseries
 
 # Data sources (IFF cluster DNS in production)

@@ -44,6 +44,8 @@ pgrestUrl: http://pgrest:3000
 # name the type and attributes as the platform does.
 callbackBaseUrl: ""
 machineWatchType: Machine
+# Finished runs move to incident history after this many seconds without a change. 0 keeps them until archived.
+autoArchiveAfterS: 3600
 machineWatchAttributes: status,errorCode,alarmLevel,faultCode
 # Alerts. The key comes from XANA_ALERTA_API_KEY, or the existing secret.
 alertaUrl: http://alerta:8080/api
