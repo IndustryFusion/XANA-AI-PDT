@@ -63,6 +63,11 @@ async def resolve(body: Ids, request: Request) -> dict[str, str]:
     return await registry(request).names(body.ids)
 
 
+@router.post("/resolve-machines")
+async def resolve_machines(body: Machines, request: Request) -> dict[str, str]:
+    return await registry(request).machine_names(body.machine_ids)
+
+
 @router.post("/resolve-builders")
 async def resolve_builders(body: Machines, request: Request) -> dict[str, str]:
     return await registry(request).builders(body.machine_ids)

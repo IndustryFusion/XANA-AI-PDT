@@ -22,6 +22,7 @@ import { Link, paths, useRoute } from '../../app/router'
 import { Button, Card, DataView, EmptyState, StatusBadge, useToast } from '../../ui/components'
 import { ConfirmDialog } from '../../ui/structured'
 import { FINISHED_STATES } from './runModel'
+import { useMachineNames } from '../../app/machineNames'
 import { formatAge, triggeredBy } from '../../ui/format'
 import { useRevealOnChange } from '../../app/reveal'
 import { toneOf } from '../../ui/status'
@@ -52,6 +53,7 @@ export function RunList({ selected, machine, refreshKey, onArchived }) {
   const notify = useToast()
   useEffect(() => { setText(machine ?? '') }, [machine])
   const filter = (list) => filterRuns(list, text, machine)
+  const names = useMachineNames(result.data?.map((r) => r.machineId))
 
   async function archive(run) {
     try {
@@ -98,7 +100,7 @@ export function RunList({ selected, machine, refreshKey, onArchived }) {
                 <Link to={runPath(r.runId, machine)} className="run-list__link" aria-current={selected === r.runId ? 'true' : undefined}>
                   <span className="run-list__issue">{r.issue}</span>
                   <span className="run-list__meta">
-                    <span>{entityLabel(r.machineId)}</span>
+                    <span>{names[r.machineId] ? <><span data-testid="machine-name">{names[r.machineId]}</span> · {entityLabel(r.machineId)}</> : entityLabel(r.machineId)}</span>
                     <span>{r.incidentId != null ? `#${r.incidentId}` : 'No incident number yet'}</span>
                     <span>{formatAge(r.startedAt)}</span>
                     {triggeredBy(r.source) && <span data-testid="run-source">{triggeredBy(r.source)}</span>}

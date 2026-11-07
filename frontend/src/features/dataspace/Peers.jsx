@@ -47,6 +47,9 @@ export default function Peers({ selected, factoryName, policyKey, onPolicyChange
                   <Link to={dataspacePath(p.id)} className="peer-list__link" aria-current={selected === p.id ? 'true' : undefined}>
                     <span className="peer-list__name">{p.name}</span>
                     <span className="mono muted">{p.id}</span>
+                    <span className={`level level--${p.accessLevel ?? 'unknown'}`} data-testid="access-level">
+                      {p.accessLevel ? `${p.accessLevel[0].toUpperCase()}${p.accessLevel.slice(1)} access` : 'Access unknown'}
+                    </span>
                   </Link>
                 </li>
               ))}

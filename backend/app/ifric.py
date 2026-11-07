@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -38,6 +39,8 @@ log = logging.getLogger(__name__)
 SERVICE = "The IFRIC registry"
 TIMEOUT_S = 10
 MAX_RESOLVED = 200
+DIRECTORY_FOR_S = 300  # the company directory is read again after this, or sooner with another token
+ASSET_NAMES = ("asset_name", "product_name", "name")
 AT_ONCE = 8
 
 
@@ -78,10 +81,14 @@ class RegistryClient:
         settings: Settings,
         token: Callable[[], str | None],
         transport: httpx.AsyncBaseTransport | None = None,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._url = settings.ifric_url and settings.ifric_url.rstrip("/")
         self._token = token
         self._transport = transport
+        self._clock = clock
+        self._directory: tuple[float, str, dict[str, str]] | None = None  # when, for which token, id → name
+        self._reading = asyncio.Lock()
 
     @property
     def configured(self) -> bool:
@@ -123,16 +130,74 @@ class RegistryClient:
 
         async def one(identifier: str) -> tuple[str, str | None]:
             async with slots:
+                failed = False
                 try:
                     answer = await self._get(f"/company/get-company-details/{_segment(identifier)}")
                 except _Failed as failure:
-                    log.warning("A company name was not resolved: %s", failure)
-                    return identifier, ""
-            company = _record(answer, "company")
-            name = company.get("company_name") if company else None
-            return identifier, name if isinstance(name, str) and name else None
+                    log.info("A company's details gave no name: %s", failure)
+                    answer, failed = None, True
+                company = _record(answer, "company")
+                name = company.get("company_name") if company else None
+                if isinstance(name, str) and name:
+                    return identifier, name
+                # The details are only a party's own: a peer is named by the directory, a factory by its owner.
+                name = (await self._directory_names()).get(identifier) or await self._owner(_segment(identifier))
+                if name:
+                    return identifier, name
+            return identifier, "" if failed else None
 
         return {key: name for key, name in await asyncio.gather(*(one(i) for i in unique)) if name is not None}
+
+    async def _directory_names(self) -> dict[str, str]:
+        """`{company ID: name}` from the registry's company directory, read once in `DIRECTORY_FOR_S`."""
+        token = self._token() or ""
+        async with self._reading:
+            kept = self._directory
+            if kept and kept[1] == token and self._clock() - kept[0] < DIRECTORY_FOR_S:
+                return kept[2]
+            try:
+                answer = await self._get("/company/get-all-companies")
+            except _Failed as failure:
+                log.info("The company directory was not read: %s", failure)
+                return {}
+            listed = (
+                answer
+                if isinstance(answer, list)
+                else (answer or {}).get("companies")
+                if isinstance(answer, dict)
+                else []
+            )
+            names = {
+                item["company_ifric_id"]: item["company_name"]
+                for item in listed or []
+                if isinstance(item, dict)
+                and isinstance(item.get("company_ifric_id"), str)
+                and isinstance(item.get("company_name"), str)
+                and item["company_name"]
+            }
+            self._directory = (self._clock(), token, names)
+            return names
+
+    async def machine_names(self, machine_ids: list[str]) -> dict[str, str]:
+        """`{machine ID: asset name}` for the machines the registry names. The others are left out."""
+        unique = list(dict.fromkeys(machine_ids))
+        if len(unique) > MAX_RESOLVED:
+            raise invalid(f"Ask for at most {MAX_RESOLVED} machines at a time.")
+        slots = asyncio.Semaphore(AT_ONCE)
+
+        async def one(machine_id: str) -> tuple[str, str | None]:
+            async with slots:
+                try:
+                    asset = _record(await self._get(f"/company/assets/{_segment(machine_id)}"), "asset")
+                except _Failed as failure:
+                    log.info("A machine's asset name was not read: %s", failure)
+                    return machine_id, None
+            for key in ASSET_NAMES:
+                if asset and isinstance(asset.get(key), str) and asset[key]:
+                    return machine_id, asset[key]
+            return machine_id, None
+
+        return {key: name for key, name in await asyncio.gather(*(one(m) for m in unique)) if name}
 
     # ── Builders ─────────────────────────────────────────────────────────────
 

@@ -377,7 +377,13 @@ async def test_not_connected_is_refused_without_calling_the_gateway():
 async def test_peers_list_with_what_each_offers():
     _, conn, client = await connected_client()
     assert await client.peers() == [
-        {"id": BUILDER, "name": BUILDER, "capabilities": ["mb:confidential"], "capabilities_unavailable": False}
+        {
+            "id": BUILDER,
+            "name": BUILDER,
+            "capabilities": ["mb:confidential"],
+            "capabilities_unavailable": False,
+            "access_level": "standard",
+        }
     ]
     await conn.close()
 
@@ -753,3 +759,85 @@ async def test_store_reads_through_a_real_database(fresh_database):
     with pytest.raises(StoreUnavailable):
         await keyless.save_secret(FACTORY, "x")
     await db.close()
+
+
+# ── Access levels and configuration ─────────────────────────────────────────
+
+OTHER_PEER = "urn:example:builder-2"
+THIRD_PEER = "urn:example:builder-3"
+
+
+def three_peers(space):
+    space.access_here[BUILDER] = [
+        {"capability": "twin:direct", "status": "auto", "source": "default"},
+        {"capability": "twin:history", "status": "approved", "source": "explicit"},
+        {"capability": "twin:adjacents", "status": "denied", "source": "explicit"},
+    ]
+    space.access_here[OTHER_PEER] = [
+        {"capability": "twin:direct", "status": "auto", "source": "default"},
+        {"capability": "twin:history", "status": "denied", "source": "explicit"},
+    ]
+    space.access_here[THIRD_PEER] = [
+        {"capability": "twin:direct", "status": "auto", "source": "default"},
+        {"capability": "twin:history", "status": "pending", "source": "explicit"},
+        {"capability": "twin:adjacents", "status": "on-request", "source": "default"},
+    ]
+    space.compatible_ids = [BUILDER, OTHER_PEER, THIRD_PEER]
+
+
+async def test_access_levels_from_the_statuses_the_gateway_reports():
+    space = Dataspace()
+    three_peers(space)
+    space, conn, client = await connected_client(space)
+    answer = await client.access_levels()
+    levels = {p["peer_id"]: p for p in answer["peers"]}
+    assert levels[BUILDER]["access_level"] == "elevated" and levels[BUILDER]["approved"] == ["twin:history"]
+    assert levels[OTHER_PEER]["access_level"] == "restricted"
+    assert levels[THIRD_PEER]["access_level"] == "standard"
+    assert answer["counts"] == {"standard": 1, "elevated": 1, "restricted": 1, "unknown": 0}
+    peers = {p["id"]: p["access_level"] for p in await client.peers()}
+    assert peers == {BUILDER: "elevated", OTHER_PEER: "restricted", THIRD_PEER: "standard"}
+    policies = {p["peer_id"]: p["access_level"] for p in await client.policies()}
+    assert policies == peers
+    await conn.close()
+
+
+async def test_a_peer_whose_access_cant_be_read_is_unknown_not_standard():
+    space = Dataspace()
+    three_peers(space)
+    space.access_failing = {OTHER_PEER}
+    space, conn, client = await connected_client(space)
+    answer = await client.access_levels()
+    failed = next(p for p in answer["peers"] if p["peer_id"] == OTHER_PEER)
+    assert failed["access_level"] is None and failed["error"]
+    assert answer["counts"] == {"standard": 1, "elevated": 1, "restricted": 0, "unknown": 1}
+    await conn.close()
+
+
+async def test_access_levels_not_connected_are_unavailable():
+    space = Dataspace()
+    client = GatewayClient(connection(space), transport=space.transport())
+    with pytest.raises(Refused) as caught:
+        await client.access_levels()
+    assert caught.value.kind == "unavailable"
+
+
+def test_the_configuration_holds_addresses_and_no_secret():
+    password_url = "http://reader:hunter2-password@registry.test:4007"
+    client, space = api(ifric_url=password_url, gateway_client_secret=SECRET)
+    with client:
+        client.post("/api/gateway/connect", json={"secret": SECRET})
+        answer = client.get("/api/gateway/config")
+        text = answer.text
+    config = answer.json()
+    assert config["gateway_url"] and config["keycloak_url"] and config["realm"] == "dataspace"
+    assert config["client_id"] == FACTORY and config["registry_url"].startswith("http://reader:***@registry.test")
+    assert SECRET not in text and KEY not in text and "hunter2" not in text
+    assert not any(token in text for token in space.valid_tokens)
+
+
+def test_the_configuration_without_a_gateway():
+    client, _ = api(gateway_url=None, settings_encryption_key=None)
+    with client:
+        config = client.get("/api/gateway/config").json()
+    assert config["configured"] is False and config["gateway_url"] is None and config["keycloak_url"] is None

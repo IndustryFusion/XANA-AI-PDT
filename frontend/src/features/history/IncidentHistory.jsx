@@ -14,6 +14,7 @@
 // limitations under the License.
 //
 
+import { useMachineNames } from '../../app/machineNames'
 import { useId, useRef, useState } from 'react'
 import { incidents as incidentsApi } from '../../data'
 import { useData } from '../../data/useData'
@@ -150,6 +151,8 @@ export function IncidentDetail({ id }) {
   const result = useData('incidents', 'getIncident', [id])
   const { navigate } = useRoute()
   const [reopening, setReopening] = useState(false)
+  const machineId = result.data?.machineId
+  const machineName = useMachineNames(machineId ? [machineId] : [])[machineId]
 
   if (result.status === 'loading' && !result.data) return <LoadingState label="Loading incident…" />
   if (result.status === 'error' && result.error?.kind === 'not_found') {
@@ -180,7 +183,7 @@ export function IncidentDetail({ id }) {
         </div>
         <p className="run-header__issue">{incident.issue}</p>
         <dl className="details run-header__details">
-          <dt>Machine</dt><dd><EntityRef id={incident.machineId} /></dd>
+          <dt>Machine</dt><dd>{machineName && <span data-testid="machine-name">{machineName} </span>}<EntityRef id={incident.machineId} /></dd>
           <dt>Started by</dt><dd data-testid="run-source">{runSourceLabel(incident.source)}</dd>
           <dt>Started</dt><dd><time dateTime={incident.startedAt}>{formatTime(incident.startedAt)}</time></dd>
           <dt>Closed</dt><dd><time dateTime={incident.closedAt}>{formatTime(incident.closedAt)}</time></dd>

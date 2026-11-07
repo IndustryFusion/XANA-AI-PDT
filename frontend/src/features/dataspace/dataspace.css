@@ -86,3 +86,8 @@
   .dataspace__top, .peers__layout { grid-template-columns: minmax(0, 1fr); }
 }
 .capability-id { word-break: normal; white-space: nowrap; }
+
+.level { font-size: var(--text-xs); }
+.level--elevated { color: var(--warning-text, var(--text)); font-weight: 600; }
+.level--restricted { color: var(--text-muted); }
+.level--unknown { color: var(--text-muted); font-style: italic; }

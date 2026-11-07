@@ -1,0 +1,6 @@
+{
+  "method": "POST",
+  "path": "/api/ifric/resolve-machines",
+  "status": 200,
+  "body": {}
+}

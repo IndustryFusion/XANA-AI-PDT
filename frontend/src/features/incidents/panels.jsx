@@ -23,6 +23,7 @@ import { ConfidenceMeter, ConfirmDialog, FileAttachments } from '../../ui/struct
 import { percent } from '../../ui/format'
 import { paths, useRoute } from '../../app/router'
 import EscalationDialog from './EscalationDialog'
+import { capabilityLabel } from '../dataspace/model'
 
 /** Runs an action with busy and error state; the caller's inputs stay as they are on failure. */
 function useAction() {
@@ -197,6 +198,32 @@ function ItemList({ items, empty }) {
   return <ul className="plain-list">{items.map((i) => <li key={i.label}>{i.label}</li>)}</ul>
 }
 
+/** What the machine builder may access at this factory now, read from the gateway when shown and on request. */
+function BuilderAccess({ builderId, builder }) {
+  const [key, setKey] = useState(0)
+  const result = useData('dataspace', 'getPeerCapabilities', [builderId], { enabled: !!builderId, refreshKey: key })
+  if (!builderId) return null
+  return (
+    <section aria-label="The machine builder's current access" className="stack">
+      <div className="row">
+        <h4 className="panel__subtitle">What {builder || 'the machine builder'} may access here now</h4>
+        <Button size="sm" onClick={() => setKey((k) => k + 1)} disabled={result.status === 'loading'}>Refresh</Button>
+      </div>
+      {result.status === 'error' ? (
+        <p className="muted" role="status">The current access could not be read from the gateway ({result.error?.message}). You can still decide.</p>
+      ) : result.data ? (
+        <ul className="plain-list">
+          {result.data.here.map((c) => (
+            <li key={c.capability} data-capability={c.capability}>
+              {capabilityLabel(c.capability)} <span className="mono muted">{c.capability}</span> <StatusBadge kind="policy" value={c.status} />
+            </li>
+          ))}
+        </ul>
+      ) : <p className="muted">Reading the current access…</p>}
+    </section>
+  )
+}
+
 export function ApprovalPanel({ run }) {
   const [note, setNote] = useState('')
   const action = useAction()
@@ -221,6 +248,7 @@ export function ApprovalPanel({ run }) {
             <ItemList items={needsApproval} empty="Nothing." />
           </section>
         </div>
+        <BuilderAccess builderId={run.escalation?.recipient?.id} builder={builder} />
         <TextField label="Note to the machine builder (optional)" value={note} onChange={setNote} disabled={action.busy} />
         <ActionError error={action.error} />
         <div className="row">

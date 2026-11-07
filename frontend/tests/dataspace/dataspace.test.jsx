@@ -20,6 +20,7 @@ import { store } from '../../src/data/sources/mock'
 import { MOCK_DATASPACE_SECRET } from '../../src/data/sources/mock/dataspaceArea'
 import { writeControls } from '../../src/data/sources/mock/controls'
 import { renderApp, renderAppWith } from '../helpers'
+import { dataspace } from '../../src/data'
 
 const open = (path = '/dataspace', controls = {}) => renderApp({ path, controls: { authEnabled: false, ...controls } })
 const region = (name) => screen.findByRole('region', { name })
@@ -291,5 +292,42 @@ describe('what the registry did not return', () => {
     expect(screen.getByText('Plant')).toBeVisible()
     expect(screen.queryByText('Owner')).not.toBeInTheDocument()
     expect(screen.queryByText('Location')).not.toBeInTheDocument()
+  })
+})
+
+describe('access levels and configuration', () => {
+  test('each peer shows its access level in the list, without opening it', async () => {
+    renderAppWith(() => {
+      const [first, second] = store.get().peers
+      store.update((s) => { s.dataspace.policies = { [first.id]: { 'twin:history': 'granted' }, [second.id]: { 'twin:direct': 'denied' } }; return s })
+    }, { path: '/dataspace', controls: { authEnabled: false } })
+    const list = await screen.findByRole('list', { name: 'Peers' })
+    const levels = (await within(list).findAllByTestId('access-level')).map((l) => l.textContent)
+    expect(levels[0]).toBe('Elevated access')
+    expect(levels[1]).toBe('Restricted access')
+    expect(levels.slice(2).every((l) => l === 'Standard access')).toBe(true)
+  })
+
+  test('the configuration panel shows addresses, realm, client and state, and no secret', async () => {
+    open()
+    const panel = await region('Configuration')
+    expect(await within(panel).findByText('http://gateway.dataspace:8080')).toBeVisible()
+    expect(within(panel).getByText('dataspace')).toBeVisible()
+    expect(within(panel).getByText('http://ifric.dataspace:4007')).toBeVisible()
+    expect(within(panel).getByText('Dataspace connected')).toBeVisible()
+    expect(panel.textContent).not.toContain(MOCK_DATASPACE_SECRET)
+  })
+
+  test('the configuration panel shows what the backend gives, and nothing that looks like a secret', async () => {
+    const spy = vi.spyOn(dataspace, 'getConnectionConfig').mockResolvedValue({
+      configured: true, gatewayUrl: 'http://gw.test', keycloakUrl: 'http://kc.test/auth', registryUrl: 'http://reader:***@ifric.test',
+      realm: 'dataspace', clientId: 'urn:factory',
+    })
+    open()
+    const panel = await region('Configuration')
+    expect(await within(panel).findByText('http://reader:***@ifric.test')).toBeVisible()
+    expect(within(panel).getByText('urn:factory')).toBeVisible()
+    expect(panel.textContent).not.toMatch(/secret|password|token/i)
+    spy.mockRestore()
   })
 })

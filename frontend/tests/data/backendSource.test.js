@@ -225,7 +225,7 @@ describe('without the mock', () => {
         'getAttributeHistory', 'getAttributeStatus', 'listTypesAt', 'queryEntitiesAt', 'subscribeEntities', 'getLiveUpdateHealth', 'getValueHints',
       ],
       alerts: ['listAlerts', 'countAlerts', 'getAlert', 'applyAlertAction', 'listEnvironments', 'listServices', 'getAlertSettings'],
-      dataspace: ['getConnection', 'connect', 'disconnect', 'listPeers', 'getPeerCapabilities', 'listCapabilityRequests', 'decideCapabilityRequest', 'setCapabilityPolicy', 'resolveNames', 'resolveBuilders'],
+      dataspace: ['getConnection', 'getConnectionConfig', 'getAccessLevels', 'connect', 'disconnect', 'listPeers', 'getPeerCapabilities', 'listCapabilityRequests', 'decideCapabilityRequest', 'setCapabilityPolicy', 'resolveNames', 'resolveBuilders', 'resolveMachines'],
       system: ['getHealth', 'getServiceSettings', 'saveServiceSettings'],
     })
     expect(backend.info.signInHint).toBeUndefined()
