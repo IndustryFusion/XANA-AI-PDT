@@ -281,21 +281,25 @@ async def test_on_data_with_full_iris_the_subscription_matches_under_a_context()
             await watch.check()
             assert watch.state == ACTIVE, watch.detail
             await watch.check()  # a second start's way: nothing to do
-            body = {f"{base}status": {"type": "Property", "value": "fault"}}
-            changed = await client.patch(f"{ENTITIES}/{machine}/attrs", json=body, headers=headers)
-            assert changed.status_code == 204
 
+        # Written until it comes through: a slower broker takes a moment to set up a new tenant and subscription.
         async def delivered():
+            async with httpx.AsyncClient(timeout=20) as client:
+                value = f"fault-{uuid.uuid4().hex[:6]}"
+                body = {f"{base}status": {"type": "Property", "value": value}}
+                changed = await client.patch(f"{ENTITIES}/{machine}/attrs", json=body, headers=headers)
+                assert changed.status_code == 204
+            await asyncio.sleep(2)
             return _Listener.received
 
-        await until(delivered, 20, "a notification")
+        await until(delivered, 90, "a notification")
         authorization, notification = _Listener.received[0]
         assert authorization == "Bearer iri-test-secret"
         [reported] = notification["data"]
         assert reported["id"] == machine
         names = [name for name in reported if name.rsplit("/", 1)[-1] == "status"]
         assert names, reported
-        assert reported[names[0]]["value"] == "fault"
+        assert reported[names[0]]["value"].startswith("fault")
     finally:
         async with httpx.AsyncClient(timeout=10) as client:
             tenant_only = {"NGSILD-Tenant": tenant}

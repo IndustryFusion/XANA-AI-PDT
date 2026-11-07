@@ -202,13 +202,28 @@ const ToastContext = createContext(() => {})
 export function ToastProvider({ children, timeoutMs = 5000 }) {
   const [toasts, setToasts] = useState([])
   const nextId = useRef(1)
+  const timers = useRef(new Set())
 
   const dismiss = useCallback((id) => setToasts((all) => all.filter((t) => t.id !== id)), [])
   const notify = useCallback((message, tone = 'info') => {
     const id = nextId.current++
     setToasts((all) => [...all, { id, message, tone }])
-    if (timeoutMs > 0) setTimeout(() => dismiss(id), timeoutMs)
+    if (timeoutMs > 0) {
+      const timer = setTimeout(() => {
+        timers.current.delete(timer)
+        dismiss(id)
+      }, timeoutMs)
+      timers.current.add(timer)
+    }
   }, [dismiss, timeoutMs])
+
+  useEffect(() => {
+    const pending = timers.current
+    return () => {
+      pending.forEach(clearTimeout)
+      pending.clear()
+    }
+  }, [])
 
   return (
     <ToastContext.Provider value={notify}>
