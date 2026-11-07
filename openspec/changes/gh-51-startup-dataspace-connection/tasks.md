@@ -10,8 +10,8 @@
 
 ## 2. Verification on a real dataspace
 
-- [ ] 2.1 Restart the backend with sign-in on and nobody signed in; a machine builder's message reaches its run; verify with the dataspace's gateway, adapters, Keycloak and a machine-builder participant
-- [ ] 2.2 Start the backend while the dataspace's Keycloak is stopped; health shows the reason, and the backend connects once Keycloak is started; verify on the same services
+- [x] 2.1 Restart the backend with sign-in on and nobody signed in; a machine builder's message reaches its run; verify with the dataspace's gateway, adapters, Keycloak and a machine-builder participant
+- [x] 2.2 Start the backend while the dataspace's Keycloak is stopped; health shows the reason, and the backend connects once Keycloak is started; verify on the same services
 - [x] 2.3 Start without a configured client; verify nothing changes from before, with the existing tests passing
 
 ## 3. Documents
