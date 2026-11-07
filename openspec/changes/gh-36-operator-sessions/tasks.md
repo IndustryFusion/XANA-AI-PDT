@@ -26,6 +26,7 @@
 
 - [ ] 4.1 Give each round its identity, per the design's table; verify each row with a recording broker, including a session ending during a round, and a restart
 - [ ] 4.2 Record the identity on a step; verify in a run's steps
+- [ ] 4.3 Remove the fallback to an operator's token from triggered rounds and the subscription, per decision 4; verify that with no service client and an operator signed in, a triggered round has no token and the subscription waits, and the check says so
 
 ## 5. TLS
 

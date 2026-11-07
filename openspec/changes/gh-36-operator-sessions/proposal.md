@@ -28,6 +28,7 @@ Full alternatives are in `design.md`.
 1. **Backend-held sessions with a cookie, or the browser sending a bearer token.** Recommended: backend-held, with a cookie.
 2. **How a run continues after the operator who started it signs out.** Recommended: it goes on under the service identity if one is configured, and otherwise without a token, where what it can't read shows as an unavailable source. A paused run waits for an answer as it does today.
 3. **Whether sign-in stays a password grant through the backend, or moves to a browser redirect.** Recommended: it stays, for this change.
+4. **Which identity the machine events subscription uses, with sessions per operator.** Not one of the issue's three: it arises from `gh-30-machine-event-runs`. Recommended: the service identity only, and without one the subscription waits and says so.
 
 ## Capabilities
 
@@ -38,6 +39,7 @@ Full alternatives are in `design.md`.
 
 ### Modified Capabilities
 
+- `backend/machine-events`: A triggered round and the subscription no longer fall back to a signed-in operator's token. Comes from `gh-30-machine-event-runs`, so this comes after that change is archived.
 - `backend/authentication`: A session per browser, with its reference in a cookie. This changes `gh-21-keycloak-sign-in`'s requirements, so it comes after that change is archived (#37).
 - `backend/run-stream`: Origin and session checks, and ending with the session.
 - `backend/local-environment`: Plain HTTP is allowed explicitly.

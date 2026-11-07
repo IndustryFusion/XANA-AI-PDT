@@ -10,7 +10,7 @@
 
 - **`gh-21-keycloak-sign-in`'s requirements "Token for platform services" and "Session after a restart" assume one session.** They are modified here, as that change's design already says this comes next.
 - **`gh-30-machine-event-runs` uses a triggered run's identity for every round,** whoever answers. Decision 2 changes that for a round an operator's answer starts, which closes the gap that change names. Its requirement has to be modified here, or that change adjusted if it merges later.
-- **`gh-30-machine-event-runs` falls back to a signed-in operator's token,** where this design's table gives a triggered run the service identity "or else nothing". That change's requirement "A triggered run while an operator is signed in" and "Not configured", and `service_identity.token() or session.token()` in `app/main.py`, which the subscription uses too, would change: with no service client, a triggered round has no token, and the subscription has no identity unless one is chosen for it. With sessions per operator, "the signed-in operator" no longer means one person. For the subscription this design has no answer of its own: **a maintainer should decide whether it may use an operator's token at all,** or needs a service client.
+- **`gh-30-machine-event-runs` falls back to a signed-in operator's token,** where this design's table gives a triggered run the service identity "or else nothing". That change's requirement "A triggered run while an operator is signed in" and "Not configured", and `service_identity.token() or session.token()` in `app/main.py`, which the subscription uses too, would change: with no service client, a triggered round has no token, and the subscription has no identity unless one is chosen for it. With sessions per operator, "the signed-in operator" no longer means one person. For the subscription, see decision 4.
 - **`architecture.md` lists the API without protection.** It is corrected on implementation.
 
 ## Decisions for a maintainer
@@ -68,6 +68,18 @@ Which token a round uses, in every case, under the recommended option:
 | Effort | None | A callback route, `state` and PKCE handling, and new tests |
 
 **Recommended: A for this change, with B as its own issue** once the platform has the redirect URIs. The session design doesn't depend on this choice: under either, the backend ends up holding tokens behind a cookie, so B can follow without touching what this change builds.
+
+### 4. Which identity the machine events subscription uses
+
+This isn't one of the issue's three. It arises because `gh-30-machine-event-runs` lets the subscription use the service identity or else the signed-in operator, and "the signed-in operator" stops meaning one person.
+
+| Alternative | For | Against |
+|---|---|---|
+| **A. The service identity only (recommended).** Without one, with sign-in on, the subscription waits, and the `machine_events` check says so | Machine events don't hang on any one person's token, and nothing else in this design keeps an operator's token after sign-out | An installation with no service client has no machine events, where today it gets them once anyone has signed in. The platform has no such client, so one has to be created |
+| B. The operator signed in longest, as for live updates | Works with no service client | The subscription is made with one person's rights. It stays in the broker and goes on delivering after that person signs out, so which identity made it stops being clear |
+| C. An explicit setting that allows an operator's token | The installer chooses | One more setting, and B's drawback where it is on |
+
+**Recommended: A.** It goes with decision 2's table: a triggered run's rounds use the service identity or else nothing.
 
 ## Other decisions
 
