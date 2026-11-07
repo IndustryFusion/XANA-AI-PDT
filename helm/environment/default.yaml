@@ -44,6 +44,9 @@ pgrestUrl: http://pgrest:3000
 # name the type and attributes as the platform does.
 callbackBaseUrl: ""
 machineWatchType: Machine
+# Your own Langfuse server for traces, for example https://langfuse.example.org. Empty uses Langfuse's default.
+# The keys come from XANA_LANGFUSE_PUBLIC_KEY and XANA_LANGFUSE_SECRET_KEY; without them nothing is traced.
+langfuseHost: ""
 # Finished runs move to incident history after this many seconds without a change. 0 keeps them until archived.
 autoArchiveAfterS: 3600
 machineWatchAttributes: status,errorCode,alarmLevel,faultCode

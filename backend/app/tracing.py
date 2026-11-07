@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import inspect
 import logging
 from typing import Any
 
@@ -36,10 +37,13 @@ def tracing_callbacks(settings: Settings) -> list[Any]:
         log.warning("LANGFUSE_* keys are set, but Langfuse is not installed: running without tracing.")
         return []
     try:
+        address = settings.langfuse_address
+        # Newer clients name the address `base_url`, older ones only `host`.
+        named = "base_url" if "base_url" in inspect.signature(Langfuse.__init__).parameters else "host"
         Langfuse(
             public_key=settings.langfuse_public_key,
             secret_key=settings.langfuse_secret_key.get_secret_value(),
-            host=settings.langfuse_host,
+            **({named: address} if address else {}),
         )
         return [CallbackHandler(public_key=settings.langfuse_public_key)]
     except Exception as error:  # noqa: BLE001 - tracing must never stop a diagnosis

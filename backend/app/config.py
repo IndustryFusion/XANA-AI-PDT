@@ -58,6 +58,7 @@ class Settings(BaseSettings):
     langfuse_public_key: str | None = None
     langfuse_secret_key: SecretStr | None = None
     langfuse_host: str | None = None
+    langfuse_base_url: str | None = None  # the newer name for the same address
 
     decision_confidence_threshold: float = Field(0.9, ge=0, le=1)
     max_concurrent_rounds: int = Field(2, ge=1)
@@ -206,7 +207,17 @@ class Settings(BaseSettings):
     def _tracing_keys_come_together(self) -> Settings:
         if bool(self.langfuse_public_key) != bool(self.langfuse_secret_key):
             raise ValueError("LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY must be set together")
+        host, base = (self.langfuse_host or "").rstrip("/"), (self.langfuse_base_url or "").rstrip("/")
+        if host and base and host != base:
+            raise ValueError(
+                "LANGFUSE_HOST and LANGFUSE_BASE_URL name different addresses; set one of them, or the same in both"
+            )
         return self
+
+    @property
+    def langfuse_address(self) -> str | None:
+        """Where traces go: LANGFUSE_HOST or LANGFUSE_BASE_URL. None means the tracing client's default."""
+        return self.langfuse_host or self.langfuse_base_url or None
 
     @model_validator(mode="after")
     def _apply_database_tls(self) -> Settings:

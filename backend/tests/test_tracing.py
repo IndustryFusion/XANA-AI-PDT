@@ -19,6 +19,7 @@ import logging
 import sys
 import types
 
+import pytest
 from langchain_core.callbacks import BaseCallbackHandler
 
 from app.tracing import tracing_callbacks
@@ -102,3 +103,68 @@ class _Memory:
             return []
 
         return nothing
+
+
+# ── Where traces go ─────────────────────────────────────────────────────────
+
+
+def recording_client(monkeypatch):
+    made = []
+
+    class Client:
+        def __init__(self, *, public_key=None, secret_key=None, base_url=None, host=None):
+            made.append({"base_url": base_url, "host": host})
+
+    stand_in(monkeypatch, Client)
+    return made
+
+
+def test_the_address_from_langfuse_host(monkeypatch):
+    made = recording_client(monkeypatch)
+    assert tracing_callbacks(make_settings(**KEYS, langfuse_host="http://traces.test:3000"))
+    assert made == [{"base_url": "http://traces.test:3000", "host": None}]
+
+
+def test_the_address_from_langfuse_base_url(monkeypatch):
+    made = recording_client(monkeypatch)
+    assert tracing_callbacks(make_settings(**KEYS, langfuse_base_url="http://traces.test:3000"))
+    assert made == [{"base_url": "http://traces.test:3000", "host": None}]
+
+
+def test_an_older_client_gets_host(monkeypatch):
+    made = []
+
+    class Older:
+        def __init__(self, *, public_key=None, secret_key=None, host=None):
+            made.append(host)
+
+    stand_in(monkeypatch, Older)
+    assert tracing_callbacks(make_settings(**KEYS, langfuse_base_url="http://traces.test:3000"))
+    assert made == ["http://traces.test:3000"]
+
+
+def test_no_address_leaves_the_clients_default(monkeypatch):
+    made = recording_client(monkeypatch)
+    assert tracing_callbacks(make_settings(**KEYS))
+    assert made == [{"base_url": None, "host": None}]
+
+
+def test_the_same_address_in_both_is_fine():
+    settings = make_settings(langfuse_host="http://traces.test:3000/", langfuse_base_url="http://traces.test:3000")
+    assert settings.langfuse_address == "http://traces.test:3000/"
+
+
+def test_two_different_addresses_stop_startup_naming_both(monkeypatch):
+    from app.config import ConfigError, load_settings
+
+    monkeypatch.setenv("LANGFUSE_HOST", "http://one.test")
+    monkeypatch.setenv("LANGFUSE_BASE_URL", "http://two.test")
+    with pytest.raises(ConfigError) as caught:
+        load_settings()
+    assert "LANGFUSE_HOST" in str(caught.value) and "LANGFUSE_BASE_URL" in str(caught.value)
+
+
+def test_an_address_without_keys_creates_nothing(monkeypatch):
+    made = recording_client(monkeypatch)
+    assert tracing_callbacks(make_settings(langfuse_host="http://traces.test:3000")) == []
+    assert made == []

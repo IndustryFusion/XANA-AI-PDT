@@ -98,6 +98,8 @@ The backend takes its secrets from the first of these that applies:
 2. **`database.credentialsSecret`:** the operator's Secret, with keys `username` and `password`. The chart builds the two database URLs from it. Its password must not need URL encoding, which holds for generated passwords.
 3. **`secrets.values`:** values given at install time, such as an API key, kept in a Secret the chart creates. With 2, these supply everything other than the database URLs.
 
+Traces go to Langfuse's own service unless `langfuseHost`, or `XANA_LANGFUSE_HOST` from the shell, names your server; it is passed as `LANGFUSE_HOST` in the backend's configuration. Without the two keys nothing is traced.
+
 For 3, Helmfile reads `XANA_ANTHROPIC_API_KEY`, `XANA_OPENAI_API_KEY`, `XANA_LANGFUSE_PUBLIC_KEY` and `XANA_LANGFUSE_SECRET_KEY` from the shell:
 
 ```bash
