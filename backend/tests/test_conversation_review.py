@@ -17,10 +17,12 @@
 
 import asyncio
 import json
+from datetime import UTC, datetime, timedelta
 
 import httpx
 import pytest
 
+from app.runs.conversation import _decision
 from tests.dataspace_support import BUILDER
 from tests.runs_support import MACHINE, rows, running, to_confirmation
 from tests.space_support import connect
@@ -167,6 +169,12 @@ async def test_archiving_with_a_close_pending_is_refused_and_the_close_goes_out(
     assert space.sent[-1]["performative"] == "close"
 
 
+def later(app, seconds):
+    """Moves the backend's clock on."""
+    now = app.state.runs._now
+    app.state.runs._now = lambda: now() + timedelta(seconds=seconds)
+
+
 async def test_a_close_the_receiver_didnt_get_is_repeated_with_its_outcome(url):
     app, space = make(url)
     async with running(app) as client:
@@ -178,12 +186,60 @@ async def test_a_close_the_receiver_didnt_get_is_repeated_with_its_outcome(url):
         await app.state.runs.check_outbox()
         run = await s.run()
         assert run["data"]["close_pending"] is True and "receiver down" in run["data"]["close_problem"]
+        later(app, 61)
         await s.poll()
         run = await s.run()
     closes = [m for m in space.sent if m.get("performative") == "close"]
     assert len(closes) == 2
     assert closes[1]["outcome"] == "resolved"
     assert "close_pending" not in run["data"]
+
+
+async def fail_closes(app, space):
+    for message in space.sent:
+        if message.get("performative") == "close":
+            space.message_status[message["message_id"]] = "error"
+            space.fail_status[message["message_id"]] = "receiver down"
+    await app.state.runs.check_outbox()
+
+
+async def test_repeating_a_close_backs_off_and_adds_no_step(url):
+    app, space = make(url)
+    async with running(app) as client:
+        s = await scene(client, app, space)
+        await client.post(f"/api/agent/stop/{s.run_id}", json={})
+        first = await s.run()
+        for _ in range(6):
+            await fail_closes(app, space)
+            await s.poll()
+        closes = lambda: [m for m in space.sent if m.get("performative") == "close"]  # noqa: E731
+        assert len(closes()) == 1, "not before its time"
+
+        later(app, 61)  # 60 s for the first failure
+        await s.poll()
+        assert len(closes()) == 2
+        await fail_closes(app, space)
+        later(app, 61)  # 120 s for the second: not due
+        await s.poll()
+        assert len(closes()) == 2
+        later(app, 60)
+        await s.poll()
+        assert len(closes()) == 3
+        run = await s.run()
+        assert len(messages(run)) == len(messages(first)), "one close in the conversation"
+        assert len(run["steps"]) == len(first["steps"])
+        assert len([e for e in run["outbox"] if e["status"] == "failed"]) == 0
+        assert len(run["outbox"]) == len(first["outbox"])
+        await client.post(f"/api/agent/refresh-conversation/{s.run_id}")
+        assert len(messages(await s.run())) == len(messages(first)), "earlier sends stay known"
+
+
+async def test_the_wait_between_closes_has_a_limit(url):
+    app, _ = make(url)
+    runs = app.state.runs
+    data = {"close_attempts": 40}
+    retry = datetime.fromisoformat(runs.close_backoff(data)["close_retry_at"])
+    assert retry - datetime.now(UTC) <= timedelta(seconds=3601)
 
 
 # ── A half-finished escalation (B9) ──────────────────────────────────────────
@@ -573,6 +629,137 @@ async def test_declining_leaves_access_that_was_approved_before(url):
         space.status_for.clear()
         await client.post(f"/api/agent/approve-data-request/{s.run_id}", json={"approved": False})
     assert [p["action"] for p in space.policies] == ["approve"]
+
+
+async def test_a_decline_is_refused_once_the_grant_went_out(url):
+    app, space = make(url)
+    on_request(space)
+    async with running(app) as client:
+        s = await scene(client, app, space)
+        request = space.deliver("request", s.conversation, capability="twin:history")
+        await s.poll()
+        space.status_for["POST /outbox/files"] = 503
+        body = {"approved": True, "request_id": request}
+        assert (await client.post(f"/api/agent/approve-data-request/{s.run_id}", json=body)).status_code >= 400
+        space.status_for.clear()
+        before = len(space.sent)
+        declined = await client.post(f"/api/agent/approve-data-request/{s.run_id}", json=body | {"approved": False})
+        assert declined.status_code == 409
+        assert len(space.sent) == before
+        assert (await client.post(f"/api/agent/approve-data-request/{s.run_id}", json=body)).status_code == 200
+    assert space.sent[-1]["kind"] == "files"
+
+
+async def half_escalated_and_reopened(client, space):
+    await connect(client)
+    run_id = await to_confirmation(client, MACHINE)
+    space.status_for["POST /outbox/messages"] = 503
+    await client.post(f"/api/agent/escalate/{run_id}")
+    space.status_for.clear()
+    conversation = space.sent[0]["conversation_id"]
+    await client.post(f"/api/agent/stop/{run_id}", json={})
+    space.deliver("reopen", conversation)
+    return run_id, conversation
+
+
+async def test_a_half_escalated_run_reopened_by_the_builder_refuses_a_grant_cleanly(url):
+    app, space = make(url)
+    async with running(app) as client:
+        run_id, conversation = await half_escalated_and_reopened(client, space)
+        request = space.deliver("request", conversation, capability="twin:history")
+        await app.state.inbox.poll_once()
+        assert (await client.get(f"/api/agent/status/{run_id}")).json()["status"] == "awaiting_operator_approval"
+        before = len(space.sent)
+        body = {"approved": True, "request_id": request}
+        granted = await client.post(f"/api/agent/approve-data-request/{run_id}", json=body)
+        assert granted.status_code == 409
+        assert len(space.sent) == before and not space.policies
+
+
+async def test_a_half_escalated_run_reopened_by_the_builder_refuses_an_answer_cleanly(url):
+    app, space = make(url)
+    async with running(app) as client:
+        run_id, conversation = await half_escalated_and_reopened(client, space)
+        space.deliver("inform", conversation, payload={"recommendation": "Replace it"})
+        await app.state.inbox.poll_once()
+        answer = await client.post(f"/api/agent/recommendation-reply/{run_id}", json={"action": "resolved"})
+    assert answer.status_code == 409
+
+
+# ── What a grant of history delivers (final review B1) ───────────────────────
+
+
+async def history_grant(app, space, client, adjacents):
+    await connect(client)
+    for item in space.access_here[BUILDER]:
+        if item["capability"] == "twin:history":
+            item["status"] = "on-request"
+        if item["capability"] == "twin:adjacents":
+            item["status"] = adjacents
+    run_id = await to_confirmation(client, MACHINE)
+    assert (await client.post(f"/api/agent/escalate/{run_id}")).status_code == 200
+    request = space.deliver("request", space.sent[0]["conversation_id"], capability="twin:history")
+    await app.state.inbox.poll_once()
+    body = {"approved": True, "request_id": request}
+    assert (await client.post(f"/api/agent/approve-data-request/{run_id}", json=body)).status_code == 200
+    run = (await client.get(f"/api/agent/status/{run_id}")).json()
+    check = [step for step in run["steps"] if step["node"] == "policy_check"][-1]["output"]
+    return [m for m in space.sent if m.get("kind") == "files"][-1]["files"]["signal-history.json"], check
+
+
+async def test_a_grant_of_history_holds_related_signals_if_those_entities_may_go(url):
+    app, space = make(url, tier="timeseries")
+    async with running(app) as client:
+        history, check = await history_grant(app, space, client, "approved")
+    assert history
+    assert check["signals"] == len(history)
+    assert f"{len(history)} signals" in check["decision"]
+    assert list(check["files"]) == ["signal-history.json"]
+
+
+@pytest.mark.parametrize(("tier", "adjacents"), [("timeseries", "on-request"), ("minimal", "approved")])
+async def test_otherwise_the_machines_own_and_the_operator_is_told_what_went(url, tier, adjacents):
+    app, space = make(url, tier=tier)
+    async with running(app) as client:
+        history, check = await history_grant(app, space, client, adjacents)
+    assert {signal["entity_id"] for signal in history} <= {MACHINE}
+    assert check["signals"] == len(history)
+    if not history:
+        assert "0 signals" in check["decision"]
+        assert "and sent" not in check["decision"]
+
+
+def test_saying_plainly_that_a_file_holds_nothing():
+    empty = [("signal-history.json", b"[]")]
+    assert "0 signals" in _decision("twin:history", empty)
+    assert "and sent" not in _decision("twin:history", empty)
+    assert _decision("twin:history", [("signal-history.json", b"[1, 2]")]).endswith("2 signals.")
+    assert _decision("twin:direct", [("machine.json", b"{}")]) == "Approved by the operator and sent."
+
+
+# ── One message that fails (S6) ──────────────────────────────────────────────
+
+
+async def test_a_message_too_deep_to_handle_stays_and_holds_up_nothing(url):
+    app, space = make(url)
+    async with running(app) as client:
+        s = await scene(client, app, space)
+        bad = space.deliver("inform", s.conversation, payload={"text": "bad"})
+        good = space.deliver("inform", s.conversation, payload={"text": "next"})
+        desk = app.state.runs.desk
+        receive = desk.receive
+
+        async def too_deep(message):
+            if message["message_id"] == bad:
+                raise RecursionError("maximum recursion depth exceeded")
+            return await receive(message)
+
+        desk.receive = too_deep
+        await s.poll()
+        run = await s.run()
+    assert good in space.acks
+    assert bad not in space.acks
+    assert good in [m["message_id"] for m in messages(run)]
 
 
 # ── After a start, and the record (S6, minors) ───────────────────────────────

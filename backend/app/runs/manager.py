@@ -29,7 +29,7 @@ import logging
 import uuid
 from collections.abc import Awaitable, Callable, Coroutine
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
 from app.errors import Refused, conflict, invalid, not_found, unavailable
@@ -58,6 +58,8 @@ log = logging.getLogger(__name__)
 MAX_ISSUE = 2000
 MAX_TEXT = 4000
 OUTBOX_POLL_S = 5
+CLOSE_RETRY_S = 60
+CLOSE_RETRY_MAX_S = 3600
 NO_ESCALATION = "No dataspace is configured for this installation."
 NOT_REOPENABLE = "Only runs with a machine-builder conversation can be reopened."
 
@@ -512,15 +514,25 @@ class RunManager:
                     if answer.get("error_message"):
                         entry["error"] = answer["error_message"]
                     changed = True
-                    if entry["status"] == "failed" and self._is_close(rec, entry["message_id"]):
+                    if entry["status"] == "failed" and (entry.get("close") or self._is_close(rec, entry["message_id"])):
                         closes_failed.append(entry.get("error") or "The machine builder didn't receive the close.")
                 outbox.append(entry)
             if changed:
                 fields: dict[str, Any] = {}
                 if closes_failed and rec.state.status == STOPPED:
                     data = rec.state.data | {"close_pending": True, "close_problem": closes_failed[-1]}
-                    fields["data"] = data
+                    fields["data"] = data | self.close_backoff(rec.state.data)
                 await self._change(rec, outbox=tuple(outbox), **fields)
+
+    def close_backoff(self, data: dict[str, Any]) -> dict[str, Any]:
+        """When to try a failed close again: later each time, as a receiver that is down stays so for a while."""
+        attempts = int(data.get("close_attempts") or 0) + 1
+        wait = min(CLOSE_RETRY_S * 2 ** (attempts - 1), CLOSE_RETRY_MAX_S)
+        return {"close_attempts": attempts, "close_retry_at": (self._now() + timedelta(seconds=wait)).isoformat()}
+
+    def close_is_due(self, data: dict[str, Any]) -> bool:
+        due = data.get("close_retry_at")
+        return not due or datetime.fromisoformat(due) <= self._now()
 
     @staticmethod
     def _is_close(rec: RunRecord, message_id: str) -> bool:

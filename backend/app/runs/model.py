@@ -102,6 +102,7 @@ class RunState:
         return [
             {key: entry[key] for key in ("message_id", "status", "kind", "error") if key in entry}
             for entry in self.outbox
+            if not entry.get("superseded")
         ]
 
     def last_decision(self) -> dict[str, Any] | None:

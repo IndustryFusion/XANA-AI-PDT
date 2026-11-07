@@ -29,7 +29,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from app.dataspace.gateway import GatewayClient
-from app.dataspace.sharing import ALLOWED_ACCESS, LABELS, TIERS, Sharing
+from app.dataspace.sharing import ADJACENTS, ALLOWED_ACCESS, FILES, HISTORY, LABELS, TIERS, Sharing, apply_policy
 from app.errors import Refused, conflict, invalid, not_found, unavailable
 from app.memory.store import IncidentStore, RunStore
 from app.runs.escalation import DELIVERY, Escalator
@@ -163,6 +163,28 @@ def pending_recommendation(state: RunState) -> dict[str, Any] | None:
         if message.get("recommendation") and message["message_id"] not in answered:
             return message
     return None
+
+
+def _grants(message: dict[str, Any], request_id: str) -> bool:
+    return message.get("act") == "grant" and message.get("in_reply_to") == request_id
+
+
+def _signal_count(files: list[tuple[str, bytes]]) -> int:
+    content = dict(files).get(FILES[HISTORY])
+    return len(json.loads(content)) if content else 0
+
+
+def _decision(capability: str, files: list[tuple[str, bytes]]) -> str:
+    """What went out, as far as it tells: a file can go and hold nothing."""
+    if capability != HISTORY:
+        return "Approved by the operator and sent."
+    count = _signal_count(files)
+    if count == 0:
+        return (
+            "Approved by the operator. The history file sent holds 0 signals: this machine has no numeric signals "
+            "of its own, and those of related entities go only if related entities may go to this builder."
+        )
+    return f"Approved by the operator and sent: {count} signals."
 
 
 def _worth_reviewing(message: dict[str, Any]) -> bool:
@@ -463,6 +485,11 @@ class ConversationDesk:
         finally:
             rec.busy = False
 
+    @staticmethod
+    def _require_escalation(state: RunState) -> None:
+        if not state.escalation:
+            raise conflict("This run's escalation never finished, so nothing can go to the machine builder from it.")
+
     def _receiver(self, state: RunState) -> str:
         if state.escalation:
             return state.escalation["recipient"]["id"]
@@ -596,8 +623,11 @@ class ConversationDesk:
             if request_id and request["message_id"] != request_id:
                 raise conflict("This data request is no longer the one waiting. Look at the current one.")
             if approved:
+                self._require_escalation(rec.state)
                 await self._grant(rec, request, note)
             else:
+                if any(_grants(m, request["message_id"]) for m in messages_of(rec.state)):
+                    raise conflict("The grant has gone out, so this can't be declined. Approving sends the data.")
                 await self._withdraw_approval(rec, request)
                 step = await self._send(
                     rec, "deny", note, capability=request["capability"], in_reply_to=request["message_id"]
@@ -620,9 +650,7 @@ class ConversationDesk:
         state = rec.state
         capability = request["capability"]
         receiver = self._receiver(state)
-        granted = any(
-            m.get("act") == "grant" and m.get("in_reply_to") == request["message_id"] for m in messages_of(state)
-        )
+        granted = any(_grants(m, request["message_id"]) for m in messages_of(state))
         names: list[str] = []
         approved_here = False
         try:
@@ -643,7 +671,10 @@ class ConversationDesk:
                 await self._store_sent(rec, step)
                 granted, approved_here = True, False
             sharing = Sharing(state.escalation["tier"], (capability,), ())
-            files = await self._escalator.files(rec.state, sharing) if capability in LABELS else []
+            # A grant of history holds related entities' signals only if those entities may go to this builder.
+            access = await self._gateway.access(consumer=receiver) if capability == HISTORY else []
+            with_related = ADJACENTS in apply_policy(state.escalation["tier"], access).allowed
+            files = await self._escalator.files(rec.state, sharing, with_related) if capability in LABELS else []
             names = [name for name, _ in files]
             entry = None
             if files:
@@ -679,9 +710,11 @@ class ConversationDesk:
             "sent": [LABELS.get(capability, capability)],
             "files": names,
             "withheld": [],
-            "decision": "Approved by the operator and sent.",
+            "decision": _decision(capability, files),
             "note": note or None,
         }
+        if capability == HISTORY:
+            output["signals"] = _signal_count(files)
         async with rec.lock:
             step = self._m.make_step("policy_check", {"approved": True}, output, rec.state.round)
             status, data = waiting_status(replace(rec.state, steps=(*rec.state.steps, step)))
@@ -696,6 +729,7 @@ class ConversationDesk:
         if action not in ("resolved", "still_failing", "escalate"):
             raise invalid("Answer with resolved, still failing or escalate.")
         async with self._sending(rec, (AWAITING_RECOMMENDATION_REVIEW,), "answering the recommendation"):
+            self._require_escalation(rec.state)
             found = pending_recommendation(rec.state)
             if found is None:
                 raise conflict("No recommendation is waiting.")
@@ -908,7 +942,7 @@ class ConversationDesk:
     async def retry_closes(self) -> None:
         """A close that couldn't be sent or delivered. Repeating one is safe under the protocol."""
         for rec in self._m.records():
-            if not rec.state.data.get("close_pending") or rec.busy:
+            if not rec.state.data.get("close_pending") or rec.busy or not self._m.close_is_due(rec.state.data):
                 continue
             try:
                 async with self._sending(rec, (STOPPED,), "repeating a close"):
@@ -921,17 +955,35 @@ class ConversationDesk:
         me = self._gateway.connection.participant_id
         if conversation_state(conversation, me) == "direct_contact_machine_builder":
             return  # only the machine builder can end that, and each refused try would stay listed at the gateway
-        done = {k: v for k, v in rec.state.data.items() if k not in ("close_pending", "close_problem")}
+        done = {
+            k: v for k, v in rec.state.data.items() if k not in ("close_pending", "close_problem", "close_retry_at")
+        }
         outcome = OUTCOME_TO_SEND.get(done.get("outcome"), done.get("outcome")) or "withdrawn"
         try:
             step = await self._send(rec, "close", done.get("reason") or "", outcome=outcome)
         except Refused as refused:
             problem = await self._close_problem(rec, refused)
+            if problem:
+                problem |= self._m.close_backoff(rec.state.data)
             async with rec.lock:
                 await self._m.change(rec, data=done | problem, conversation_id=conversation_of(rec.state))
             return
         step["output"]["conv_state"] = "closed"
-        await self._store_sent(rec, step, data=done, conversation_id=conversation_of(rec.state))
+        repeated = any(m.get("act") == "close" for m in messages_of(rec.state))
+        if not repeated:
+            await self._store_sent(rec, step, data=done, conversation_id=conversation_of(rec.state))
+            return
+        # One close in the conversation, however often it had to go: the earlier sends stay known, out of sight.
+        entry = step.pop("_entry") | {"close": True}
+        closes = {m.get("message_id") for m in messages_of(rec.state) if m.get("act") == "close"}
+        outbox = tuple(
+            {**e, "superseded": True}
+            if e["status"] == "failed" and (e.get("close") or e["message_id"] in closes)
+            else e
+            for e in rec.state.outbox
+        )
+        async with rec.lock:
+            await self._m.change(rec, data=done, outbox=(*outbox, entry))
 
     async def reopen(self, run_id: str) -> dict[str, str]:
         await self._m.ready()
