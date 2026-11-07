@@ -99,8 +99,12 @@ export function createEntitiesArea(store) {
   const now = () => new Date().toISOString()
 
   function query(list, params) {
-    const { test, limit } = compileQuery(params)
-    return structuredClone(list.filter(test).slice(0, limit))
+    const { test, limit, needsFilter } = compileQuery(params)
+    const cap = currentControls().searchCap
+    const capped = cap != null && needsFilter && list.length > cap
+    const found = structuredClone((capped ? list.slice(0, cap) : list).filter(test).slice(0, limit))
+    if (capped) found.limited = { scanned: cap, total: list.length }
+    return found
   }
 
   /** Entities as they were at time `t` (see data-interface.md for the approximation). */
@@ -234,8 +238,13 @@ export function createEntitiesArea(store) {
       if (subAttribute && !isAttribute(entity[name][subAttribute])) throw err('not_found', `${name} has no sub-attribute ${subAttribute}.`)
       store.update((state) => {
         const e = state.entities.find((x) => x.id === id)
-        if (subAttribute) delete e[name][subAttribute]
-        else delete e[name]
+        if (subAttribute) {
+          delete e[name][subAttribute]
+        } else {
+          delete e[name]
+          state.entityLog.deletedAttributes ??= {}
+          state.entityLog.deletedAttributes[id] = { ...state.entityLog.deletedAttributes[id], [name]: now() }
+        }
         return state
       })
     }),
@@ -313,13 +322,22 @@ export function createEntitiesArea(store) {
       const lo = Math.max(from ? Date.parse(from) : start, start)
       const hi = Math.min(to ? Date.parse(to) : Date.now(), Date.now())
       if (Number.isNaN(lo) || Number.isNaN(hi)) throw err('invalid', 'The time range is not valid.')
-      return seriesOf(entity, name, lo, hi) ?? []
+      const points = seriesOf(entity, name, lo, hi) ?? []
+      const cap = currentControls().searchCap
+      if (cap == null || points.length <= cap) return points
+      const newest = points.slice(-cap)
+      newest.limited = { newest: cap }
+      return newest
     }),
 
     getAttributeStatus: withControls((id) => {
       const entity = find(id)
-      if (!entity) return {}
-      return Object.fromEntries(attributeNames(entity).map((name) => [name, { deleted: false, observedAt: entity[name]?.observedAt ?? null }]))
+      const recorded = entity ? attributeNames(entity).filter((name) => entity[name]?.observedAt) : []
+      const states = Object.fromEntries(recorded.map((name) => [name, { deleted: false, observedAt: entity[name].observedAt }]))
+      for (const [name, at] of Object.entries(store.get().entityLog.deletedAttributes?.[id] ?? {})) {
+        if (!states[name]) states[name] = { deleted: true, observedAt: at }
+      }
+      return states
     }),
 
     listTypesAt: withControls((at) => [...new Set(entitiesAt(parseMoment(at)).map((e) => e.type))].sort()),

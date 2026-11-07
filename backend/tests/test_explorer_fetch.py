@@ -20,6 +20,7 @@ import httpx
 import pytest
 
 from app.errors import Refused
+from app.ngsi import fetch as fetch_module
 from app.ngsi.fetch import MAX_BYTES, fetch_document, is_public
 
 PUBLIC = "93.184.216.34"
@@ -76,7 +77,7 @@ def test_internal_addresses(address):
     assert not is_public(address)
 
 
-@pytest.mark.parametrize("address", [PUBLIC, "1.1.1.1", "2606:4700:4700::1111", "::ffff:1.1.1.1"])
+@pytest.mark.parametrize("address", [PUBLIC, "1.1.1.1", "2606:4700:4700::1111", "::ffff:1.1.1.1", "64:ff9b::101:101"])
 def test_public_addresses(address):
     assert is_public(address)
 
@@ -224,7 +225,40 @@ async def test_unknown_host_is_502_not_a_refusal_of_an_internal_address():
 
 
 async def test_proxies_from_the_environment_are_ignored(monkeypatch):
-    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:1")
+    seen = {}
+    real = httpx.AsyncClient
+
+    def spying(**kwargs):
+        seen.update(kwargs)
+        return real(**kwargs)
+
+    monkeypatch.setattr(fetch_module.httpx, "AsyncClient", spying)
     transport = answers(httpx.Response(200, json=[]))
     await asyncio.wait_for(fetch_document("https://docs.example/a", resolver=public, transport=transport), 5)
+    assert seen["trust_env"] is False
     assert transport.seen[0].url.host == PUBLIC
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://exa mple.org/",
+        "http://[::1",
+        "http://%zz/",
+        "http://a..b/",
+        "http://" + "x" * 300 + ".example/",
+        "http://.example/",
+        "https://exam\x00ple.org/",
+        "http://host:99999/",
+        "http://host:port/",
+    ],
+)
+async def test_malformed_urls_are_invalid_and_not_a_crash(url):
+    async def names(host, port):
+        host.encode("idna")
+        return [PUBLIC]
+
+    try:
+        await fetch_document(url, resolver=names, transport=answers(httpx.Response(200, json=[])))
+    except Refused as refused:
+        assert refused.kind in ("invalid", "unavailable")

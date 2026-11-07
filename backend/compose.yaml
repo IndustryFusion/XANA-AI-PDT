@@ -50,6 +50,7 @@ x-backend-env: &backend-env
   MAX_CONCURRENT_ROUNDS: ${MAX_CONCURRENT_ROUNDS:-2}
   NGSI_URL: http://broker:9090
   NGSI_CONTEXT_URL: ${NGSI_CONTEXT_URL:-}
+  NGSI_ALLOWED_CONTEXTS: ${NGSI_ALLOWED_CONTEXTS:-}
   PGREST_URL: http://pgrest:3000
   TIMESCALE_DB_URL: postgresql://xana@db:5432/tsdb
   POSTGRES_MEMORY_URL: postgresql://xana@db:5432/memory

@@ -66,6 +66,7 @@ class Settings(BaseSettings):
     ngsi_url: str = "http://localhost:9090"
     ngsi_tenant: str | None = None
     ngsi_context_url: str | None = None
+    ngsi_allowed_contexts: str | None = None
     pgrest_url: str = "http://pgrest:3000"
     timescale_db_url: SecretStr = SecretStr("postgresql://xana@localhost:5432/tsdb")
     timescale_table: str = "attributes"

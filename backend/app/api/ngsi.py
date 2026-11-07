@@ -45,6 +45,15 @@ class TypeNames(BaseModel):
     types: list[str]
 
 
+def _answer(found: list) -> Any:
+    """A list. If it stopped early, a header says how far it got: the body stays what the broker's would be."""
+    limited = getattr(found, "limited", None)
+    if not limited:
+        return list(found)
+    text = ", ".join(f"{key}={value}" for key, value in limited.items())
+    return JSONResponse(list(found), headers={"X-Results-Limited": text})
+
+
 def _attributes(body: Any) -> dict[str, Any]:
     if not isinstance(body, dict) or not body:
         raise invalid("Name at least one attribute.")
@@ -74,8 +83,11 @@ async def query_entities(
     id_pattern: str | None = None,
     q: str | None = None,
     limit: int = 100,
-) -> list[dict]:
-    return await request.app.state.broker.query(entity_type=type, entity_id=id, id_pattern=id_pattern, q=q, limit=limit)
+) -> Any:
+    found = await request.app.state.broker.query(
+        entity_type=type, entity_id=id, id_pattern=id_pattern, q=q, limit=limit
+    )
+    return _answer(found)
 
 
 @router.patch("/entities/{entity_id:path}/attrs", status_code=204)
@@ -136,8 +148,8 @@ async def history(
     start: str | None = Query(None, alias="from"),
     end: str | None = Query(None, alias="to"),
     dataset_id: str | None = None,
-) -> list[dict]:
-    return await request.app.state.attribute_history.values(entity_id, attribute, start, end, dataset_id)
+) -> Any:
+    return _answer(await request.app.state.attribute_history.values(entity_id, attribute, start, end, dataset_id))
 
 
 @router.get("/attr-status")

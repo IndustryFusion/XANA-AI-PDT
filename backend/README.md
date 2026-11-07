@@ -62,7 +62,7 @@ Check it:
 curl 'http://localhost:8000/api/diagnostics?fresh=true'
 ```
 
-Every check (memory, time-series store, context broker, language model) should be `ok`. While the model is still downloading, the language model check is `degraded`.
+Each of the four checks (memory, time-series store, context broker, language model) should be `ok`. The optional services aren't in this report: each area says when its own service fails. While the model is still downloading, the language model check is `degraded`.
 
 **With the UI:** in `frontend/`, run `npm run dev`. The development server forwards `/api` and `/ws` to `XANA_BACKEND_URL` (default `http://localhost:8000`).
 
@@ -136,7 +136,9 @@ To check sign-in in a browser, run `XANA_E2E_SIGNIN=1 XANA_E2E_BACKEND=1 npx pla
 
 Routes under `/api/ngsi` reach only `NGSI_URL` and `PGREST_URL`, with the session's token. No route takes an address. They are for operators: the diagnostic workflow has no path to them, and only reads.
 
-- **Names on platform data:** attributes are full IRIs, and answers keep them. A short name in `q` silently matches nothing unless `NGSI_CONTEXT_URL` names a context that maps it. The same goes for the agent's lookups through `partOf` and `measures`. An IRI with a dot in `q`, which the broker can't evaluate, is filtered by the backend over up to 5000 entities.
+- **Names on platform data:** attributes are full IRIs, and answers keep them. A short name in `q` silently matches nothing unless `NGSI_CONTEXT_URL` names a context that maps it. The same goes for the agent's lookups through `partOf` and `measures`. What the broker can't evaluate in `q` (`~=`, `!~=`, `!attr`, ranges and IRIs with a dot) is evaluated by the backend over up to 5000 entities, and the header `X-Results-Limited: scanned=5000, total=5300` says when there were more. Patterns run on RE2, so look-around and back-references are refused.
+- **Contexts:** an imported entity may name only the ETSI core context, `NGSI_CONTEXT_URL`, or what `NGSI_ALLOWED_CONTEXTS` lists, because the broker fetches a context from inside the platform.
+- **Concurrent edits:** one read-then-write at a time per entity, so two adds of one attribute give one `conflict`. Another writer can still change an attribute in between.
 - **History:** PostgREST needs `TIMESCALE_TABLE` and `TIMESCALE_ENTITY_TABLE` in the platform's layout. On the platform, the operator's token must carry the `role` claim, which the `scorpio` client's `pgrest_role` scope adds.
 - **Import from a URL:** refuses every internal address, also after a redirect, and connects only to the address it checked. 10 MB and 10 s at most.
 - **While the session is shared:** anyone who can reach the backend can edit, delete and import, using the signed-in operator's token. See [Sign-in](#sign-in).

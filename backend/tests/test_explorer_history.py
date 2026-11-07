@@ -19,7 +19,7 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from app.ngsi.history import attribute_filter, quoted, typed_value
+from app.ngsi.history import attribute_filter, typed_value
 from app.ngsi.timeshift import rebuild
 from tests.explorer_support import IRI, MACHINE, TOKEN, Broker, Rows, app_with
 
@@ -143,25 +143,49 @@ def test_bad_time_is_invalid_and_is_not_sent(client, rows):
 
 
 @pytest.mark.parametrize(
-    "hostile",
+    ("hostile", "placed"),
     [
-        'x",attributeId.like."y',
-        "x),or=(deleted.is.true",
-        'a"b',
-        "back\\slash",
-        "with,comma",
-        "(paren)",
+        ('x",entityId.like."y', 'x\\",entityId.like.\\"y'),
+        ("x),or=(deleted.is.true", "x),or=(deleted.is.true"),
+        ('a"b', 'a\\"b'),
+        ("with,comma", "with,comma"),
+        ("(paren)", "(paren)"),
     ],
 )
-def test_short_name_cannot_change_the_filter(hostile):
+def test_short_name_cannot_change_the_filter(hostile, placed):
     column, condition = attribute_filter(hostile)
     assert column == "or"
-    inner = condition[1:-1]
-    # Removing the three properly quoted values leaves only the structure.
-    escaped = quoted(hostile)[1:-1]
-    assert inner.count(escaped) == 3
-    skeleton = inner.replace(escaped, "NAME")
-    assert skeleton == 'attributeId.eq."NAME",attributeId.like."*/NAME",attributeId.like."*#NAME"'
+    assert condition == (f'(attributeId.eq."{placed}",attributeId.like."*/{placed}",attributeId.like."*#{placed}")')
+
+
+def test_a_backslash_stays_itself_in_both_filters():
+    _column, condition = attribute_filter("a\\b")
+    assert condition.startswith('(attributeId.eq."a\\\\b",')
+    assert 'like."*/a\\\\\\\\b"' in condition
+
+
+def test_like_wildcards_in_a_short_name_are_literal():
+    _column, condition = attribute_filter("a_b%c")
+    assert 'eq."a_b%c"' in condition
+    assert 'like."*/a\\\\_b\\\\%c"' in condition
+
+
+def test_times_reach_postgrest_normalised_not_as_given(client, rows):
+    history(client, "temp", **{"from": "2026-11-01T02:00:00+02:00"})
+    observed = [v for k, v in rows.requests[0].url.params.multi_items() if k == "observedAt"]
+    assert observed == ["gte.2026-11-01T00:00:00+00:00"]
+
+
+def test_more_values_than_fit_says_so_and_keeps_the_newest():
+    many = [
+        row("temp", f"2026-10-{1 + i % 28:02d}T{i % 24:02d}:{i % 60:02d}:{i % 59:02d}+00:00", str(i))
+        for i in range(5200)
+    ]
+    client = TestClient(app_with(Broker(), Rows({"attributes": many, "entities": []})))
+    answer = history(client, f"{IRI}temp")
+    assert len(answer.json()) == 5000
+    assert answer.headers["X-Results-Limited"] == "newest=5000"
+    assert answer.json() == sorted(answer.json(), key=lambda p: p["at"])
 
 
 def test_wildcard_in_a_short_name_is_refused(client, rows):
