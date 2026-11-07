@@ -63,6 +63,16 @@ class AttributeChange(BaseModel):
     kind: Literal["relationship", "text"]
 
 
+class Observation(BaseModel):
+    """One stored value of an attribute, of any type, as the store holds it."""
+
+    entity_id: str
+    attribute: str
+    at: datetime
+    value: str | None
+    value_type: str | None = None
+
+
 class LifecycleEvent(BaseModel):
     entity_id: str
     entity_type: str | None = None
@@ -106,6 +116,18 @@ class ChangeHistorySource(Protocol):
 
     async def lifecycle(self, entity_ids: list[str], window: timedelta, limit: int = 50) -> list[LifecycleEvent]:
         """Entities created or deleted within `window`, newest first."""
+        ...
+
+
+@runtime_checkable
+class ObservationSource(Protocol):
+    """The stored values themselves. A source without it can't give them."""
+
+    async def observations(
+        self, entity_id: str, window: timedelta, attributes: list[str] | None = None, limit: int = 500
+    ) -> list[Observation]:
+        """Values of one entity within `window`, newest first, of any type. With `attributes`, only those,
+        by short name or full IRI."""
         ...
 
 
