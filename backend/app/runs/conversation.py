@@ -29,7 +29,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from app.dataspace.gateway import GatewayClient
-from app.dataspace.sharing import ADJACENTS, ALLOWED_ACCESS, FILES, HISTORY, LABELS, TIERS, Sharing, apply_policy
+from app.dataspace.sharing import ALLOWED_ACCESS, FILES, HISTORY, LABELS, TIERS, Sharing
 from app.errors import Refused, conflict, invalid, not_found, unavailable
 from app.memory.store import IncidentStore, RunStore
 from app.runs.escalation import DELIVERY, Escalator
@@ -174,6 +174,23 @@ def _granted(state: RunState, request_id: str) -> bool:
     )
 
 
+def granted_capabilities(capability: str) -> tuple[str, ...]:
+    """What a grant sends. History goes as the `timeseries` tier does: with the machine's data and related entities."""
+    return TIERS["timeseries"] if capability == HISTORY else (capability,)
+
+
+def requested_attributes(message: dict[str, Any]) -> list[str] | None:
+    """The attributes a data request names in its payload's `attributes`, if it names any."""
+    payload = message.get("payload")
+    found = payload.get("attributes") if isinstance(payload, dict) else None
+    if isinstance(found, str):
+        found = [found]
+    if not isinstance(found, list):
+        return None
+    names = [item.strip() for item in found if isinstance(item, str) and item.strip()]
+    return names[:50] or None
+
+
 def _signal_count(files: list[tuple[str, bytes]]) -> int:
     content = dict(files).get(FILES[HISTORY])
     return len(json.loads(content)) if content else 0
@@ -186,8 +203,8 @@ def _decision(capability: str, files: list[tuple[str, bytes]]) -> str:
     count = _signal_count(files)
     if count == 0:
         return (
-            "Approved by the operator. The history file sent holds 0 signals: there were none in the 24 hours "
-            "queried. Those of related entities go only if related entities may go to this builder."
+            "Approved by the operator. The history file sent holds 0 signals: the machine itself had none "
+            "within the 24 hours queried."
         )
     return f"Approved by the operator and sent: {count} signal{'' if count == 1 else 's'}."
 
@@ -301,6 +318,8 @@ class ConversationDesk:
         if act == "request" and message.get("capability"):
             capability = message["capability"]
             output["data_request"] = {"items": [{"label": LABELS.get(capability, capability), "category": capability}]}
+            if (attributes := requested_attributes(message)) is not None:
+                output["data_request"]["attributes"] = attributes
         elif act == "request":
             output["free_text"] = True
         if act == "inform" and (recommendation := recommendation_of(message)):
@@ -675,11 +694,9 @@ class ConversationDesk:
                 )
                 await self._store_sent(rec, step)
                 granted = True
-            sharing = Sharing(state.escalation["tier"], (capability,), ())
-            # A grant of history holds related entities' signals only if those entities may go to this builder.
-            access = await self._gateway.access(consumer=receiver) if capability == HISTORY else []
-            with_related = ADJACENTS in apply_policy(state.escalation["tier"], access).allowed
-            files = await self._escalator.files(rec.state, sharing, with_related) if capability in LABELS else []
+            sharing = Sharing(state.escalation["tier"], granted_capabilities(capability), ())
+            attributes = request.get("data_request", {}).get("attributes")
+            files = await self._escalator.files(rec.state, sharing, attributes) if capability in LABELS else []
             names = [name for name, _ in files]
             entry = None
             if files:
@@ -712,7 +729,7 @@ class ConversationDesk:
             "request_id": request["message_id"],
             "tier": state.escalation["tier"],
             "recipient": state.escalation["recipient"]["name"],
-            "sent": [LABELS.get(capability, capability)],
+            "sent": [LABELS.get(item, item) for item in sharing.allowed],
             "files": names,
             "withheld": [],
             "decision": _decision(capability, files),

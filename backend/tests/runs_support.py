@@ -133,6 +133,7 @@ def make_app(
     )
     app.state.script = script
     app.state.context = agent.context
+    app.state.history = agent.history
     return app
 
 

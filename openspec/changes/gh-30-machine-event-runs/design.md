@@ -51,22 +51,21 @@ The service identity is deliberately never used for what a caller of `/api` asks
 
 With sign-in off, no token is needed, so the identity counts as available.
 
-### Which events start a run
+### Which events start a run: decided by a maintainer
 
-A run starts for an event if the machine has no open run, and:
+The maintainer decided that this follows the behaviour of the earlier system. Every event starts a run, unless a run that an event started for the same machine is in progress:
 
-- **from the broker:** the machine's watched values differ from those last seen. They are stored, so that a restart doesn't start a run for every machine at its next write. **A machine never seen counts as changed, so its first report starts one run,** also a healthy one: a machine created with `status: running`, or each machine once after the first install, since the first report of a real fault can't be told from it. Nothing says what a healthy value is on the platform.
-- **from Alerta:** the alert isn't a repeat (`repeat`), its severity isn't `ok`, `normal`, `up`, `cleared`, `informational`, `debug` or `trace`, and its status isn't `closed`, `expired`, `shelved` or `blackout`. `resource` is the machine, as on the Alerts screen. `{machine_id, issue}` is accepted too, for other senders.
+- **from the broker:** each entity of a notification that has an ID. The issue names the watched values it holds, or says `state change detected` when it holds none. Values are not compared with those reported before, and nothing about them is stored.
+- **from Alerta:** the alert isn't a repeat (`repeat`), its severity isn't `ok`, `normal`, `up`, `cleared`, `informational`, `debug` or `trace`, and its status isn't `closed`, `expired`, `shelved` or `blackout`. `resource` is the machine, as on the Alerts screen. `{machine_id, issue}` is accepted too, for other senders, and each such call starts a run.
 
-Values seen during an open run are stored too. So a fault that came during a run and is reported again after it ends starts nothing new, while a further change does.
+**In progress** means from the run's start until its first analysis ends: it completes, fails, is stopped, or pauses for the operator (`awaiting_input`, `awaiting_confirmation`). A paused run holds nothing up, nor does its next round after the operator answers, nor acting on a confirmation, nor a conversation with the machine builder. Runs an operator started don't count, and an operator can still start a run on any machine. The worker checks this one event at a time, so events arriving together during a run start one run. After a restart, a triggered run whose first analysis runs again counts as in progress; a paused one doesn't.
 
-Alternative: no comparison, as the issue doesn't ask for it. A platform that writes `status` regularly would then start a new run after every run ended, for every machine, forever.
+Alternatives that were considered:
 
-### One open run per machine
+- **Compare with the values last seen, stored per machine, with a machine's first report counting as a change,** and count any open run, also a paused one, an operator's and one after a restart, which the first version did. It keeps a platform that writes `status` regularly from starting a new run after every run ended.
+- **Count any open run, without comparing values.**
 
-Checked by the worker, one event at a time, on the same state as the screens: any status that isn't final, so paused runs count, and a reopened run counts again. Since it reads stored state, this holds after a restart. A run an operator is starting at that moment counts.
-
-**An operator can still start a second run on a machine with an open run**, as today, because refusing would change existing behaviour that no issue asks to change.
+What this costs: a platform that writes a watched attribute regularly, changed or not, starts a run at each write that arrives while no triggered run of that machine is in its first analysis. Paused runs can pile up for one machine.
 
 ### What can fail
 
@@ -75,9 +74,9 @@ Checked by the worker, one event at a time, on the same state as the screens: an
 | Queue full | `503`, so the sender can tell. The queue holds 1000 events |
 | Memory database down | The worker holds the event and tries again every 5 s, so nothing is lost while the process lives. The queue fills behind it |
 | Language model down | The run starts, and fails visibly with its source. Unlike an operator, nobody is there to read a refusal |
-| A triggered run just failed | For 5 minutes, an event for that machine starts nothing, so that a failing model gives one failed run per machine, not one per alert. The latest event per machine and source is held in memory, with its values not taken as seen, and starts when the wait ends |
+| A triggered run just failed | For 5 minutes, an event for that machine starts nothing, so that a failing model gives one failed run per machine, not one per alert. The latest event per machine and source is held in memory, and starts when the wait ends. The earlier behaviour had no such wait; it is kept as a protection a maintainer may drop |
 | Unknown short name | Logged and dropped |
-| Short name with the broker down | It stays as given, and an open run whose identifier ends in it counts as that machine's |
+| Short name with the broker down | It stays as given, and a run in progress whose identifier ends in it counts as that machine's |
 | Data the database refuses | NUL and lone surrogates are taken out first, and nothing left is refused. Only a data, integrity or limit error (class 54) is logged and dropped. Everything else is tried again, as a read-only database or a missing right can be put right, so such a fault holds the queue back until then. A body is limited to 10 MiB |
 | Anything unexpected | Logged and dropped; the worker goes on |
 | Backend stops | **What is in the queue is lost.** The issue asks for a queue, and the broker doesn't retry. Keeping events in the database would add a store for a window of milliseconds |
@@ -111,7 +110,7 @@ Alternative: the backend polls Alerta, which needs nothing on the platform. It i
 
 ## Architectural implications
 
-- A second way in, and the first that doesn't start with an operator: `architecture.md`'s Event Layer describes it, and is corrected for the identity and the comparison.
+- A second way in, and the first that doesn't start with an operator: `architecture.md`'s Event Layer describes it, and is corrected for the identity and for which events start a run.
 - New secrets, added to redaction. No new runtime dependency in the backend.
 
 ## Alternatives for the queue

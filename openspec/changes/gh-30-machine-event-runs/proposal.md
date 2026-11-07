@@ -8,9 +8,9 @@ A run starts only when an operator asks for one. When a machine reports a proble
 
 ## What Changes
 
-- `POST /events/ngsi` and `POST /events/alert` add to a bounded queue, read by one worker. A machine with an open run gets no further run, also while that run is paused, and after a restart.
+- `POST /events/ngsi` and `POST /events/alert` add to a bounded queue, read by one worker. Every event starts a run, unless a run that an event started for that machine is still in its first analysis.
 - A context broker subscription with the stable ID `urn:ngsi-ld:Subscription:XanaPDT:MachineWatch`, on type `Machine`, watching `status`, `errorCode`, `alarmLevel` and `faultCode`, delivered to `{CALLBACK_BASE_URL}/events/ngsi`. It is created when an identity is available, retried until it is, and its state is a check in the health report.
-- A notification repeating the values a machine already reported starts nothing, as the broker notifies every write to a watched attribute, changed or not.
+- Values are not compared with those reported before: a notification repeating them starts a run too, as a maintainer decided.
 - A service identity: a Keycloak client of its own with client credentials, used for the subscription and for triggered runs. This settles what #36 leaves to this issue.
 - Webhook callers present a shared secret. See `design.md`.
 - A small Alerta plugin that sends new alerts to `POST /events/alert`, as Alerta has no outbound webhook of its own.

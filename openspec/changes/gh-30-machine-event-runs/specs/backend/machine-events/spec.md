@@ -26,19 +26,19 @@
 - **THEN** the call is answered 503, and says so
 
 ### Requirement: Events from the context broker
-The backend SHALL read each entity of a notification as an event for that machine, with an issue naming the watched values, whether attributes have short names or full IRIs.
+The backend SHALL read each entity of a notification that has an ID as an event for that machine, with an issue naming the watched values, whether attributes have short names or full IRIs. Every such event SHALL start a run, unless a run is in progress for that machine as below. Values are not compared with those reported before.
 
 #### Scenario: A status change
-- **WHEN** a notification reports a machine's `status` with a value not seen before
+- **WHEN** a notification reports a machine's `status`
 - **THEN** one run starts for that machine, with an issue naming the value
 
-#### Scenario: A machine not seen before
-- **WHEN** the first notification for a machine arrives, whatever its values
-- **THEN** one run starts
-
 #### Scenario: The same values again
-- **WHEN** a notification repeats the watched values last seen for the machine, also after a restart
-- **THEN** no run starts
+- **WHEN** a notification repeats the watched values reported before, also after a restart, and no run is in progress for the machine
+- **THEN** a run starts
+
+#### Scenario: No watched value
+- **WHEN** an entity of a notification holds none of the watched values
+- **THEN** a run starts, with the issue `Machine event: state change detected`
 
 #### Scenario: Full IRIs
 - **WHEN** the attributes are full IRIs ending in a watched name
@@ -67,28 +67,28 @@ The backend SHALL read an Alerta alert, or `{machine_id, issue}`, as an event fo
 - **WHEN** the body names no machine
 - **THEN** it is refused as `invalid`
 
-### Requirement: One worker, one open run per machine
-One worker SHALL handle events in order, and an event for a machine with an open run SHALL start nothing.
+### Requirement: One worker, one run in progress per machine
+One worker SHALL handle events in order, and an event SHALL start nothing while a run that an event started for the same machine is in progress: from its start until its first analysis ends, by completing, failing, being stopped or pausing for the operator. Runs an operator started, and rounds after the first pause, don't count.
 
 #### Scenario: Repeated events during a run
-- **WHEN** events for a machine arrive while its run is `running`, also at the same moment
+- **WHEN** events for a machine arrive while a run an event started for it is in its first analysis, also at the same moment
 - **THEN** exactly one run exists for it
 
 #### Scenario: While paused
-- **WHEN** events arrive while the machine's run waits for the operator or the machine builder
-- **THEN** no run starts
-
-#### Scenario: After the run ended
-- **WHEN** the run is `completed`, `failed`, `stopped` or `mb_closed`, and the watched values change
+- **WHEN** an event arrives while the machine's triggered run waits for the operator or the machine builder
 - **THEN** a new run starts
 
-#### Scenario: After a restart
-- **WHEN** the backend restarts with an open run, and an event for that machine arrives
-- **THEN** no run starts
+#### Scenario: After the operator answers
+- **WHEN** a triggered run goes on after the operator's answer or confirmation, and an event for that machine arrives
+- **THEN** a new run starts
 
-#### Scenario: An operator is starting a run
-- **WHEN** an event arrives while an operator's start for that machine is being stored
-- **THEN** only the operator's run exists
+#### Scenario: After the run ended
+- **WHEN** the run is `completed`, `failed`, `stopped` or `mb_closed`, and an event arrives
+- **THEN** a new run starts, unless a triggered run of that machine failed lately, as below
+
+#### Scenario: An operator's run
+- **WHEN** a run an operator started for that machine is in progress or paused, and an event arrives
+- **THEN** a run starts for the event, and the operator can still start runs
 
 #### Scenario: Other machines aren't held up
 - **WHEN** a run of one machine is in progress, and an event for another arrives
@@ -115,11 +115,11 @@ The worker SHALL go on after any failure, and lose no event while the process li
 
 #### Scenario: A triggered run just failed
 - **WHEN** a triggered run of a machine failed within the last 5 minutes, and another event for it arrives
-- **THEN** no run starts yet. Its values aren't taken as seen, and the latest event per machine and source starts once the wait ends, with no further event needed
+- **THEN** no run starts yet, and the latest event per machine and source starts once the wait ends, with no further event needed
 
 #### Scenario: A short name with the broker down
-- **WHEN** an event's short name can't be resolved, and an open run's identifier ends in that name
-- **THEN** no run starts, and its values aren't taken as seen
+- **WHEN** an event's short name can't be resolved, and the identifier of a run in progress ends in that name
+- **THEN** no run starts
 
 #### Scenario: Unknown name
 - **WHEN** an event names a machine that can't be resolved

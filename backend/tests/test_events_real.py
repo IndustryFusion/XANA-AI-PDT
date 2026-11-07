@@ -127,7 +127,7 @@ async def test_the_subscription_shows_in_health():
     assert SECRET not in state["detail"]
 
 
-async def test_a_status_change_starts_one_run_and_repeats_start_nothing(machine):
+async def test_a_status_change_starts_a_run_and_the_same_value_starts_another_once_it_paused(machine):
     await until(subscribed, what="the subscription")
     await asyncio.sleep(1)
     assert await runs_of(machine) == []
@@ -149,10 +149,15 @@ async def test_a_status_change_starts_one_run_and_repeats_start_nothing(machine)
     stored = await until(paused, what="the run to pause")
     assert stored["incident_id"] is not None
 
-    for value in ("fault", "fault-2", "fault-3"):
-        await set_status(machine, value)
-    await asyncio.sleep(3)
-    assert [r["run_id"] for r in await runs_of(machine)] == [run["run_id"]]
+    await set_status(machine, "fault")
+
+    async def two_runs():
+        found = await runs_of(machine)
+        return found if len(found) == 2 else None
+
+    found = await until(two_runs, what="a second run")
+    assert {r["source"] for r in found} == {"ngsi"}
+    assert run["run_id"] in {r["run_id"] for r in found}
 
 
 @pytest.mark.skipif(not ALERTA, reason="needs TEST_ALERTA_URL")
@@ -194,7 +199,7 @@ async def test_without_the_secret_the_real_route_refuses(machine):
 
 
 @pytest.mark.skipif(not CONTAINER, reason="needs TEST_EVENTS_BACKEND_CONTAINER")
-async def test_a_restart_makes_no_duplicate_and_a_paused_run_still_counts(machine):
+async def test_a_restart_makes_no_duplicate_subscription_and_a_paused_run_holds_nothing_up(machine):
     await until(subscribed, what="the subscription")
     await set_status(machine, "fault")
 
@@ -213,9 +218,14 @@ async def test_a_restart_makes_no_duplicate_and_a_paused_run_still_counts(machin
 
     await until(back, 90, "the backend")
     assert len(await machine_subscriptions()) == 1
-    await set_status(machine, "fault-again")
-    await asyncio.sleep(3)
-    assert [r["run_id"] for r in await runs_of(machine)] == [run["run_id"]]
+    await set_status(machine, "fault")
+
+    async def two_runs():
+        found = await runs_of(machine)
+        return found if len(found) == 2 else None
+
+    found = await until(two_runs, what="a run after the restart")
+    assert run["run_id"] in {r["run_id"] for r in found}
 
 
 # On data with full IRIs, under a context ---------------------------------------------------------

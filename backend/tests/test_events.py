@@ -20,7 +20,7 @@ import contextlib
 import json
 import logging
 import threading
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import httpx
@@ -45,6 +45,8 @@ from app.health import HealthService
 from app.main import create_app
 from app.memory.migrate import Migrator
 from app.memory.store import Database, StoreRefused, StoreUnavailable
+from app.runs.manager import RunRecord
+from app.runs.model import RunState
 from tests.conftest import make_settings
 from tests.runs_support import (
     FAIL,
@@ -108,10 +110,12 @@ def test_a_notification_gives_an_event_per_machine_naming_what_it_reported():
         ),
         WATCHED,
     )
-    assert [(e.machine_id, e.source) for e in events] == [("urn:m:1", "ngsi"), ("urn:m:2", "ngsi")]
+    # Every entity with an ID is an event, also one that reports none of the watched values.
+    assert [(e.machine_id, e.source) for e in events] == [("urn:m:1", "ngsi"), ("urn:m:2", "ngsi"), ("urn:m:3", "ngsi")]
     assert events[0].issue == "Machine event: status=fault, errorCode=E42"
-    assert events[0].watched == {"status": "fault", "errorCode": "E42"}
-    assert ignored == 3
+    assert events[1].issue == "Machine event: alarmLevel=3"
+    assert events[2].issue == "Machine event: state change detected"
+    assert ignored == 2
 
 
 @pytest.mark.parametrize(
@@ -126,7 +130,7 @@ def test_a_notification_gives_an_event_per_machine_naming_what_it_reported():
 )
 def test_names_and_forms_on_platform_data(attribute):
     [event], _ = ngsi_events(notification({"id": "urn:m:1", **attribute}), WATCHED)
-    assert event.watched == {"status": "fault"}
+    assert event.issue == "Machine event: status=fault"
 
 
 @pytest.mark.parametrize("body", [[], {}, {"data": "x"}, None, 3])
@@ -138,7 +142,6 @@ def test_a_body_that_is_no_notification(body):
 def test_an_alert_names_its_machine_and_what_happened():
     event = alert_event({"resource": "urn:m:1", "event": "HighTemp", "text": "92 C", "severity": "major"})
     assert (event.machine_id, event.source, event.issue) == ("urn:m:1", "alert", "Alert HighTemp: 92 C")
-    assert event.watched is None
 
 
 def test_the_plain_form():
@@ -278,38 +281,32 @@ async def test_repeated_events_during_a_run_start_nothing(url):
 
 
 @pytest.mark.db
-async def test_events_arriving_together_start_one_run(url):
-    async with running(event_app(url)) as client:
-        bodies = [notification(status(MACHINE, f"fault-{n}")) for n in range(30)]
+async def test_events_arriving_together_during_a_run_start_one_run(url):
+    app = event_app(url)
+    async with running(app) as client:
+        bodies = [notification(status(GATED, f"fault-{n}")) for n in range(30)]
         answers = await asyncio.gather(*(client.post("/events/ngsi", json=b, headers=AUTH) for b in bodies))
         assert {a.status_code for a in answers} == {202}
         assert len(await runs_are(client, 1)) == 1
         assert len(rows(url, "SELECT run_id FROM runs")) == 1
+        app.state.context.gate.set()
 
 
 @pytest.mark.db
-async def test_while_paused_nothing_starts_until_the_run_ends(url):
+async def test_a_run_waiting_for_the_operator_holds_nothing_up(url):
     async with running(event_app(url)) as client:
         await client.post("/events/ngsi", json=notification(status(MACHINE, "a")), headers=AUTH)
         [listed] = await runs_are(client, 1)
-        run_id = listed["run_id"]
-        await until(client, run_id, "awaiting_input")
-        await client.post("/events/ngsi", json=notification(status(MACHINE, "b")), headers=AUTH)
-        assert len(await runs_are(client, 1)) == 1
-
-        assert (await client.post(f"/api/agent/stop/{run_id}", json={})).status_code == 200
-        # Reported during the run, and only repeated now: nothing new.
-        await client.post("/events/ngsi", json=notification(status(MACHINE, "b")), headers=AUTH)
-        assert len(await runs_are(client, 1)) == 1
-        # A change, with the run ended.
-        await client.post("/events/ngsi", json=notification(status(MACHINE, "c")), headers=AUTH)
+        await until(client, listed["run_id"], "awaiting_input")
+        # The same values again: every notification counts.
+        await client.post("/events/ngsi", json=notification(status(MACHINE, "a")), headers=AUTH)
         found = await runs_are(client, 2)
-        assert sorted(r["status"] for r in found)[-1] == "stopped"
+        assert all(r["source"] == "ngsi" for r in found)
         assert len({r["run_id"] for r in found}) == 2
 
 
 @pytest.mark.db
-async def test_the_same_values_again_start_nothing_also_after_a_restart(url):
+async def test_the_same_values_again_start_a_run_each_time_also_after_a_restart(url):
     async with running(event_app(url)) as client:
         await client.post("/events/ngsi", json=notification(status(MACHINE, "a")), headers=AUTH)
         [listed] = await runs_are(client, 1)
@@ -318,65 +315,68 @@ async def test_the_same_values_again_start_nothing_also_after_a_restart(url):
         await client.post(f"/api/agent/archive/{listed['run_id']}")
         assert await open_runs(client) == []
         await client.post("/events/ngsi", json=notification(status(MACHINE, "a")), headers=AUTH)
-        assert await runs_are(client, 0) == []
+        [again] = await runs_are(client, 1)
+        await until(client, again["run_id"], "awaiting_input")
 
     async with running(event_app(url)) as client:
+        # The run from before the restart waits for the operator, so it holds nothing up.
         await client.post("/events/ngsi", json=notification(status(MACHINE, "a")), headers=AUTH)
-        assert await runs_are(client, 0) == []
-        await client.post("/events/ngsi", json=notification(status(MACHINE, "z")), headers=AUTH)
-        assert len(await runs_are(client, 1)) == 1
+        found = await runs_are(client, 2)
+        assert again["run_id"] in {r["run_id"] for r in found}
 
 
 @pytest.mark.db
-async def test_a_paused_run_still_counts_after_a_restart(url):
+async def test_a_notification_without_watched_values_starts_a_run(url):
     async with running(event_app(url)) as client:
-        await client.post("/events/ngsi", json=notification(status(MACHINE, "a")), headers=AUTH)
+        body = notification({"id": MACHINE, "type": "Machine", "temperature": {"value": 80}})
+        assert (await client.post("/events/ngsi", json=body, headers=AUTH)).json() == {"accepted": 1, "ignored": 0}
         [listed] = await runs_are(client, 1)
-        await until(client, listed["run_id"], "awaiting_input")
-
-    async with running(event_app(url)) as client:
-        await client.post("/events/ngsi", json=notification(status(MACHINE, "b")), headers=AUTH)
-        await client.post("/events/alert", json={"machine_id": MACHINE, "issue": "x"}, headers=AUTH)
-        found = await runs_are(client, 1)
-        assert [r["source"] for r in found] == ["ngsi"]
-        assert found[0]["run_id"] == listed["run_id"]
+        assert listed["issue"] == "Machine event: state change detected"
 
 
 @pytest.mark.db
-async def test_an_operators_open_run_counts_and_operators_can_still_start(url):
-    async with running(event_app(url)) as client:
-        run_id = await start(client, MACHINE)
-        await until(client, run_id, "awaiting_input")
-        await client.post("/events/alert", json={"machine_id": MACHINE, "issue": "x"}, headers=AUTH)
-        assert len(await runs_are(client, 1)) == 1
-        second = await start(client, MACHINE, "Something else")
+async def test_an_operators_run_holds_up_no_event_and_operators_can_still_start(url):
+    app = event_app(url)
+    async with running(app) as client:
+        run_id = await start(client, GATED)
+        await eventually(lambda: GATED in app.state.context.started)
+        await client.post("/events/alert", json={"machine_id": GATED, "issue": "x"}, headers=AUTH)
+        found = await runs_are(client, 2)
+        assert sorted(r["source"] for r in found) == ["alert", "operator"]
+        second = await start(client, GATED, "Something else")
         assert second != run_id
-        assert {r["source"] for r in await open_runs(client)} == {"operator"}
+        app.state.context.gate.set()
 
 
-@pytest.mark.db
-async def test_an_event_during_an_operators_start_doesnt_add_a_run(url):
+@pytest.mark.parametrize(
+    ("status_now", "round_now", "steps", "holds"),
+    [
+        ("running", 1, (), True),
+        ("awaiting_input", 1, (), False),
+        ("awaiting_confirmation", 1, (), False),
+        ("awaiting_machine_builder", 1, (), False),
+        ("running", 2, (), False),  # going on after the operator's answer
+        ("running", 1, ({"node": "resolution"},), False),  # acting on a confirmation
+        ("completed", 1, (), False),
+        ("failed", 1, (), False),
+        ("stopped", 1, (), False),
+    ],
+)
+async def test_only_a_triggered_runs_first_analysis_holds_events_up(url, status_now, round_now, steps, holds):
     app = event_app(url)
     async with running(app) as client:
         await open_runs(client)
-        store = app.state.runs._store
-        save, entered, proceed = store.save, asyncio.Event(), asyncio.Event()
-
-        async def slow_save(run, *rest):
-            entered.set()
-            await proceed.wait()
-            return await save(run, *rest)
-
-        store.save = slow_save
-        starting = asyncio.create_task(app.state.runs._create(MACHINE, "An operator's run"))
-        await entered.wait()
-        store.save = save
-        await client.post("/events/alert", json={"machine_id": MACHINE, "issue": "x"}, headers=AUTH)
-        await asyncio.sleep(0.2)
-        proceed.set()
-        await starting
-        found = await runs_are(client, 1)
-        assert [r["source"] for r in found] == ["operator"]
+        runs = app.state.runs
+        now = datetime.now(UTC)
+        for source in ("ngsi", "alert", "operator"):
+            state = RunState(
+                f"r-{source}", MACHINE, "x", status_now, now, now, round=round_now, steps=steps, source=source
+            )
+            runs._runs[state.run_id] = RunRecord(state)
+            expected = holds and source != "operator"
+            assert runs._triggered_in_progress(MACHINE) is expected, source
+            assert runs._triggered_in_progress(OTHER_MACHINE) is False
+            del runs._runs[state.run_id]
 
 
 @pytest.mark.db
@@ -442,7 +442,7 @@ class FakeRuns:
     def failed_lately(self, machine):
         return False
 
-    async def start_triggered(self, machine, issue, source, watched):
+    async def start_triggered(self, machine, issue, source):
         self.calls.append(machine)
         if self.failures:
             raise self.failures.pop(0)
@@ -537,29 +537,6 @@ async def test_with_the_database_down_a_real_event_starts_one_run_when_it_is_bac
         await client.post("/events/ngsi", json=notification(status(MACHINE, "a")), headers=AUTH)
         assert len(await runs_are(client, 1)) == 1
         assert not down
-        assert rows(url, "SELECT watched FROM machine_watched_values") == [({"status": "a"},)]
-
-
-@pytest.mark.db
-async def test_with_the_values_not_stored_trying_again_starts_no_second_run(url):
-    app = event_app(url)
-    async with running(app) as client:
-        await open_runs(client)
-        store = app.state.runs._store
-        remember, down = store.remember_watched_values, [True]
-
-        async def failing(*args):
-            if down:
-                down.pop()
-                raise StoreUnavailable("The memory database is not reachable.")
-            return await remember(*args)
-
-        store.remember_watched_values = failing
-        app.state.events._retry_s = 0.01
-        await client.post("/events/ngsi", json=notification(status(MACHINE, "a")), headers=AUTH)
-        assert len(await runs_are(client, 1)) == 1
-        await eventually(lambda: bool(rows(url, "SELECT 1 FROM machine_watched_values")))
-        assert len(await open_runs(client)) == 1
 
 
 @pytest.mark.db
@@ -601,9 +578,6 @@ async def test_a_value_the_database_cant_store_doesnt_stop_later_events(url):
         await client.post("/events/ngsi", json=notification(status(OTHER_MACHINE, "fault")), headers=AUTH)
         found = await runs_are(client, 2)
     assert "status=fault" in {r["issue"].removeprefix("Machine event: ") for r in found}
-    assert rows(url, "SELECT watched FROM machine_watched_values WHERE machine_id = %s", MACHINE) == [
-        ({"status": "fault"},)
-    ]
 
 
 @pytest.mark.db
@@ -671,17 +645,15 @@ async def test_after_a_failed_triggered_run_the_latest_event_waits_and_then_star
 
 
 @pytest.mark.db
-async def test_a_fault_during_the_wait_isnt_taken_as_seen(url):
+async def test_a_fault_during_the_wait_starts_its_run_when_the_wait_ends(url):
     app = event_app(url)
     async with running(app) as client:
         await failed_triggered_run(app, client)
         await client.post("/events/ngsi", json=notification(status(MACHINE, "new-fault")), headers=AUTH)
         await runs_are(client, 1)
-        assert rows(url, "SELECT watched FROM machine_watched_values") != [({"status": "new-fault"},)]
         later_by(app, 301)
         found = await runs_are(client, 2)
     assert "Machine event: status=new-fault" in [r["issue"] for r in found]
-    assert rows(url, "SELECT watched FROM machine_watched_values") == [({"status": "new-fault"},)]
 
 
 @pytest.mark.db
@@ -726,26 +698,17 @@ async def test_the_wait_holds_after_a_restart(url):
 
 
 @pytest.mark.db
-async def test_a_short_name_held_back_by_a_longer_identifier_isnt_taken_as_seen(url):
+async def test_a_short_name_held_back_by_a_longer_identifier_starts_a_run_once_nothing_holds_it(url):
     app = event_app(url)
     async with running(app) as client:
-        await client.post("/events/alert", json={"machine_id": MACHINE, "issue": "one"}, headers=AUTH)
-        await client.post("/events/ngsi", json=notification(status("press-01", "fault")), headers=AUTH)
+        await client.post("/events/alert", json={"machine_id": GATED, "issue": "one"}, headers=AUTH)
+        await eventually(lambda: GATED in app.state.context.started)
+        await client.post("/events/ngsi", json=notification(status("gated", "fault")), headers=AUTH)
         [only] = await runs_are(client, 1)
-        assert rows(url, "SELECT watched FROM machine_watched_values") == []
+        app.state.context.gate.set()
         await until(client, only["run_id"], "awaiting_input")
-        await client.post(f"/api/agent/stop/{only['run_id']}", json={})
-        await client.post("/events/ngsi", json=notification(status("press-01", "fault")), headers=AUTH)
+        await client.post("/events/ngsi", json=notification(status("gated", "fault")), headers=AUTH)
         assert len(await runs_are(client, 2)) == 2, "the same values, once nothing holds them back"
-
-
-@pytest.mark.db
-async def test_a_run_with_its_own_identifier_still_marks_values_as_seen(url):
-    async with running(event_app(url)) as client:
-        await client.post("/events/alert", json={"machine_id": MACHINE, "issue": "one"}, headers=AUTH)
-        await client.post("/events/ngsi", json=notification(status(MACHINE, "fault")), headers=AUTH)
-        await runs_are(client, 1)
-    assert rows(url, "SELECT watched FROM machine_watched_values") == [({"status": "fault"},)]
 
 
 @pytest.mark.db
@@ -863,7 +826,8 @@ def test_nothing_left_after_cleaning_is_refused(body):
 
 def test_a_machine_or_value_of_nul_alone_gives_no_event():
     assert ngsi_events(notification(status("\x00\x00", "fault")), WATCHED) == ([], 1)
-    assert ngsi_events(notification(status("urn:m", "\x00")), WATCHED) == ([], 1)
+    [event], ignored = ngsi_events(notification(status("urn:m", "\x00")), WATCHED)
+    assert (event.issue, ignored) == ("Machine event: state change detected", 0)
 
 
 @pytest.mark.db
@@ -877,19 +841,23 @@ async def test_an_operators_failed_run_holds_nothing_up(url):
 
 
 @pytest.mark.db
-async def test_a_short_name_that_cant_be_resolved_counts_as_the_open_runs_machine(url):
-    async with running(event_app(url)) as client:
-        await client.post("/events/alert", json={"machine_id": MACHINE, "issue": "one"}, headers=AUTH)
-        await client.post("/events/alert", json={"machine_id": "press-01", "issue": "two"}, headers=AUTH)
+async def test_a_short_name_that_cant_be_resolved_counts_as_the_machine_in_progress(url):
+    app = event_app(url)
+    async with running(app) as client:
+        await client.post("/events/alert", json={"machine_id": GATED, "issue": "one"}, headers=AUTH)
+        await eventually(lambda: GATED in app.state.context.started)
+        await client.post("/events/alert", json={"machine_id": "gated", "issue": "two"}, headers=AUTH)
         assert len(await runs_are(client, 1)) == 1
         await client.post("/events/alert", json={"machine_id": "press-02", "issue": "other"}, headers=AUTH)
         assert len(await runs_are(client, 2)) == 2
+        app.state.context.gate.set()
 
 
 def test_an_attribute_as_an_object_without_a_value_key_counts():
     [event], _ = ngsi_events(notification({"id": "urn:m", "status": {"type": "Property", "code": 7}}), WATCHED)
-    assert event.watched == {"status": {"code": 7}}
-    assert ngsi_events(notification({"id": "urn:m", "status": {"type": "Property"}}), WATCHED)[0] == []
+    assert event.issue == "Machine event: status={'code': 7}"
+    [empty], _ = ngsi_events(notification({"id": "urn:m", "status": {"type": "Property"}}), WATCHED)
+    assert empty.issue == "Machine event: state change detected"
 
 
 # ── The subscription ─────────────────────────────────────────────────────────
@@ -981,7 +949,7 @@ async def test_type_and_attributes_can_be_set():
         notification({"id": "urn:m", f"{base}machine_state": {"value": "down"}, "status": {"value": "unwatched"}}),
         [f"{base}machine_state"],
     )
-    assert event.watched == {"machine_state": "down"}
+    assert event.issue == "Machine event: machine_state=down"
 
 
 async def test_it_names_the_configured_context():
