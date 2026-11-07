@@ -42,7 +42,6 @@ log = logging.getLogger(__name__)
 CHECK_EVERY_S = 60
 RENEW_MARGIN_S = 120
 MAX_RENEW_FAILURES = 3
-STARTUP_ATTEMPTS = 3
 PROVIDER_TIMEOUT_S = 10
 HEALTH_TIMEOUT_S = 5
 
@@ -78,6 +77,7 @@ class GatewayConnection:
         self._changing = asyncio.Lock()  # connecting, disconnecting and renewing happen one at a time
         self._renewal: asyncio.Task[None] | None = None
         self._starting: asyncio.Task[None] | None = None
+        self._retrying = False  # connecting by itself failed because the dataspace can't be reached, and goes on
 
     # ── State ────────────────────────────────────────────────────────────────
 
@@ -140,13 +140,25 @@ class GatewayConnection:
             "sharing_tier": None if state == "not_configured" else self._s.data_sharing_policy,
             "detail": self._detail(stored),
             "renewal_failures": self._failures,
+            "client_id": None if state == "not_configured" else self.client_in_use(),
+            "connecting": self._retrying and state != "connected",
         }
+
+    def client_in_use(self) -> str | None:
+        """The client of the connection while connected, else the one a connection would use now."""
+        return self._client_id if self.token() and self._client_id else self.client_id()
+
+    def not_connected_reason(self) -> tuple[str | None, bool]:
+        """Why connecting by itself failed last, and whether it is still being tried."""
+        if self.token():
+            return None, False
+        return self._last_problem, self._retrying
 
     def config(self) -> dict[str, Any]:
         return {
             "configured": self.configured,
             "realm": self._s.gateway_keycloak_realm,
-            "client_id": self.client_id(),
+            "client_id": self.client_in_use(),
             "sharing_tier": self._s.data_sharing_policy,
         }
 
@@ -180,9 +192,11 @@ class GatewayConnection:
 
     # ── Connecting ───────────────────────────────────────────────────────────
 
-    async def connect(self, secret: str | None = None) -> dict[str, Any]:
+    async def connect(self, secret: str | None = None, *, unless_connected: bool = False) -> dict[str, Any]:
         secret = secret or None
         async with self._changing:
+            if unless_connected and self.token():
+                return await self.status()
             if not self.configured:
                 raise conflict("No dataspace connection is configured.")
             client_id = self.client_id()
@@ -204,12 +218,14 @@ class GatewayConnection:
             await self._stop_renewal()
             self._token, self._secret, self._client_id = token, chosen, client_id
             self._failures, self._stopped, self._last_problem = 0, False, None
+            self._retrying = False
             self._renewal = asyncio.create_task(self._keep_fresh())
         return await self.status()
 
     async def disconnect(self) -> None:
         if not self.configured:
             raise conflict("No dataspace connection is configured.")
+        await self._stop_starting()
         async with self._changing:
             await self._stop_renewal()
             self._forget()
@@ -221,6 +237,7 @@ class GatewayConnection:
     def _forget(self) -> None:
         self._token = self._secret = self._client_id = None
         self._failures, self._stopped, self._last_problem = 0, False, None
+        self._retrying = False
 
     async def _remember(self, client_id: str, secret: str, typed: bool) -> None:
         try:
@@ -272,11 +289,11 @@ class GatewayConnection:
             raise unavailable("The memory database is not reachable.")
         if not stored.connect_wanted or not (self._env_secret() or stored.secret):
             return False
-        await self.connect()
+        await self.connect(unless_connected=True)
         return True
 
     def start(self) -> None:
-        """Connects in the background, with a few tries, as other services may be starting too."""
+        """Connects in the background. While the dataspace can't be reached, it tries again every check."""
         if self._starting is None or self._starting.done():
             self._starting = asyncio.create_task(self._start_up())
 
@@ -284,17 +301,28 @@ class GatewayConnection:
         self.start()
 
     async def _start_up(self) -> None:
-        for attempt in range(STARTUP_ATTEMPTS):
+        while True:
             try:
                 await self.connect_if_wanted()
+                self._retrying = False
                 return
             except Refused as refused:
-                log.warning("The dataspace connection was not made: %s", refused.message)
                 self._last_problem = refused.message
                 if refused.kind != "unavailable":
+                    log.warning("The dataspace connection was refused, and is not tried again: %s", refused.message)
+                    self._retrying = False
                     return
-            if attempt + 1 < STARTUP_ATTEMPTS:
-                await asyncio.sleep(self._check_every)
+                log.warning("The dataspace connection was not made, and is tried again: %s", refused.message)
+                self._retrying = True
+            await asyncio.sleep(self._check_every)
+
+    async def _stop_starting(self) -> None:
+        task, self._starting = self._starting, None
+        if task is not None and task is not asyncio.current_task():
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+        self._retrying = False
 
     # ── Renewing ─────────────────────────────────────────────────────────────
 
@@ -343,11 +371,7 @@ class GatewayConnection:
 
     async def close(self) -> None:
         await self._stop_renewal()
-        task, self._starting = self._starting, None
-        if task is not None:
-            task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await task
+        await self._stop_starting()
 
 
 def _iso(epoch: float) -> str:
