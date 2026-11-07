@@ -63,3 +63,32 @@ Reopening an incident SHALL start a new run with the incident's machine and issu
 #### Scenario: Already reopened
 - **WHEN** a client reopens an incident whose reopened run is still active
 - **THEN** the request is refused as `conflict`
+
+### Requirement: Escalation in the record
+An archived incident SHALL record the builder, the conversation reference and the outcome.
+
+#### Scenario: Archived after escalating
+- **WHEN** an escalated run is stopped and archived
+- **THEN** its record says it was escalated, with the reference, the builder's name, the escalation and the outcome, and a summary in the list says the same
+
+#### Scenario: Not escalated
+- **WHEN** a run that wasn't escalated is archived
+- **THEN** these are empty, as before
+
+### Requirement: Conversation in the record
+An archived incident SHALL record the chat, the conversation's state, the builder and the outcome.
+
+#### Scenario: Archived after a conversation
+- **WHEN** a run with a conversation is archived
+- **THEN** its record holds every message, the last state, the builder and outcome, including `mb_closed`
+
+### Requirement: An incident's source
+An incident SHALL keep its run's `source`, in the history and in its record.
+
+#### Scenario: Archived
+- **WHEN** a triggered run is archived
+- **THEN** its incident has an incident number and that `source`
+
+#### Scenario: An existing incident
+- **WHEN** an incident stored before this change is read
+- **THEN** its `source` is `operator`
