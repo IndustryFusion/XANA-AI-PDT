@@ -427,6 +427,7 @@ async def test_a_refused_download_is_an_answer_not_a_broken_one(url):
         await s.poll()
         assert (await client.get(f"/api/agent/message-files/{s.run_id}/{message}")).status_code == 404
         assert (await client.get(f"/api/agent/message-files/{s.run_id}/unknown")).status_code == 404
+        assert not [r for r in space.requests if "unknown" in str(r.url)], "an unknown ID isn't asked of the gateway"
 
 
 # ── What the operator looked at (B8) ─────────────────────────────────────────
@@ -615,16 +616,17 @@ async def test_a_download_renews_a_refused_token(url):
         s = await scene(client, app, space)
         message = space.deliver("inform", s.conversation, has_files=True, payload={"_bundle": True})
         space.downloads[message] = b"PK"
-        route, refused = space.route, []
+        route, refused, grants = space.route, [], space.grants
 
-        def expire_at_download(request):
+        def refuse_a_download_once(request):
             if request.url.path.endswith("/download") and not refused:
                 refused.append(1)
-                space.valid_tokens.clear()
+                return httpx.Response(401, json={"detail": "expired"})
             return route(request)
 
-        space.route = expire_at_download
+        space.route = refuse_a_download_once
         await s.poll()
         assert refused and message in space.acks
+        assert space.grants > grants
         got = await client.get(f"/api/agent/message-files/{s.run_id}/{message}")
     assert got.content == b"PK"
