@@ -61,6 +61,7 @@ class Settings(BaseSettings):
 
     decision_confidence_threshold: float = Field(0.9, ge=0, le=1)
     max_concurrent_rounds: int = Field(2, ge=1)
+    auto_archive_after_s: int = Field(3600, ge=0)  # 0: finished runs stay until an operator archives them
 
     keycloak_url: str | None = None
     keycloak_realm: str = "iff"

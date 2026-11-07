@@ -166,3 +166,107 @@ describe('new incident form', () => {
     await waitFor(() => expect(window.location.pathname).toMatch(/^\/incidents\/run-/))
   })
 })
+
+describe('builder, filter and archive in the list', () => {
+  const arrange = (change) => {
+    resetMock({ path: '/incidents', controls })
+    store.update((s) => { change(s); return s })
+    render(<App />)
+  }
+
+  test('an escalated run names its machine builder, and others show none', async () => {
+    arrange((s) => { s.runs[0].escalation = { ref: 'r1', recipient: { id: 'urn:x:builder', name: 'Builder GmbH' } } })
+    const rows = await items()
+    expect(within(rows[0]).getByTestId('run-builder')).toHaveTextContent('Machine builder: Builder GmbH')
+    expect(within(rows[1]).queryByTestId('run-builder')).toBeNull()
+  })
+
+  test('a builder without a name shows its ID', async () => {
+    arrange((s) => { s.runs[1].escalation = { ref: 'r1', recipient: { id: 'urn:x:builder', name: '' } } })
+    const rows = await items()
+    expect(within(rows[1]).getByTestId('run-builder')).toHaveTextContent('urn:x:builder')
+  })
+
+  test('typing part of a machine ID, in any case, narrows the list, and clearing it shows all again', async () => {
+    const user = userEvent.setup()
+    open('/incidents')
+    const all = await items()
+    const field = screen.getByLabelText('Filter by machine')
+    const target = store.get().runs[0].machineId
+    const part = target.slice(-8, -2).toUpperCase()
+    await user.type(field, part)
+    const kept = within(await list()).getAllByRole('listitem')
+    const expected = store.get().runs.filter((r) => r.machineId.toLowerCase().includes(part.toLowerCase()))
+    expect(kept).toHaveLength(expected.length)
+    expect(kept.length).toBeLessThan(all.length)
+    await user.clear(field)
+    expect(within(await list()).getAllByRole('listitem')).toHaveLength(all.length)
+  })
+
+  test('a filter nothing matches says so and can be cleared', async () => {
+    const user = userEvent.setup()
+    open('/incidents')
+    const all = await items()
+    await user.type(screen.getByLabelText('Filter by machine'), 'no-such-machine')
+    const region = await list()
+    expect(within(region).getByText('No active incidents match the filter.')).toBeVisible()
+    await user.click(within(region).getByRole('button', { name: 'Clear filter' }))
+    expect(within(await list()).getAllByRole('listitem')).toHaveLength(all.length)
+  })
+
+  test('the machine from the URL fills the filter', async () => {
+    const machine = (() => { resetMock({ path: '/', controls }); return store.get().runs[0].machineId })()
+    open(`/incidents?machine=${encodeURIComponent(machine)}`)
+    await items()
+    expect(screen.getByLabelText('Filter by machine')).toHaveValue(machine)
+    for (const row of within(await list()).getAllByRole('listitem')) expect(row).toHaveTextContent(machine.split(':').pop())
+  })
+
+  test('a finished run is archived from its row after confirming, and is in the history', async () => {
+    const user = userEvent.setup()
+    arrange((s) => { s.runs[0].status = 'failed'; s.runs[0].data = { ...s.runs[0].data, error: 'x' } })
+    const runId = store.get().runs[0].runId
+    const issue = store.get().runs[0].issue
+    const before = (await items()).length
+    await user.click(screen.getByRole('button', { name: `Archive: ${issue}` }))
+    const dialog = await screen.findByRole('dialog', { name: 'Archive this run?' })
+    await user.click(within(dialog).getByRole('button', { name: 'Archive' }))
+    // The archive and the list's reload each wait for the mock's latency, which is longer on a busy machine.
+    await waitFor(() => expect(store.get().runs.find((r) => r.runId === runId)).toBeUndefined(), { timeout: 5000 })
+    await waitFor(async () => expect(within(await list()).getAllByRole('listitem')).toHaveLength(before - 1), { timeout: 5000 })
+    expect(store.get().incidents.some((i) => i.issue === issue)).toBe(true)
+  })
+
+  test('a refused archive leaves the row and shows why', async () => {
+    const user = userEvent.setup()
+    arrange((s) => { s.runs[0].status = 'stopped'; s.runs[0].data = { ...s.runs[0].data, closePending: true } })
+    const issue = store.get().runs[0].issue
+    const before = (await items()).length
+    await user.click(screen.getByRole('button', { name: `Archive: ${issue}` }))
+    await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Archive' }))
+    const alert = await within(await list()).findByRole('alert', {}, { timeout: 5000 })
+    expect(alert).toHaveTextContent("hasn't been told yet")
+    expect(within(await list()).getAllByRole('listitem')).toHaveLength(before)
+  })
+
+  test('runs that are not finished offer no archive', async () => {
+    open('/incidents')
+    await items()
+    const finished = store.get().runs.filter((r) => ['completed', 'failed', 'stopped', 'mb_closed'].includes(r.status))
+    expect(within(await list()).queryAllByRole('button', { name: /^Archive:/ })).toHaveLength(finished.length)
+  })
+
+  test('archiving the run shown in the run view from the list says it is no longer active', async () => {
+    const user = userEvent.setup()
+    resetMock({ controls })
+    const { runId, issue } = store.get().runs[1]
+    resetMock({ path: paths.run(runId), controls })
+    render(<App />)
+    await user.click(await screen.findByRole('button', { name: 'Stop run…' }))
+    await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Stop run' }))
+    await user.click(await within(await list()).findByRole('button', { name: `Archive: ${issue}` }))
+    await user.click(within(await screen.findByRole('dialog', { name: 'Archive this run?' })).getByRole('button', { name: 'Archive' }))
+    expect(await screen.findByRole('heading', { name: 'This run is not active' }, { timeout: 5000 })).toBeVisible()
+    expect(store.get().runs.find((r) => r.runId === runId)).toBeUndefined()
+  })
+})

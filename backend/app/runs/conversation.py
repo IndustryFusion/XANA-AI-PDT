@@ -20,6 +20,7 @@ Only an operator's request sends. See the `gh-29-machine-builder-conversation` d
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import json
 import logging
@@ -57,6 +58,9 @@ MISSING_FILE_TRIES = 5
 GRANT_DAYS = 30
 NOT_REOPENABLE = ("escalated", "superseded")
 OUTCOME_TO_SEND = {"not_resolved": "failed"}
+CLOSE_OUTCOMES = ("resolved", "not_resolved", "rejected", "timed_out", "escalated")
+ESCALATE_WAIT_S = 60  # how long an escalated close waits for its escalate to reach the machine builder
+ESCALATE_POLL_S = 1.0
 PROTOCOL_ACTS = ("inform", "request", "escalate", "deescalate")
 
 
@@ -131,6 +135,41 @@ def recommendation_of(message: dict[str, Any]) -> dict[str, Any] | None:
 
 def messages_of(state: RunState) -> list[dict[str, Any]]:
     return [step["output"] for step in state.steps if step["node"] == "message"]
+
+
+TOP_HYPOTHESES = 3
+ALERT_FIELDS = ("event", "severity", "text", "resource", "value", "status")
+
+
+def diagnosis_of(state: RunState) -> dict[str, Any] | None:
+    """What the run's latest round diagnosed, for the conversation agent: None before any diagnosis."""
+    latest: dict[str, dict[str, Any]] = {}
+    for step in state.steps:
+        if step["node"] in ("observe", "hypothesize", "validate", "decide"):
+            if step.get("round", 1) >= latest.get(step["node"], {}).get("round", 0):
+                latest[step["node"]] = step
+    decided = (latest.get("decide") or {}).get("output") or {}
+    hypotheses = ((latest.get("validate") or latest.get("hypothesize") or {}).get("output") or {}).get("hypotheses")
+    hypotheses = sorted(
+        [h for h in hypotheses or [] if isinstance(h, dict)], key=lambda h: h.get("confidence") or 0, reverse=True
+    )
+    root_cause = state.data.get("root_cause") or decided.get("root_cause")
+    if not root_cause and not hypotheses:
+        return None
+    leading = hypotheses[0] if hypotheses else {}
+    alerts = ((latest.get("observe") or {}).get("output") or {}).get("alerts") or []
+    return {
+        "root_cause": root_cause or leading.get("title"),
+        "confirmed": bool(root_cause),
+        "confidence": state.data.get("confidence", decided.get("confidence", leading.get("confidence"))),
+        "hypotheses": [
+            {key: h.get(key) for key in ("title", "confidence", "verdict") if h.get(key) is not None}
+            for h in hypotheses[:TOP_HYPOTHESES]
+        ],
+        "active_alerts": [
+            {key: a[key] for key in ALERT_FIELDS if a.get(key) is not None} for a in alerts if isinstance(a, dict)
+        ],
+    }
 
 
 def last_state(state: RunState) -> str:
@@ -421,6 +460,7 @@ class ConversationDesk:
             tier=escalation.get("tier"),
             builder=(escalation.get("recipient") or {}).get("name"),
             machine_type=machine_type,
+            diagnosis=diagnosis_of(state),
         )
 
     def _agent_steps(self, state: RunState, reply: Any, reviewed: str | None = None) -> list[dict[str, Any]]:
@@ -607,10 +647,15 @@ class ConversationDesk:
         return requests[-1]["message_id"] if requests else None
 
     async def _close(self, rec: RunRecord, act: str, text: str, outcome: str | None) -> dict[str, str]:
-        if act == "close" and outcome not in ("resolved", "not_resolved", "escalated"):
-            raise invalid("Choose an outcome for closing the conversation.")
+        if act == "close" and outcome not in CLOSE_OUTCOMES:
+            raise invalid(f"Choose an outcome for closing the conversation: {', '.join(CLOSE_OUTCOMES)}.")
         sent = "withdrawn" if act == "cancel" else OUTCOME_TO_SEND.get(outcome, outcome)
         async with self._sending(rec, CONVERSATION, "closing"):
+            if last_state(rec.state) == "direct_contact_machine_builder":
+                raise conflict("The machine builder has escalated this conversation, so only it can close it now.")
+            if sent == "escalated":
+                # The dataspace requires `escalate` before a close as escalated, on both sides.
+                await self._escalated_first(rec)
             step = await self._send(rec, "close", text, outcome=sent)
             step["output"]["conv_state"] = "closed"
             reason = text or f"Conversation closed with outcome: {outcome or sent}"
@@ -622,6 +667,58 @@ class ConversationDesk:
             }
             await self._store_sent(rec, step, status=STOPPED, data=await self._as_closed(rec, step, data))
         return {"status": STOPPED, "conv_state": "closed"}
+
+    async def _escalated_first(self, rec: RunRecord) -> None:
+        """Sends `escalate` unless this side's escalation has reached the machine builder, and waits until it has.
+
+        Refusals reach the operator, and nothing more is sent: a close as escalated that the machine builder's
+        side refuses can't be reopened, so the two sides would stay apart.
+        """
+        state_now = last_state(rec.state)
+        mine = [m for m in messages_of(rec.state) if m.get("act") == "escalate" and m.get("sender") == "operator"]
+        status = None
+        if state_now == "direct_contact_operator" and mine:
+            status, _ = await self._delivery(mine[-1]["message_id"])
+            if status == "notified":
+                return
+        if state_now == "open" or status in ("error", "rejected"):
+            step = await self._send(rec, "escalate", "")
+            await self._store_sent(rec, step)
+            if step["output"].get("conv_state") == "direct_contact_machine_builder":
+                raise conflict(
+                    "The machine builder escalated this conversation at the same time and its step won, "
+                    "so only it can close it now. Nothing else was sent."
+                )
+            message_id = step["output"]["message_id"]
+        elif mine:
+            message_id = mine[-1]["message_id"]
+        else:
+            return  # escalating by this side, with the step from before this backend recorded them
+        deadline = asyncio.get_running_loop().time() + ESCALATE_WAIT_S
+        while True:
+            status, problem = await self._delivery(message_id)
+            if status == "notified":
+                return
+            if status in ("error", "rejected"):
+                raise conflict(
+                    f"The machine builder did not get the escalation ({problem or status}). "
+                    "Nothing else was sent. Closing as escalated again sends the escalation again first."
+                )
+            if asyncio.get_running_loop().time() >= deadline:
+                raise conflict(
+                    "The escalation hasn't reached the machine builder yet, so the close wasn't sent. "
+                    "The conversation is escalated meanwhile. Close again once the escalation has arrived."
+                )
+            await asyncio.sleep(ESCALATE_POLL_S)
+
+    async def _delivery(self, message_id: str) -> tuple[str | None, str | None]:
+        """A sent message's status at the gateway and its error message; no status if it can't be read now."""
+        try:
+            answer = await self._gateway.message_status(message_id)
+        except Refused as refused:
+            log.info("The status of message %s was not read: %s", message_id, refused.message)
+            return None, None
+        return answer.get("status"), answer.get("error_message")
 
     async def _as_closed(self, rec: RunRecord, step: dict[str, Any], data: dict[str, Any]) -> dict[str, Any]:
         """A close that came too late changed nothing: the conversation's own outcome is the true one."""

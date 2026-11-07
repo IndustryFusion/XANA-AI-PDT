@@ -85,6 +85,11 @@ export async function request(area, method, path, { params, body, raw = false, t
   const result = raw ? JSON.parse(text) : fromBackend(JSON.parse(text))
   const limited = limitOf(response.headers?.get('X-Results-Limited'))
   if (limited && Array.isArray(result)) result.limited = limited
+  const total = response.headers?.get('X-Total-Count')
+  if (total != null && total !== '' && Array.isArray(result) && Number.isInteger(Number(total))) {
+    // Not enumerable, so that the list still compares as the entities it holds.
+    Object.defineProperty(result, 'total', { value: Number(total), enumerable: false })
+  }
   return result
 }
 

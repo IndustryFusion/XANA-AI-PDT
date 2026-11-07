@@ -64,7 +64,9 @@ export function createRunRecord({ runId, machineId, issue, scenario, at, inciden
 
 export function summarize(run) {
   const { runId, incidentId, machineId, issue, status, startedAt, updatedAt, escalationRef, source } = run
-  return { runId, incidentId, machineId, issue, status, startedAt, updatedAt, escalationRef, source }
+  const recipient = run.escalation?.recipient
+  const machineBuilder = recipient?.id ? { id: recipient.id, name: recipient.name || null } : null
+  return { runId, incidentId, machineId, issue, status, startedAt, updatedAt, escalationRef, source, machineBuilder }
 }
 
 export function isReopenable(run) {
@@ -356,6 +358,8 @@ const ACTIONS = {
     if (act === 'close') {
       if (!closeOutcomes(convState).includes(outcome)) throw invalid('Choose an outcome for closing the conversation.')
       run.queue = []
+      // As the backend: closing as escalated from an open conversation escalates first.
+      if (outcome === 'escalated' && convState === 'open') x.send('escalate', '', { convState: 'direct_contact_operator' })
       x.send('close', text || `Closed with outcome: ${CLOSE_OUTCOMES[outcome]}.`, { outcome, convState: 'closed' })
       stop(run, x, { reason: `Conversation closed with outcome: ${CLOSE_OUTCOMES[outcome]}`, outcome, reopenable: !FINAL_OUTCOMES.includes(outcome) })
       run.queue.push(...run.outbox.filter((o) => o.status === 'pending').map((o) => ({ delay: DELIVERY_MS, deliver: o.messageId })))

@@ -84,6 +84,13 @@ def rules(prompt: Any) -> dict[str, Any]:
         plan.append(first("send_inform", text="A draft for you to review."))
     if "close it" in question:
         plan.append(first("send_close", outcome="resolved", text="Resolved, thank you."))
+    if "diagnos" in question:
+        diagnosis = section(prompt, "diagnosis") or {}
+        if diagnosis.get("root_cause"):
+            text = f"XANA diagnosed {diagnosis['root_cause']}, with confidence {diagnosis.get('confidence')}."
+        else:
+            text = "There is no diagnosis for this run yet."
+        return {"tool": "set_response", "arguments": {"text": text}}
     for action in plan:
         if action:
             return action
@@ -118,6 +125,7 @@ async def run_case(case: dict[str, Any], llm: Any) -> Result:
         allowed_entities=[MACHINE],
         tier="minimal",
         builder="Builder GmbH",
+        diagnosis=case.get("diagnosis"),
     )
     answer = await agent.answer(turn)
     problems = []
@@ -133,6 +141,8 @@ async def run_case(case: dict[str, Any], llm: Any) -> Result:
         problems.append("a query reached the ontology")
     if re.search(case.get("reply_must_not", "$^"), answer.reply):
         problems.append("the reply holds what it must not")
+    if not re.search(case.get("reply_must", ""), answer.reply):
+        problems.append("the reply lacks what it must hold")
     return Result(case["name"], answer.tools, problems)
 
 

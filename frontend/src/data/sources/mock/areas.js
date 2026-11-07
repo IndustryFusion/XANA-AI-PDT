@@ -152,6 +152,9 @@ export function createAreas(store) {
       if (!FINISHED_STATES.includes(run.status)) {
         throw new DataError('runs', 'conflict', 'Only finished runs can be archived; stop the run first.')
       }
+      if (run.data?.closePending) {
+        throw new DataError('runs', 'conflict', "The machine builder hasn't been told yet that this conversation is closed. It can be archived once that has gone out.")
+      }
       store.update((s) => {
         const record = s.runs.find((r) => r.runId === runId)
         if (record.incidentId == null) record.incidentId = s.counters.incident++

@@ -57,12 +57,13 @@ function subscribeEntities({ type, ids } = {}, onEvent) {
 }
 
 const queryParams = ({ type, id, idPattern, q, limit } = {}) => ({ type, id, id_pattern: idPattern, q, limit })
+const pagedParams = ({ offset, attrs, hasAttr, ...query } = {}) => ({ ...queryParams(query), offset, attrs, has_attr: hasAttr })
 
 export const entities = {
   getStats: () => request(AREA, 'GET', '/api/ngsi/stats'),
   listTypes: () => request(AREA, 'GET', '/api/ngsi/types', raw),
   listAttributes: () => request(AREA, 'GET', '/api/ngsi/attributes', raw),
-  queryEntities: (query) => request(AREA, 'GET', '/api/ngsi/entities', { ...raw, params: queryParams(query) }),
+  queryEntities: (query) => request(AREA, 'GET', '/api/ngsi/entities', { ...raw, params: pagedParams(query) }),
   getEntity: (id) => request(AREA, 'GET', `/api/ngsi/entities/${seg(id)}`, raw),
   updateAttributes: (id, attrs) => request(AREA, 'PATCH', `/api/ngsi/entities/${seg(id)}/attrs`, { ...raw, body: attrs }),
   appendAttributes: (id, attrs) => request(AREA, 'POST', `/api/ngsi/entities/${seg(id)}/attrs`, { ...raw, body: attrs }),
