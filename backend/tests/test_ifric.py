@@ -138,7 +138,12 @@ async def test_names_without_a_token_or_a_registry():
 async def test_identifiers_are_one_encoded_segment():
     registry, client = client_of()
     await client.names(["urn:ifric:a/b c"])
-    assert registry.paths == ["/company/get-company-details/urn%3Aifric%3Aa%2Fb%20c"]
+    # Unknown in the details, so the directory and the factory's owner are asked too, with the same segment.
+    assert registry.paths == [
+        "/company/get-company-details/urn%3Aifric%3Aa%2Fb%20c",
+        "/company/get-all-companies",
+        "/company/factories/urn%3Aifric%3Aa%2Fb%20c/owner",
+    ]
     registry, client = client_of()
     with pytest.raises(NoBuilder):
         await client.builder("../../admin")
@@ -149,7 +154,10 @@ async def test_names_are_asked_once_each_and_a_few_at_a_time():
     registry, client = client_of()
     ids = [f"urn:{n}" for n in range(40)] * 2
     await client.names(ids)
-    assert len(registry.paths) == 40
+    details = [p for p in registry.paths if "get-company-details" in p]
+    assert len(details) == len(set(details)) == 40
+    assert registry.paths.count("/company/get-all-companies") == 1  # read once, though 40 asked at once
+    assert len([p for p in registry.paths if p.endswith("/owner")]) == 40
     assert 1 < registry.most_in_flight <= 8
 
 
@@ -371,6 +379,9 @@ def test_routes_and_peer_names():
         assert client.post("/api/ifric/resolve", json={"ids": [BUILDER]}).json() == {BUILDER: "Builder GmbH"}
         builders = client.post("/api/ifric/resolve-builders", json={"machine_ids": [MACHINE, "urn:x"]}).json()
         assert builders == {MACHINE: "Builder GmbH"}
+        registry.answers[f"/company/assets/{MACHINE.replace(':', '%3A')}"] = (200, {"asset_name": "Press 1"})
+        machines = client.post("/api/ifric/resolve-machines", json={"machine_ids": [MACHINE, "urn:x"]}).json()
+        assert machines == {MACHINE: "Press 1"}
         assert client.get("/api/ifric/factory").json()["name"] == "Plant"
         peers = client.get("/api/gateway/peers").json()
         assert peers[0]["name"] == "Builder GmbH" and peers[0]["id"] == BUILDER
@@ -441,3 +452,102 @@ def test_nothing_in_the_agent_reaches_the_registry():
 def test_ifric_url_is_read_from_the_environment(monkeypatch):
     monkeypatch.setenv("IFRIC_URL", "registry:4007")
     assert load_settings(_env_file=None).ifric_url == "http://registry:4007"
+
+
+# ── More names: directory, factory owner, asset names ───────────────────────
+
+PEER = "urn:ifric:ifx-eur-com-peer"
+DIRECTORY = "/company/get-all-companies"
+
+
+def directory(*companies):
+    return (200, [{"company_ifric_id": i, "company_name": n, "company_image": None} for i, n in companies])
+
+
+class Clock:
+    def __init__(self):
+        self.now = 100.0
+
+    def __call__(self):
+        return self.now
+
+
+async def test_a_peer_refused_in_the_details_is_named_by_the_directory():
+    registry, client = client_of()
+    registry.answers[company_path(PEER)] = (403, {"message": "Forbidden"})
+    registry.answers[DIRECTORY] = directory((PEER, "Peer Werke"), (BUILDER, "Builder GmbH"))
+    assert await client.names([PEER]) == {PEER: "Peer Werke"}
+
+
+async def test_a_company_the_details_dont_know_is_named_by_the_directory():
+    registry, client = client_of()
+    registry.answers[company_path(PEER)] = (200, {"company": None})
+    registry.answers[DIRECTORY] = directory((PEER, "Peer Werke"))
+    assert await client.names([PEER]) == {PEER: "Peer Werke"}
+
+
+async def test_a_factory_is_named_by_its_owner():
+    registry, client = client_of()
+    registry.answers[DIRECTORY] = directory((PEER, "Peer Werke"))
+    registry.answers[factory_path("/owner")] = (200, {"owner": {"company_name": "Factory Owner AG"}})
+    assert await client.names([FACTORY_ID]) == {FACTORY_ID: "Factory Owner AG"}
+
+
+async def test_the_directory_is_read_once_in_300_seconds_and_again_with_another_token():
+    token = {"value": "one"}
+    registry = Registry()
+    clock = Clock()
+    client = RegistryClient(
+        make_settings(ifric_url=REGISTRY), lambda: token["value"], transport=registry.transport(), clock=clock
+    )
+    registry.answers[DIRECTORY] = directory((PEER, "Peer Werke"))
+    await asyncio.gather(*(client.names([PEER]) for _ in range(5)))
+    clock.now += 299
+    await client.names([PEER])
+    assert registry.paths.count(DIRECTORY) == 1
+    clock.now += 2
+    await client.names([PEER])
+    assert registry.paths.count(DIRECTORY) == 2
+    token["value"] = "two"
+    await client.names([PEER])
+    assert registry.paths.count(DIRECTORY) == 3
+
+
+async def test_a_directory_that_fails_leaves_the_name_out_and_the_answer_goes_on():
+    registry, client = client_of()
+    registry.answers[company_path(BUILDER)] = (200, {"company_name": "Builder GmbH"})
+    registry.answers[DIRECTORY] = httpx.ConnectError("refused")
+    assert await client.names([PEER, BUILDER]) == {BUILDER: "Builder GmbH"}
+
+
+@pytest.mark.parametrize("field", ["asset_name", "product_name", "name"])
+async def test_machines_are_named_by_their_asset(field):
+    registry, client = client_of()
+    registry.answers[f"/company/assets/{MACHINE.replace(':', '%3A')}"] = (200, {field: "Laser cutter L3"})
+    assert await client.machine_names([MACHINE, MACHINE]) == {MACHINE: "Laser cutter L3"}
+    assert registry.paths == [f"/company/assets/{MACHINE.replace(':', '%3A')}"]
+
+
+async def test_a_machine_without_an_asset_name_is_left_out():
+    registry, client = client_of()
+    other = "urn:ngsi-ld:Machine:other"
+    # An asset record that holds IDs only, as the registry service's does.
+    registry.answers[f"/company/assets/{MACHINE.replace(':', '%3A')}"] = (
+        200,
+        {"asset_ifric_id": MACHINE, "is_twin": True},
+    )
+    registry.answers[f"/company/assets/{other.replace(':', '%3A')}"] = (403, {"message": "Forbidden"})
+    assert await client.machine_names([MACHINE, other, "urn:ngsi-ld:Machine:unknown"]) == {}
+
+
+async def test_machine_names_without_a_registry_or_a_token():
+    assert await RegistryClient(make_settings(), lambda: "t").machine_names([MACHINE]) == {}
+    registry = Registry()
+    client = RegistryClient(make_settings(ifric_url=REGISTRY), lambda: None, transport=registry.transport())
+    assert await client.machine_names([MACHINE]) == {} and registry.paths == []
+
+
+async def test_too_many_machines_are_refused():
+    _, client = client_of()
+    with pytest.raises(Refused):
+        await client.machine_names([f"urn:m:{n}" for n in range(MAX_RESOLVED + 1)])

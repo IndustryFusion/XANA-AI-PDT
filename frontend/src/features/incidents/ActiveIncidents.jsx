@@ -19,7 +19,10 @@ import { runs } from '../../data'
 import { useData } from '../../data/useData'
 import { EntityRef, entityLabel } from '../../app/EntityRef'
 import { Link, paths, useRoute } from '../../app/router'
-import { Button, Card, DataView, EmptyState, StatusBadge } from '../../ui/components'
+import { Button, Card, DataView, EmptyState, StatusBadge, useToast } from '../../ui/components'
+import { ConfirmDialog } from '../../ui/structured'
+import { FINISHED_STATES } from './runModel'
+import { useMachineNames } from '../../app/machineNames'
 import { formatAge, triggeredBy } from '../../ui/format'
 import { useRevealOnChange } from '../../app/reveal'
 import { toneOf } from '../../ui/status'
@@ -30,12 +33,46 @@ export const LIST_REFRESH_MS = 5000
 
 const runPath = (runId, machine) => (machine ? `${paths.run(runId)}?machine=${encodeURIComponent(machine)}` : paths.run(runId))
 
-/** Open runs, newest first, optionally for one machine. */
-export function RunList({ selected, machine, refreshKey }) {
-  const result = useData('runs', 'listActiveRuns', [], { refreshMs: LIST_REFRESH_MS, refreshKey })
-  const filter = (list) => (machine ? list.filter((r) => r.machineId === machine) : list)
+/** The runs a typed filter keeps: the machine ID contains the text, in any letter case. The URL's machine is exact. */
+export function filterRuns(list, text, machine) {
+  const wanted = text.trim()
+  if (!wanted) return list
+  if (machine && wanted === machine) return list.filter((r) => r.machineId === machine)
+  const lower = wanted.toLowerCase()
+  return list.filter((r) => r.machineId.toLowerCase().includes(lower))
+}
+
+/** Open runs, newest first, with a machine filter, the builder of escalated runs, and archive for finished ones. */
+export function RunList({ selected, machine, refreshKey, onArchived }) {
+  const [ownKey, setOwnKey] = useState(0)
+  const result = useData('runs', 'listActiveRuns', [], { refreshMs: LIST_REFRESH_MS, refreshKey: `${refreshKey ?? ''}|${ownKey}` })
+  const [text, setText] = useState(machine ?? '')
+  const [archiving, setArchiving] = useState(null)
+  const [problems, setProblems] = useState({})
+  const filterId = useId()
+  const notify = useToast()
+  useEffect(() => { setText(machine ?? '') }, [machine])
+  const filter = (list) => filterRuns(list, text, machine)
+  const names = useMachineNames(result.data?.map((r) => r.machineId))
+
+  async function archive(run) {
+    try {
+      await runs.archiveRun(run.runId)
+      setProblems(({ [run.runId]: _, ...rest }) => rest)
+      notify(run.incidentId != null ? `Run archived as incident #${run.incidentId}; see the incident history.` : 'Run archived; see the incident history.', 'success')
+      setOwnKey((k) => k + 1)
+      onArchived?.(run.runId)
+    } catch (err) {
+      setProblems((p) => ({ ...p, [run.runId]: err.message }))
+    }
+  }
+
   return (
     <Card title="Open runs" className="run-list">
+      <div className="field run-list__filter">
+        <label className="field__label" htmlFor={filterId}>Filter by machine</label>
+        <input id={filterId} type="search" value={text} placeholder="Part of a machine ID" onChange={(e) => setText(e.target.value)} />
+      </div>
       {machine && (
         <p className="filter-note">
           <span>Machine: <EntityRef id={machine} /></span>
@@ -46,7 +83,11 @@ export function RunList({ selected, machine, refreshKey }) {
         result={result}
         errorTitle="Could not load open runs"
         isEmpty={(list) => filter(list).length === 0}
-        empty={(
+        empty={text.trim() && !machine && result.data?.length ? (
+          <EmptyState title="No active incidents match the filter.">
+            <Button onClick={() => setText('')}>Clear filter</Button>
+          </EmptyState>
+        ) : (
           <EmptyState title={machine ? 'No open runs for this machine.' : 'No open runs.'}>
             <Link to={paths.newIncident(machine)} className="btn btn--primary btn--md">Start a new analysis</Link>
           </EmptyState>
@@ -59,18 +100,31 @@ export function RunList({ selected, machine, refreshKey }) {
                 <Link to={runPath(r.runId, machine)} className="run-list__link" aria-current={selected === r.runId ? 'true' : undefined}>
                   <span className="run-list__issue">{r.issue}</span>
                   <span className="run-list__meta">
-                    <span>{entityLabel(r.machineId)}</span>
+                    <span>{names[r.machineId] ? <><span data-testid="machine-name">{names[r.machineId]}</span> · {entityLabel(r.machineId)}</> : entityLabel(r.machineId)}</span>
                     <span>{r.incidentId != null ? `#${r.incidentId}` : 'No incident number yet'}</span>
                     <span>{formatAge(r.startedAt)}</span>
                     {triggeredBy(r.source) && <span data-testid="run-source">{triggeredBy(r.source)}</span>}
+                    {r.machineBuilder && <span data-testid="run-builder">Machine builder: {r.machineBuilder.name || r.machineBuilder.id}</span>}
                   </span>
                 </Link>
-                <StatusBadge kind="run" value={r.status} />
+                <div className="run-list__side">
+                  <StatusBadge kind="run" value={r.status} />
+                  {FINISHED_STATES.includes(r.status) && (
+                    <Button size="sm" onClick={() => setArchiving(r)} aria-label={`Archive: ${r.issue}`}>Archive…</Button>
+                  )}
+                </div>
+                {problems[r.runId] && <p className="form-error run-list__problem" role="alert">Not archived: {problems[r.runId]}</p>}
               </li>
             ))}
           </ul>
         )}
       </DataView>
+      <ConfirmDialog
+        open={archiving != null} title="Archive this run?" confirmLabel="Archive"
+        onConfirm={() => archive(archiving)} onClose={() => setArchiving(null)}
+      >
+        <p>The run moves to the incident history{archiving?.issue ? <>: “{archiving.issue}”</> : null}.</p>
+      </ConfirmDialog>
     </Card>
   )
 }
@@ -172,7 +226,7 @@ export default function ActiveIncidents() {
         {!creating && <Link to={paths.newIncident(machine)} className="btn btn--primary btn--md">New incident</Link>}
       </div>
       <div className="split">
-        <div className="split__side"><RunList selected={params.runId} machine={machine} refreshKey={refreshKey} /></div>
+        <div className="split__side"><RunList selected={params.runId} machine={machine} refreshKey={refreshKey} onArchived={refreshList} /></div>
         <div className="split__main" ref={mainRef}>{main}</div>
       </div>
     </section>

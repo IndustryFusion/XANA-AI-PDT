@@ -169,7 +169,7 @@ export default function ImportDialog({ open, onClose, onImported }) {
               </div>
             ) : (
               <>
-                <p>{preview.entities.length} entities are ready to import. Existing entities with the same ID are updated.</p>
+                <p>{preview.entities.length} entities are ready to import. <strong>Import replaces:</strong> an existing entity with the same ID is replaced by the one in the file, and its attributes that are not in the file are removed.</p>
                 <div className="table-wrap">
                   <table className="table">
                     <caption className="visually-hidden">Entities to import</caption>

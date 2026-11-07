@@ -90,6 +90,8 @@ class ConversationInput:
     tier: str | None = None
     builder: str | None = None
     machine_type: str | None = None
+    # What XANA diagnosed in this run: root cause, confidence, top hypotheses, the machine's active alerts.
+    diagnosis: dict[str, Any] | None = None
 
 
 @dataclass
@@ -154,6 +156,7 @@ class ConversationAgent:
                 "conversation",
                 machine={"machine_id": turn.machine_id, "machine_type": turn.machine_type, "issue": turn.issue},
                 builder={"name": turn.builder, "sharing_tier": turn.tier},
+                diagnosis=turn.diagnosis or {"none": "This run has no diagnosis yet."},
                 conversation=turn.messages,
                 question=turn.question,
                 earlier_actions=state["actions"],

@@ -56,12 +56,16 @@ class TypeNames(BaseModel):
 
 
 def _answer(found: list) -> Any:
-    """A list. If it stopped early, a header says how far it got: the body stays what the broker's would be."""
-    limited = getattr(found, "limited", None)
-    if not limited:
+    """A list. If it stopped early, a header says how far it got, and another gives the total when it is known:
+    the body stays what the broker's would be."""
+    headers = {}
+    if limited := getattr(found, "limited", None):
+        headers["X-Results-Limited"] = ", ".join(f"{key}={value}" for key, value in limited.items())
+    if (total := getattr(found, "total", None)) is not None:
+        headers["X-Total-Count"] = str(total)
+    if not headers:
         return list(found)
-    text = ", ".join(f"{key}={value}" for key, value in limited.items())
-    return JSONResponse(list(found), headers={"X-Results-Limited": text})
+    return JSONResponse(list(found), headers=headers)
 
 
 def _attributes(body: Any) -> dict[str, Any]:
@@ -94,9 +98,19 @@ async def query_entities(
     id_pattern: str | None = None,
     q: str | None = None,
     limit: int = 100,
+    offset: int = 0,
+    attrs: str | None = None,
+    has_attr: str | None = None,
 ) -> Any:
     found = await request.app.state.broker.query(
-        entity_type=type, entity_id=id, id_pattern=id_pattern, q=q, limit=limit
+        entity_type=type,
+        entity_id=id,
+        id_pattern=id_pattern,
+        q=q,
+        limit=limit,
+        offset=offset,
+        attrs=attrs,
+        has_attr=has_attr,
     )
     return _answer(found)
 

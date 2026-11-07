@@ -24,6 +24,7 @@ import CapabilityRequests from './CapabilityRequests'
 import ConnectionSection from './ConnectionSection'
 import Peers from './Peers'
 import SharingTier from './SharingTier'
+import ConfigurationPanel from './ConfigurationPanel'
 import './dataspace.css'
 
 const ON_CONNECTION_CHANGE = [CONNECTION_CHANGED]
@@ -55,6 +56,7 @@ export default function Dataspace() {
       <div className="dataspace__top">
         <ConnectionSection result={connection} />
         <SharingTier tier={connection.data?.sharingTier} status={connection.data ? 'success' : connection.status} />
+        <ConfigurationPanel state={state} refreshKey={state} />
       </div>
       {state === 'connected' && (
         <>

@@ -173,6 +173,35 @@ function DataTile({ opts }) {
 
 const ON_CONNECTION_CHANGE = [CONNECTION_CHANGED]
 
+const LEVEL_LABELS = { standard: 'standard', elevated: 'elevated', restricted: 'restricted', unknown: 'unknown' }
+
+/** Peers per access level, as the backend works it out from the gateway, and the peers with elevated access. */
+function AccessLevels({ opts }) {
+  const result = useData('dataspace', 'getAccessLevels', [], { ...opts, refreshOn: ON_CONNECTION_CHANGE })
+  return (
+    <DataView result={result} errorTitle="Could not load access levels">
+      {({ peers, counts }) => {
+        const elevated = peers.filter((p) => p.accessLevel === 'elevated')
+        const shown = Object.keys(LEVEL_LABELS).filter((level) => level !== 'unknown' || counts.unknown > 0)
+        return (
+          <section className="stack" aria-label="Access levels">
+            <p className="row tile__levels">
+              {shown.map((level) => (
+                <span key={level} className={`level level--${level}`} data-level={level}><strong>{counts[level]}</strong> {LEVEL_LABELS[level]}</span>
+              ))}
+            </p>
+            {elevated.length > 0 && (
+              <ul className="tile__list" aria-label="Peers with elevated access">
+                {elevated.map((p) => <li key={p.peerId} className="tile__item">{p.name}: {p.approved.join(', ')}</li>)}
+              </ul>
+            )}
+          </section>
+        )
+      }}
+    </DataView>
+  )
+}
+
 function DataspaceTile({ opts }) {
   const connection = useData('dataspace', 'getConnection', [], { ...opts, refreshOn: ON_CONNECTION_CHANGE })
   const connected = connection.data?.state === 'connected'
@@ -201,6 +230,7 @@ function DataspaceTile({ opts }) {
                     </>
                   )}
                 </DataView>
+                <AccessLevels opts={opts} />
               </>
             ) : (
               <EmptyState title="Not connected to the dataspace.">

@@ -48,6 +48,8 @@ const connected = await call('POST', `${gateway}/connect`, { secret })
 record('dataspace.connect', connected)
 record('dataspace.getConnection', await call('GET', `${gateway}/status`))
 const peers = record('dataspace.listPeers', await call('GET', `${gateway}/peers`))
+record('dataspace.getConnectionConfig', await call('GET', `${gateway}/config`))
+record('dataspace.getAccessLevels', await call('GET', `${gateway}/access-levels`))
 record('dataspace.getPeerCapabilities', await call('GET', `${gateway}/peers/${encodeURIComponent(peers[0].id)}/capabilities`))
 const requests = record('dataspace.listCapabilityRequests', await call('GET', `${gateway}/capabilities/requests`))
 const pending = requests.find((r) => r.status === 'pending')
@@ -58,6 +60,7 @@ if (process.env.RECORD_MACHINE) {
   record('session.getFactory', await call('GET', '/api/ifric/factory'))
   record('dataspace.resolveNames', await call('POST', '/api/ifric/resolve', { ids: [peers[0].id] }))
   record('dataspace.resolveBuilders', await call('POST', '/api/ifric/resolve-builders', { machine_ids: [process.env.RECORD_MACHINE] }))
+  record('dataspace.resolveMachines', await call('POST', '/api/ifric/resolve-machines', { machine_ids: [process.env.RECORD_MACHINE] }))
 }
 // An escalation, if the backend has the sample data and a machine with a builder (RECORD_MACHINE).
 if (process.env.RECORD_MACHINE) {

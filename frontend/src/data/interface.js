@@ -50,14 +50,17 @@ export const OPERATIONS = {
   ],
   alerts: ['listAlerts', 'countAlerts', 'getAlert', 'applyAlertAction', 'listEnvironments', 'listServices', 'getAlertSettings'],
   dataspace: [
-    'getConnection', 'connect', 'disconnect', 'listPeers', 'getPeerCapabilities',
-    'listCapabilityRequests', 'decideCapabilityRequest', 'setCapabilityPolicy', 'resolveNames', 'resolveBuilders',
+    'getConnection', 'getConnectionConfig', 'connect', 'disconnect', 'listPeers', 'getPeerCapabilities', 'getAccessLevels',
+    'listCapabilityRequests', 'decideCapabilityRequest', 'setCapabilityPolicy', 'resolveNames', 'resolveBuilders', 'resolveMachines',
   ],
   ...(KNOWLEDGE_BASE_ENABLED ? { knowledgeBase: ['listDocuments', 'uploadDocument', 'getIngestJob', 'updateDescription', 'deleteDocument', 'query'] } : {}),
   system: ['getHealth', 'getServiceSettings', 'saveServiceSettings'],
 }
 
 export const AREAS = Object.keys(OPERATIONS)
+
+/** A peer's access here: more than its defaults (`elevated`), some refused (`restricted`), or defaults. */
+export const ACCESS_LEVELS = ['standard', 'elevated', 'restricted']
 
 /** Every run state the UI represents. */
 export const RUN_STATES = [
@@ -267,6 +270,7 @@ const user = { username: 'string', name: 'string', email: 'string' }
 const runSummary = {
   runId: 'string', incidentId: '?number', machineId: 'string', issue: 'string',
   status: { $enum: RUN_STATES }, startedAt: 'date', updatedAt: 'date', escalationRef: '?string', source: { $enum: RUN_SOURCES },
+  machineBuilder: { $optional: { id: 'string', name: '?string' } },
 }
 const step = { node: 'string', input: { $optional: {} }, output: {}, at: 'date' }
 const outbox = [{ messageId: 'string', status: { $enum: DELIVERY_STATES } }]
@@ -387,13 +391,21 @@ export const SHAPES = {
     getConnection: connection,
     connect: connection,
     disconnect: nothing,
-    listPeers: [{ id: 'string', name: 'string', capabilities: ['string'] }],
+    getConnectionConfig: {
+      configured: 'boolean', gatewayUrl: '?string', keycloakUrl: '?string', registryUrl: '?string', realm: 'string', clientId: '?string',
+    },
+    listPeers: [{ id: 'string', name: 'string', capabilities: ['string'], accessLevel: { $optional: { $enum: ACCESS_LEVELS } } }],
+    getAccessLevels: {
+      peers: [{ peerId: 'string', name: 'string', accessLevel: { $optional: { $enum: ACCESS_LEVELS } }, approved: ['string'], error: '?string' }],
+      counts: { standard: 'number', elevated: 'number', restricted: 'number', unknown: 'number' },
+    },
     getPeerCapabilities: { peerId: 'string', name: 'string', atPeer: [policy], here: [policy] },
     listCapabilityRequests: [capabilityRequest],
     decideCapabilityRequest: capabilityRequest,
     setCapabilityPolicy: nothing,
     resolveNames: { $record: 'string' },
     resolveBuilders: { $record: 'string' },
+    resolveMachines: { $record: 'string' },
   },
   knowledgeBase: {
     listDocuments: [{

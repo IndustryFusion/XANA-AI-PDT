@@ -36,6 +36,11 @@ Keeping machines apart means a list of companies doesn't cost asset lookups, and
 
 Alternative: one `resolve` that tries every kind for every ID. Up to four requests per unknown ID, and an asset and a company with similar names couldn't be told apart.
 
+### Found in implementation
+
+- **The registry has no asset name.** Its asset record holds the asset's ID, its manufacturer, owner and factory, and whether it is twinned, but no name. `resolve-machines` takes `asset_name`, `product_name` or `name` when an answer has one, and otherwise leaves the machine out, so with this registry the screens show machine IDs. Naming assets needs the registry to keep a name, which this change can't add.
+- **A stopped registry within 300 seconds of reading the directory** still names the companies in it, from what was read. After that, or after a restart, names are left out and IDs are shown.
+
 ## Risks
 
 - The directory holds every company in the registry, kept in memory for 300 seconds. It is used only to name IDs XANA already has.

@@ -76,6 +76,14 @@ export function createDataspaceArea(store) {
 
   const status = (map, capability) => map?.[capability] ?? 'default'
 
+  /** As the backend: an explicit grant is more than the defaults, a refusal restricts. */
+  function levelOf(peerId) {
+    const policy = store.get().dataspace.policies[peerId] ?? {}
+    const approved = Object.keys(policy).filter((c) => policy[c] === 'granted')
+    const accessLevel = approved.length ? 'elevated' : Object.values(policy).includes('denied') ? 'restricted' : 'standard'
+    return { accessLevel, approved }
+  }
+
   const area = {
     getConnection: withControls(connectionResult),
 
@@ -95,9 +103,32 @@ export function createDataspaceArea(store) {
       setState('disconnected')
     }),
 
+    getConnectionConfig: withControls(() => {
+      const configured = connectionState() !== 'not_configured'
+      return {
+        configured,
+        gatewayUrl: configured ? 'http://gateway.dataspace:8080' : null,
+        keycloakUrl: configured ? 'http://keycloak.dataspace:8080/auth' : null,
+        registryUrl: configured ? 'http://ifric.dataspace:4007' : null,
+        realm: 'dataspace',
+        clientId: configured ? store.get().connection.participantId : null,
+      }
+    }),
+
     listPeers: withControls(() => {
       requireConnected()
-      return structuredClone(store.get().peers)
+      return structuredClone(store.get().peers).map((p) => ({ ...p, accessLevel: levelOf(p.id).accessLevel }))
+    }),
+
+    getAccessLevels: withControls(() => {
+      requireConnected()
+      const counts = { standard: 0, elevated: 0, restricted: 0, unknown: 0 }
+      const peers = store.get().peers.map((p) => {
+        const entry = { peerId: p.id, name: p.name, ...levelOf(p.id), error: null }
+        counts[entry.accessLevel] += 1
+        return entry
+      })
+      return { peers, counts }
     }),
 
     getPeerCapabilities: withControls((peerId) => {
@@ -154,6 +185,11 @@ export function createDataspaceArea(store) {
 
     resolveBuilders: withControls((machineIds = []) => Object.fromEntries(
       machineIds.map((id) => [id, builderFor(id)?.name]).filter(([, name]) => name),
+    )),
+
+    // Asset names, as a registry gives them: the machine entity's name here.
+    resolveMachines: withControls((machineIds = []) => Object.fromEntries(
+      machineIds.map((id) => [id, store.get().entities?.find((e) => e.id === id)?.name?.value]).filter(([, name]) => typeof name === 'string' && name),
     )),
   }
   return { area, connectionState }

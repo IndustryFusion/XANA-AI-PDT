@@ -24,6 +24,9 @@ import { DecisionCard, HypothesisList } from '../../src/features/incidents/Analy
 import { OutcomePanel } from '../../src/features/incidents/panels'
 import { addRun, findRun, renderApp, renderAppWith, renderWithRouter } from '../helpers'
 import { KNOWLEDGE_BASE_ENABLED } from '../../src/data/interface'
+import { dataspace } from '../../src/data'
+import { DataError } from '../../src/data/errors'
+import { store } from '../../src/data/sources/mock'
 
 const controls = { authEnabled: false, speed: 50 }
 const openRun = (runId, extra = {}) => renderApp({ path: paths.run(runId), controls: { ...controls, ...extra } })
@@ -231,6 +234,49 @@ describe('state panels', () => {
     await user.type(within(p).getByLabelText('Note to the machine builder (optional)'), 'Only for this incident.')
     await user.click(within(p).getByRole('button', { name: 'Decline' }))
     await waitFor(() => expect(findRun(runId).status).toBe('awaiting_machine_builder'))
+  })
+
+  test('the approval panel shows the builder\'s current access here, read again on refresh', async () => {
+    const user = userEvent.setup()
+    openNew({ scenario: 'request_beyond_tier', machine: 'press-brake-02', actions: [['escalate']] })
+    const p = await panel('Data request needs your approval')
+    const access = await within(p).findByRole('region', { name: "The machine builder's current access" })
+    const builderId = findRun(window.location.pathname.split('/').pop()).escalation.recipient.id
+    await waitFor(() => expect(access.querySelector('[data-capability="twin:history"]')).not.toBeNull())
+    const before = access.querySelector('[data-capability="twin:history"]').textContent
+    const next = before.includes('Denied') ? 'granted' : 'denied'
+    store.update((s) => { s.dataspace.policies[builderId] = { ...s.dataspace.policies[builderId], 'twin:history': next }; return s })
+    await user.click(within(access).getByRole('button', { name: 'Refresh' }))
+    await waitFor(() => expect(access.querySelector('[data-capability="twin:history"]')).toHaveTextContent(next === 'denied' ? 'Denied' : 'Granted'))
+  })
+
+  test('the approval panel still decides when the builder\'s access cannot be read', async () => {
+    const user = userEvent.setup()
+    const spy = vi.spyOn(dataspace, 'getPeerCapabilities').mockRejectedValue(new DataError('dataspace', 'unavailable', 'The gateway is down.'))
+    openNew({ scenario: 'request_beyond_tier', machine: 'press-brake-02', actions: [['escalate']] })
+    const runId = window.location.pathname.split('/').pop()
+    const p = await panel('Data request needs your approval')
+    expect(await within(p).findByText(/could not be read from the gateway \(The gateway is down\.\)/)).toBeVisible()
+    await user.click(within(p).getByRole('button', { name: 'Decline' }))
+    await waitFor(() => expect(findRun(runId).status).toBe('awaiting_machine_builder'))
+    spy.mockRestore()
+  })
+
+  test("a machine's asset name from the registry is shown next to its ID", async () => {
+    const spy = vi.spyOn(dataspace, 'resolveMachines').mockImplementation(async (ids) => Object.fromEntries(ids.map((id) => [id, 'Asset seven'])))
+    openRun('run-1002')
+    await panel('The agent needs more information')
+    expect(await within(document.querySelector('.run-header')).findByTestId('machine-name')).toHaveTextContent('Asset seven')
+    spy.mockRestore()
+  })
+
+  test('without the registry the run view shows the machine ID and works', async () => {
+    const spy = vi.spyOn(dataspace, 'resolveMachines').mockRejectedValue(new DataError('dataspace', 'unavailable', 'No registry.'))
+    openRun('run-1002')
+    expect(await panel('The agent needs more information')).toBeVisible()
+    expect(within(document.querySelector('.run-header')).queryByTestId('machine-name')).toBeNull()
+    expect(document.querySelector('.run-header')).toHaveTextContent(findRun('run-1002').machineId.split(':').pop())
+    spy.mockRestore()
   })
 
   test('a failing action keeps the panel and the input and shows the reason', async () => {

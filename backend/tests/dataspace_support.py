@@ -91,6 +91,11 @@ class Dataspace:
         self.policies: list[dict[str, Any]] = []
         self.sent: list[dict[str, Any]] = []  # what was accepted, in order: messages and file bundles
         self.message_status: dict[str, str] = {}
+        self.compatible_ids: list[str] = []  # empty: only the builder
+        self.access_failing: set[str] = set()  # consumers whose access here answers 503
+        self.status_on_accept: dict[str, str] = {}  # performative → the status its sends get at once
+        self.fail_status_on_accept: dict[str, str] = {}  # performative → the error message with that status
+        self.escalate_loses = False  # the builder's escalate crosses ours and wins
         self.fail_status: dict[str, str] = {}
         self.conversations: dict[str, dict[str, Any]] = {}
         self.refused: list[dict[str, Any]] = []
@@ -149,10 +154,15 @@ class Dataspace:
     def route(self, request: httpx.Request) -> httpx.Response:
         path, query = request.url.path, request.url.params
         if path == "/participants/compatible":
-            return httpx.Response(200, json=[{"participant_id": BUILDER, "participant_type": "t", "hosted": True}])
+            ids = self.compatible_ids or [BUILDER]
+            return httpx.Response(
+                200, json=[{"participant_id": i, "participant_type": "t", "hosted": True} for i in ids]
+            )
         if path == "/capabilities/access":
             if "provider" in query:
                 return httpx.Response(200, json=self.access_at.get(query["provider"], []))
+            if query["consumer"] in self.access_failing:
+                return httpx.Response(503, json={"detail": "adapter unavailable"})
             return httpx.Response(200, json=self.access_here.get(query["consumer"], []))
         if path == "/capabilities/requests" and request.method == "GET":
             wanted = query.get("status")
@@ -205,7 +215,10 @@ class Dataspace:
         record["message_id"] = f"m-{len(self.sent) + 1}"
         record["conversation_id"] = record.get("conversation_id") or f"c-{len(self.sent) + 1}"
         self.sent.append(record)
-        self.message_status[record["message_id"]] = "pending"
+        performative = record.get("performative")
+        self.message_status[record["message_id"]] = self.status_on_accept.get(performative, "pending")
+        if performative in self.fail_status_on_accept:
+            self.fail_status[record["message_id"]] = self.fail_status_on_accept[performative]
         body = {"message_id": record["message_id"], "status": "pending", "applied": True, "conversation_state": "OPEN"}
         return httpx.Response(202, json=body)
 
@@ -238,8 +251,13 @@ class Dataspace:
             and body["performative"] in ("close", "deescalate")
         ):
             return self._refuse(body, "not_escalator")
+        state = conversation["state"] if conversation else "OPEN"
+        if body["performative"] == "close" and body.get("outcome") == "escalated" and state != "ESCALATING":
+            return self._refuse(body, "requires_escalate")  # as the contract: escalate first
         answer = self._accepted(body)
         self._move(body)
+        if body["performative"] == "escalate" and self.escalate_loses:
+            self.conversations[body["conversation_id"]]["escalated_by"] = BUILDER
         return answer
 
     def _refuse(self, body: dict[str, Any], reason: str) -> httpx.Response:
