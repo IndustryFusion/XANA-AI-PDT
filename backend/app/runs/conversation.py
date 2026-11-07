@@ -29,7 +29,7 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
-from app.dataspace.gateway import GatewayClient
+from app.dataspace.gateway import GatewayClient, time_left, within
 from app.dataspace.sharing import ALLOWED_ACCESS, FILES, HISTORY, LABELS, TIERS, Sharing
 from app.errors import Refused, conflict, invalid, not_found, unavailable
 from app.memory.store import IncidentStore, RunStore
@@ -61,6 +61,10 @@ OUTCOME_TO_SEND = {"not_resolved": "failed"}
 CLOSE_OUTCOMES = ("resolved", "not_resolved", "rejected", "timed_out", "escalated")
 ESCALATE_WAIT_S = 60  # how long an escalated close waits for its escalate to reach the machine builder
 ESCALATE_POLL_S = 1.0
+# All of an escalated close, within the UI's limit for a send (300 s) and a proxy's usual one.
+ESCALATED_CLOSE_S = 290
+# The close of an escalated close is sent only with this much time left, for the gateway to answer.
+CLOSE_SEND_AT_LEAST_S = 60
 PROTOCOL_ACTS = ("inform", "request", "escalate", "deescalate")
 
 
@@ -654,9 +658,9 @@ class ConversationDesk:
             if last_state(rec.state) == "direct_contact_machine_builder":
                 raise conflict("The machine builder has escalated this conversation, so only it can close it now.")
             if sent == "escalated":
-                # The dataspace requires `escalate` before a close as escalated, on both sides.
-                await self._escalated_first(rec)
-            step = await self._send(rec, "close", text, outcome=sent)
+                step = await self._escalated_close(rec, text)
+            else:
+                step = await self._send(rec, "close", text, outcome=sent)
             step["output"]["conv_state"] = "closed"
             reason = text or f"Conversation closed with outcome: {outcome or sent}"
             data = {
@@ -667,6 +671,19 @@ class ConversationDesk:
             }
             await self._store_sent(rec, step, status=STOPPED, data=await self._as_closed(rec, step, data))
         return {"status": STOPPED, "conv_state": "closed"}
+
+    async def _escalated_close(self, rec: RunRecord, text: str) -> dict[str, Any]:
+        """`escalate` if needed, then `close` as escalated, all within `ESCALATED_CLOSE_S`."""
+        with within(ESCALATED_CLOSE_S):
+            # The dataspace requires `escalate` before a close as escalated, on both sides.
+            await self._escalated_first(rec)
+            left = time_left()
+            if left is not None and left < CLOSE_SEND_AT_LEAST_S:
+                raise conflict(
+                    "The escalation took long to go through, so the close wasn't sent. "
+                    "The conversation is escalated. Close again."
+                )
+            return await self._send(rec, "close", text, outcome="escalated")
 
     async def _escalated_first(self, rec: RunRecord) -> None:
         """Sends `escalate` unless this side's escalation has reached the machine builder, and waits until it has.
@@ -694,7 +711,8 @@ class ConversationDesk:
             message_id = mine[-1]["message_id"]
         else:
             return  # escalating by this side, with the step from before this backend recorded them
-        deadline = asyncio.get_running_loop().time() + ESCALATE_WAIT_S
+        wait = ESCALATE_WAIT_S if time_left() is None else min(ESCALATE_WAIT_S, max(0.0, time_left()))
+        deadline = asyncio.get_running_loop().time() + wait
         while True:
             status, problem = await self._delivery(message_id)
             if status == "notified":

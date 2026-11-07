@@ -24,7 +24,7 @@ from fastapi.testclient import TestClient
 from app.config import load_settings
 from app.errors import Refused
 from app.health import HealthService
-from app.ifric import MAX_RESOLVED, NoBuilder, RegistryClient
+from app.ifric import DOWN_FOR_S, MAX_RESOLVED, NAMES_WITHIN_S, NoBuilder, RegistryClient
 from app.main import AgentDeps, create_app
 from app.memory.migrate import Migrator
 from app.runs.machines import MachineResolver
@@ -551,3 +551,86 @@ async def test_too_many_machines_are_refused():
     _, client = client_of()
     with pytest.raises(Refused):
         await client.machine_names([f"urn:m:{n}" for n in range(MAX_RESOLVED + 1)])
+
+
+# ── A slow or failing registry ──────────────────────────────────────────────
+
+
+class Hanging(Registry):
+    """A registry that takes `seconds` to answer anything, as a hung one does."""
+
+    def __init__(self, seconds: float) -> None:
+        super().__init__()
+        self.seconds = seconds
+
+    async def handle(self, request: httpx.Request) -> httpx.Response:
+        self.paths.append(request.url.raw_path.decode())
+        await asyncio.sleep(self.seconds)
+        return httpx.Response(200, json={"company": None})
+
+
+def hanging_client(seconds=30.0, clock=None):
+    registry = Hanging(seconds)
+    kwargs = {"clock": clock} if clock else {}
+    client = RegistryClient(make_settings(ifric_url=REGISTRY), lambda: "t", transport=registry.transport(), **kwargs)
+    return registry, client
+
+
+async def test_a_hanging_registry_gives_names_within_one_time_however_many_ids():
+    registry, client = hanging_client()
+    ids = [f"urn:ifric:peer-{n}" for n in range(6)]
+    started = asyncio.get_running_loop().time()
+    names = await asyncio.wait_for(client.names(ids), 6)
+    took = asyncio.get_running_loop().time() - started
+    assert names == {i: "" for i in ids}
+    assert took < NAMES_WITHIN_S + 0.5, took
+    asked = len(registry.paths)
+    # It isn't asked again for a while: the next lookup answers at once, with no request.
+    started = asyncio.get_running_loop().time()
+    assert await client.names(ids) == {i: "" for i in ids}
+    assert asyncio.get_running_loop().time() - started < 0.2 and len(registry.paths) == asked
+
+
+async def test_a_registry_that_cant_be_reached_isnt_asked_for_owners_or_the_directory():
+    registry, client = client_of()
+    for n in range(6):
+        registry.answers[company_path(f"urn:ifric:peer-{n}")] = httpx.ConnectError("refused")
+    names = await client.names([f"urn:ifric:peer-{n}" for n in range(6)])
+    assert set(names.values()) == {""}
+    assert not [p for p in registry.paths if p.endswith("/owner") or p == "/company/get-all-companies"]
+
+
+async def test_the_registry_is_asked_again_after_a_while():
+    clock = Clock()
+    registry, client = hanging_client(seconds=30.0, clock=clock)
+    await client.names(["urn:ifric:a"])
+    asked = len(registry.paths)
+    clock.now += DOWN_FOR_S + 1
+    registry.seconds = 0
+    await client.names(["urn:ifric:a"])
+    assert len(registry.paths) > asked
+
+
+async def test_machine_names_within_one_time():
+    _, client = hanging_client()
+    started = asyncio.get_running_loop().time()
+    assert await asyncio.wait_for(client.machine_names([f"urn:m:{n}" for n in range(20)]), 6) == {}
+    assert asyncio.get_running_loop().time() - started < NAMES_WITHIN_S + 0.5
+
+
+async def test_peers_and_access_levels_answer_in_time_with_the_registry_hanging():
+    space = Dataspace()
+    peers = [f"urn:example:builder-{n}" for n in range(6)]
+    space.compatible_ids = peers
+    from app.dataspace.gateway import GatewayClient
+    from tests.test_gateway import connection
+
+    conn = connection(space)
+    await conn.connect(SECRET)
+    _, registry = hanging_client()
+    gateway = GatewayClient(conn, transport=space.transport(), names=registry.names)
+    for read in (gateway.peers, gateway.access_levels):
+        started = asyncio.get_running_loop().time()
+        await asyncio.wait_for(read(), 8)
+        assert asyncio.get_running_loop().time() - started < NAMES_WITHIN_S + 1
+    await conn.close()

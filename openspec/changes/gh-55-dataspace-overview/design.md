@@ -16,7 +16,7 @@ The gateway reports, per consumer, each capability's status and source (`GET /ca
 
 `approved` means the factory chose to give this peer more than its defaults, which is what an operator wants to keep an eye on. A peer whose access couldn't be read has `access_level: null` and the error, and is counted apart as "unknown", never as standard.
 
-The level is added to `GET /api/gateway/policies` per peer, with a summary of counts, and to each peer of `GET /api/gateway/peers`, read in the same way. The dashboard reads `policies`.
+The levels and their counts are answered by a new `GET /api/gateway/access-levels`, which the dashboard reads. Each peer of `GET /api/gateway/peers` and `GET /api/gateway/policies` carries its level too, read in the same way. `policies` stays a list, as before.
 
 Alternative: `elevated` only for an approval of a capability whose default is `on-request`. The answer for an explicit status doesn't say the default, so XANA would need its own copy of the catalogue, which can drift from the contract.
 
@@ -40,6 +40,10 @@ Alternative: one `resolve` that tries every kind for every ID. Up to four reques
 
 - **The registry has no asset name.** Its asset record holds the asset's ID, its manufacturer, owner and factory, and whether it is twinned, but no name. `resolve-machines` takes `asset_name`, `product_name` or `name` when an answer has one, and otherwise leaves the machine out, so with this registry the screens show machine IDs. Naming assets needs the registry to keep a name, which this change can't add.
 - **A stopped registry within 300 seconds of reading the directory** still names the companies in it, from what was read. After that, or after a restart, names are left out and IDs are shown.
+
+### A slow or failing registry
+
+Found in review: names were looked up one after the other where the directory and a factory's owner were asked, with 10 s limits, so a hanging registry made `peers` and `access-levels` take about 10 s per peer, past the UI's 15 s. Now all of one lookup of names ends within 3 s, whatever the number of IDs; what isn't known by then has an empty name, as a failed lookup has. A registry that timed out, couldn't be reached or failed with a server error isn't asked again for 30 s, by names or machine names, and once it has failed in a lookup, the directory and owners aren't asked in it. A refusal or an unknown company doesn't count as failing.
 
 ## Risks
 

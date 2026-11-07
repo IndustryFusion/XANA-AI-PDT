@@ -207,3 +207,59 @@ def test_without_a_gateway_nothing_is_tried():
     with TestClient(app) as client:
         assert client.get("/api/gateway/status").json()["state"] == "not_configured"
     assert not space.requests
+
+
+# ── A disconnect racing a connection by itself; connecting again after renewal stopped ─────
+
+
+class SlowStore(MemoryStore):
+    """Writes take a while, as a database's do, so a read can come before a write lands."""
+
+    async def set_connect_wanted(self, wanted):
+        await asyncio.sleep(0.05)
+        await super().set_connect_wanted(wanted)
+
+
+async def test_a_disconnect_during_a_sign_in_is_not_undone():
+    space = Dataspace()
+    store = SlowStore()
+    await store.save_secret(FACTORY, SECRET)  # a secret stored, and connecting wanted
+    conn = connection(space, store=store)
+    # The sign-in reads "wanted" before the disconnect has stored "not wanted", then waits for the lock.
+    await asyncio.gather(conn.disconnect(), conn.connect_if_wanted())
+    await asyncio.sleep(0.05)
+    assert conn.token() is None and space.grants == 0
+    assert store.stored.connect_wanted is False
+    assert (await conn.status())["state"] == "disconnected"
+    await conn.close()
+
+
+async def test_after_renewal_stops_the_backend_connects_again_by_itself():
+    space = Dataspace()
+    space.expires_in = 100  # within the renewal margin: due at once
+    conn = connection(space, store=MemoryStore(), check_every_s=0.01, gateway_client_secret=SECRET)
+    await conn.connect()
+    space.provider_status = 503  # the identity provider is down for longer than renewal tries
+    assert await until(lambda: conn._stopped and conn._retrying)
+    status = await conn.status()
+    assert "renewal stopped" in status["detail"] and status["connecting"] is True
+    space.provider_status = None
+    assert await until(lambda: conn.token() is not None and not conn._stopped)
+    status = await conn.status()
+    assert status["state"] == "connected" and status["renewal_failures"] == 0 and status["connecting"] is False
+    await conn.close()
+
+
+async def test_after_renewal_stops_a_disconnect_ends_the_tries():
+    space = Dataspace()
+    space.expires_in = 100
+    conn = connection(space, store=MemoryStore(), check_every_s=0.01, gateway_client_secret=SECRET)
+    await conn.connect()
+    space.provider_status = 503
+    assert await until(lambda: conn._stopped)
+    await conn.disconnect()
+    tried = len(token_calls(space))
+    space.provider_status = None
+    await asyncio.sleep(0.1)
+    assert len(token_calls(space)) == tried and conn.token() is None
+    await conn.close()

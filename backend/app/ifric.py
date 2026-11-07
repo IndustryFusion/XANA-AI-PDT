@@ -40,6 +40,8 @@ SERVICE = "The IFRIC registry"
 TIMEOUT_S = 10
 MAX_RESOLVED = 200
 DIRECTORY_FOR_S = 300  # the company directory is read again after this, or sooner with another token
+NAMES_WITHIN_S = 3.0  # all of one name lookup ends by then: names are shown next to IDs, never waited for
+DOWN_FOR_S = 30  # after the registry timed out, couldn't be reached or failed, it isn't asked for this long
 ASSET_NAMES = ("asset_name", "product_name", "name")
 AT_ONCE = 8
 
@@ -89,6 +91,7 @@ class RegistryClient:
         self._clock = clock
         self._directory: tuple[float, str, dict[str, str]] | None = None  # when, for which token, id → name
         self._reading = asyncio.Lock()
+        self._down: tuple[float, str] | None = None  # when the registry last failed, for which token
 
     @property
     def configured(self) -> bool:
@@ -122,31 +125,59 @@ class RegistryClient:
     # ── Names ────────────────────────────────────────────────────────────────
 
     async def names(self, ids: list[str]) -> dict[str, str]:
-        """`{id: name}`. An unknown ID is left out, and a failed lookup has an empty name."""
+        """`{id: name}`. An unknown ID is left out, and a failed lookup has an empty name.
+
+        All of it ends within `NAMES_WITHIN_S`, however many IDs: what isn't known by then is a failed lookup.
+        While the registry is down, it isn't asked again for `DOWN_FOR_S`.
+        """
         unique = list(dict.fromkeys(ids))
         if len(unique) > MAX_RESOLVED:
             raise invalid(f"Ask for at most {MAX_RESOLVED} names at a time.")
         slots = asyncio.Semaphore(AT_ONCE)
 
-        async def one(identifier: str) -> tuple[str, str | None]:
+        async def one(identifier: str) -> str | None:
             async with slots:
-                failed = False
+                if self._is_down():
+                    return ""
                 try:
                     answer = await self._get(f"/company/get-company-details/{_segment(identifier)}")
                 except _Failed as failure:
                     log.info("A company's details gave no name: %s", failure)
+                    self._note(failure)
                     answer, failed = None, True
+                else:
+                    failed = False
                 company = _record(answer, "company")
                 name = company.get("company_name") if company else None
                 if isinstance(name, str) and name:
-                    return identifier, name
+                    return name
+                if self._is_down():
+                    return ""
                 # The details are only a party's own: a peer is named by the directory, a factory by its owner.
-                name = (await self._directory_names()).get(identifier) or await self._owner(_segment(identifier))
+                name = (await self._directory_names()).get(identifier)
+                if not name and not self._is_down():
+                    name = await self._owner(_segment(identifier))
                 if name:
-                    return identifier, name
-            return identifier, "" if failed else None
+                    return name
+            return "" if failed else None
 
-        return {key: name for key, name in await asyncio.gather(*(one(i) for i in unique)) if name is not None}
+        found = await _within(NAMES_WITHIN_S, {i: one(i) for i in unique}, late=_LATE)
+        if _LATE in found.values():
+            self._went_slow()
+        return {key: "" if name is _LATE else name for key, name in found.items() if name is not None}
+
+    def _is_down(self) -> bool:
+        down = self._down
+        return bool(down and down[1] == (self._token() or "") and self._clock() - down[0] < DOWN_FOR_S)
+
+    def _went_slow(self) -> None:
+        log.warning("The IFRIC registry did not answer in time; it isn't asked for %d s.", DOWN_FOR_S)
+        self._down = (self._clock(), self._token() or "")
+
+    def _note(self, failure: _Failed) -> None:
+        """A timeout, no answer or a server error means the registry is down; a refusal or 404 doesn't."""
+        if failure.status is None or failure.status >= 500:
+            self._down = (self._clock(), self._token() or "")
 
     async def _directory_names(self) -> dict[str, str]:
         """`{company ID: name}` from the registry's company directory, read once in `DIRECTORY_FOR_S`."""
@@ -155,10 +186,13 @@ class RegistryClient:
             kept = self._directory
             if kept and kept[1] == token and self._clock() - kept[0] < DIRECTORY_FOR_S:
                 return kept[2]
+            if self._is_down():
+                return {}
             try:
                 answer = await self._get("/company/get-all-companies")
             except _Failed as failure:
                 log.info("The company directory was not read: %s", failure)
+                self._note(failure)
                 return {}
             listed = (
                 answer
@@ -185,19 +219,25 @@ class RegistryClient:
             raise invalid(f"Ask for at most {MAX_RESOLVED} machines at a time.")
         slots = asyncio.Semaphore(AT_ONCE)
 
-        async def one(machine_id: str) -> tuple[str, str | None]:
+        async def one(machine_id: str) -> str | None:
             async with slots:
+                if self._is_down():
+                    return None
                 try:
                     asset = _record(await self._get(f"/company/assets/{_segment(machine_id)}"), "asset")
                 except _Failed as failure:
                     log.info("A machine's asset name was not read: %s", failure)
-                    return machine_id, None
+                    self._note(failure)
+                    return None
             for key in ASSET_NAMES:
                 if asset and isinstance(asset.get(key), str) and asset[key]:
-                    return machine_id, asset[key]
-            return machine_id, None
+                    return asset[key]
+            return None
 
-        return {key: name for key, name in await asyncio.gather(*(one(m) for m in unique)) if name}
+        found = await _within(NAMES_WITHIN_S, {m: one(m) for m in unique}, late=_LATE)
+        if _LATE in found.values():
+            self._went_slow()
+        return {key: name for key, name in found.items() if name and name is not _LATE}
 
     # ── Builders ─────────────────────────────────────────────────────────────
 
@@ -264,6 +304,7 @@ class RegistryClient:
             owner = _record(await self._get(f"/company/factories/{segment}/owner"), "owner")
         except _Failed as failure:
             log.info("A factory's owner is left out: %s", failure)
+            self._note(failure)
             return None
         name = owner.get("company_name") if owner else None
         return name if isinstance(name, str) and name else None
@@ -285,3 +326,20 @@ class RegistryClient:
             return {"configured": False, "state": "not_configured", "detail": "No IFRIC registry is configured."}
         state, detail = await self.check(participant_id)
         return {"configured": True, "state": state, "detail": detail}
+
+
+_LATE = object()  # a lookup still running when the time was up
+
+
+async def _within(seconds: float, lookups: dict[str, Any], late: Any) -> dict[str, Any]:
+    """Runs the lookups together and gives what each found by then; one still running gives `late`."""
+    if not lookups:
+        return {}
+    tasks = {key: asyncio.ensure_future(lookup) for key, lookup in lookups.items()}
+    _, pending = await asyncio.wait(tasks.values(), timeout=seconds)
+    for task in pending:
+        task.cancel()
+    if pending:
+        await asyncio.wait(pending)
+        log.info("%d registry lookups were still running after %s s, and are left out.", len(pending), seconds)
+    return {key: late if task in pending or task.exception() else task.result() for key, task in tasks.items()}

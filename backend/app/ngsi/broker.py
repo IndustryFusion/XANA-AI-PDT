@@ -376,12 +376,15 @@ class ContextBroker:
         ids = [entity["id"] for entity in found if isinstance(entity.get("id"), str)]
         if not ids:
             return []
-        asked: dict[str, Any] = {"id": ",".join(ids), "type": "*", "limit": len(ids)}
-        if selected:
-            asked["attrs"] = ",".join(selected)
-        read = await self._json("GET", "/entities", params=asked)
-        read = read if isinstance(read, list) else []
-        by_id = {entity.get("id"): entity for entity in read if isinstance(entity, dict)}
+        by_id: dict[Any, dict[str, Any]] = {}
+        # In chunks, as all of a page's IDs in one address can be too long for the broker (HTTP 414).
+        for start in range(0, len(ids), BATCH):
+            chunk = ids[start : start + BATCH]
+            asked: dict[str, Any] = {"id": ",".join(chunk), "type": "*", "limit": len(chunk)}
+            if selected:
+                asked["attrs"] = ",".join(selected)
+            read = await self._json("GET", "/entities", params=asked)
+            by_id.update((e.get("id"), e) for e in (read if isinstance(read, list) else []) if isinstance(e, dict))
         return [by_id[entity_id] for entity_id in ids if entity_id in by_id]
 
     async def _filtered(self, params: dict[str, Any], tree: Any, page: _Page) -> Limited:
