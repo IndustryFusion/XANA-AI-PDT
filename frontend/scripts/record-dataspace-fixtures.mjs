@@ -53,4 +53,10 @@ const requests = record('dataspace.listCapabilityRequests', await call('GET', `$
 const pending = requests.find((r) => r.status === 'pending')
 record('dataspace.decideCapabilityRequest', await call('PATCH', `${gateway}/capabilities/requests/${encodeURIComponent(pending.id)}`, { action: 'approve', note: 'Recorded' }))
 record('dataspace.setCapabilityPolicy', await call('POST', `${gateway}/capabilities/policy`, { consumer_id: peers[0].id, capability: 'twin:history', action: 'reset' }))
+// The registry's answers, if the backend has IFRIC_URL with the sample companies of RECORD_MACHINE.
+if (process.env.RECORD_MACHINE) {
+  record('session.getFactory', await call('GET', '/api/ifric/factory'))
+  record('dataspace.resolveNames', await call('POST', '/api/ifric/resolve', { ids: [peers[0].id] }))
+  record('dataspace.resolveBuilders', await call('POST', '/api/ifric/resolve-builders', { machine_ids: [process.env.RECORD_MACHINE] }))
+}
 record('dataspace.disconnect', await call('POST', `${gateway}/disconnect`))

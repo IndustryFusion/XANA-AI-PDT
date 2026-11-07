@@ -32,7 +32,7 @@ export default function CapabilityRequests({ refreshKey, onDecided }) {
   const [notice, setNotice] = useState(null)
   const notify = useToast()
   const noteId = useId()
-  const nameOf = (id) => names.data?.[id] ?? id
+  const nameOf = (id) => names.data?.[id] || id
 
   function open(request, approved) {
     setNote('')

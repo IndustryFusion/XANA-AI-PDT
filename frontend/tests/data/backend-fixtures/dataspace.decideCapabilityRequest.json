@@ -1,15 +1,15 @@
 {
   "method": "PATCH",
-  "path": "/api/gateway/capabilities/requests/a32d39be-1cf6-4df3-9af7-9d99fa814d68",
+  "path": "/api/gateway/capabilities/requests/e03fdd90-a085-4c91-9e13-38c50d8a6cd8",
   "status": 200,
   "body": {
-    "id": "a32d39be-1cf6-4df3-9af7-9d99fa814d68",
+    "id": "e03fdd90-a085-4c91-9e13-38c50d8a6cd8",
     "requester_id": "urn:example:xana-builder",
     "capability": "twin:history",
     "purpose": "Compare runs",
-    "requested_at": "2026-11-07T02:23:45.456311+00:00",
+    "requested_at": "2026-11-07T02:35:33.293640+00:00",
     "status": "approved",
     "note": "Recorded",
-    "decided_at": "2026-11-07T02:23:46.309936+00:00"
+    "decided_at": "2026-11-07T02:35:35.059167+00:00"
   }
 }

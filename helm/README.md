@@ -57,6 +57,8 @@ The Data Explorer reads history from `pgrestUrl` (the platform's `pgrest` servic
 
 The dataspace uses `gatewayUrl`, `gatewayKeycloakUrl` (the address the dataspace's services know Keycloak by, since they compare a token's issuer exactly), `gatewayKeycloakRealm`, `gatewayClientId` and `dataSharingPolicy`. With a gateway, `SETTINGS_ENCRYPTION_KEY` is required, or the backend does not start: set it with `XANA_SETTINGS_ENCRYPTION_KEY`, and the client secret, if the operator shouldn't enter it, with `XANA_GATEWAY_CLIENT_SECRET`, or either in the existing secret.
 
+The IFRIC registry uses `ifricUrl`, including its port, and `factoryId`.
+
 Alerts use `alertaUrl`, which must end in `/api`. Set the key with `XANA_ALERTA_API_KEY`, or as `ALERTA_API_KEY` in the existing secret.
 
 Value hints read `fusekiUrl` and `fusekiDataset`. Set `fusekiGraphBase` to `http://<Fuseki's external host>/<realm>`, as the platform names its graphs after that host.

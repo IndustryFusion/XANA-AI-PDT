@@ -1,0 +1,8 @@
+{
+  "method": "POST",
+  "path": "/api/ifric/resolve-builders",
+  "status": 200,
+  "body": {
+    "urn:ngsi-ld:Machine:press-01": "Machine Builder GmbH"
+  }
+}

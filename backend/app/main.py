@@ -29,13 +29,14 @@ from fastapi import FastAPI
 from langchain_core.language_models import BaseChatModel
 
 from app.alerta import AlertaClient
-from app.api import alerta, auth, diagnostics, errors, gateway, incidents, ngsi, runs, shacl, stream
+from app.api import alerta, auth, diagnostics, errors, gateway, ifric, incidents, ngsi, runs, shacl, stream
 from app.auth import KeycloakSession
 from app.config import Settings, get_llm, load_settings
 from app.dataspace.connection import GatewayConnection
 from app.dataspace.credentials import CredentialStore
 from app.dataspace.gateway import GatewayClient
 from app.health import HealthService
+from app.ifric import RegistryClient
 from app.memory.migrate import Migrator
 from app.memory.store import Database, IncidentStore, RunStore
 from app.ngsi.broker import ContextBroker
@@ -111,8 +112,9 @@ def create_app(
         company_id=lambda: session.status().get("company_id"),
         transport=gateway_transport,
     )
-    gateway_client = GatewayClient(gateway_connection, transport=gateway_transport)
-    health = health or HealthService(settings, migrator, token=session.token, gateway=gateway_client)
+    registry = RegistryClient(settings, gateway_connection.token, transport=gateway_transport)
+    gateway_client = GatewayClient(gateway_connection, transport=gateway_transport, names=registry.names)
+    health = health or HealthService(settings, migrator, token=session.token, gateway=gateway_client, registry=registry)
     agent = agent or AgentDeps.from_settings(settings, token=session.token)
     incident_store = IncidentStore(db)
     callbacks = tracing_callbacks(settings)
@@ -167,6 +169,7 @@ def create_app(
     app.state.session = session
     app.state.gateway_connection = gateway_connection
     app.state.gateway = gateway_client
+    app.state.ifric = registry
     app.state.migrator = migrator
     app.state.health = health
     app.state.runs = manager
@@ -206,5 +209,6 @@ def create_app(
     app.include_router(shacl.router)
     app.include_router(alerta.router)
     app.include_router(gateway.router)
+    app.include_router(ifric.router)
     app.include_router(stream.router)
     return app

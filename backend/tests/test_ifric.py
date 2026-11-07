@@ -1,0 +1,443 @@
+#
+# Copyright (c) 2026 IndustryFusion Foundation
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+import asyncio
+import pathlib
+import re
+
+import httpx
+import pytest
+from fastapi.testclient import TestClient
+
+from app.config import load_settings
+from app.errors import Refused
+from app.health import HealthService
+from app.ifric import MAX_RESOLVED, NoBuilder, RegistryClient
+from app.main import AgentDeps, create_app
+from app.memory.migrate import Migrator
+from app.runs.machines import MachineResolver
+from sample_data import ifric_stub
+from tests.conftest import CLOSED_HTTP, make_settings
+from tests.dataspace_support import BUILDER, FACTORY, SECRET, Dataspace, gateway_settings
+from xana_agent.testing import FakeContextSource, FakeHistorySource, StepScript, sample_entities, sample_history
+
+REGISTRY = "http://registry.test:4007"
+MACHINE = "urn:ngsi-ld:Machine:press-01"
+FACTORY_ID = "urn:ifric:ifx-eur-loc-fac-1"
+
+
+class Registry:
+    """Answers as the registry does. `answers` holds path → (status, body) or an exception."""
+
+    def __init__(self) -> None:
+        self.paths: list[str] = []
+        self.tokens: list[str] = []
+        self.answers: dict[str, object] = {}
+        self.in_flight = 0
+        self.most_in_flight = 0
+
+    def transport(self) -> httpx.MockTransport:
+        return httpx.MockTransport(self.handle)
+
+    async def handle(self, request: httpx.Request) -> httpx.Response:
+        self.in_flight += 1
+        self.most_in_flight = max(self.most_in_flight, self.in_flight)
+        await asyncio.sleep(0.001)
+        self.in_flight -= 1
+        raw = request.url.raw_path.decode()
+        self.paths.append(raw)
+        self.tokens.append(request.headers.get("authorization", ""))
+        answer = self.answers.get(raw, (404, {"message": "Not found"}))
+        if isinstance(answer, Exception):
+            raise answer
+        status, body = answer
+        return httpx.Response(status, json=body) if body is not None else httpx.Response(status, text="<html>")
+
+
+def company_path(identifier: str) -> str:
+    return f"/company/get-company-details/{identifier.replace(':', '%3A')}"
+
+
+def asset_path(identifier: str = MACHINE) -> str:
+    return f"/company/assets/{identifier.replace(':', '%3A')}/manufacturer"
+
+
+def factory_path(suffix: str = "") -> str:
+    return f"/company/factories/{FACTORY_ID.replace(':', '%3A')}{suffix}"
+
+
+def client_of(registry=None, token="the-token", url=REGISTRY):  # noqa: S107
+    registry = registry or Registry()
+    settings = make_settings(ifric_url=url) if url else make_settings()
+    return registry, RegistryClient(settings, lambda: token, transport=registry.transport())
+
+
+# ── Names ───────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        [{"company_ifric_id": BUILDER, "company_name": "Builder GmbH"}],
+        {"company_ifric_id": BUILDER, "company_name": "Builder GmbH"},
+        {"company": {"company_name": "Builder GmbH"}},
+    ],
+)
+async def test_a_name_from_every_form_of_answer(body):
+    registry, client = client_of()
+    registry.answers[company_path(BUILDER)] = (200, body)
+    assert await client.names([BUILDER]) == {BUILDER: "Builder GmbH"}
+    assert registry.tokens == ["Bearer the-token"]
+
+
+@pytest.mark.parametrize("body", [[], {"company": None, "message": "x"}, [{"company_ifric_id": "x"}], {}])
+async def test_unknown_company_is_left_out(body):
+    registry, client = client_of()
+    registry.answers[company_path(BUILDER)] = (200, body)
+    assert await client.names([BUILDER]) == {}
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        (403, {"message": "no"}),
+        (401, {"message": "no"}),
+        (500, {"message": "boom"}),
+        (200, None),
+        httpx.ReadTimeout("t"),
+    ],
+)
+async def test_a_failed_name_is_empty_and_the_others_stay(failure):
+    registry, client = client_of()
+    registry.answers[company_path("urn:a")] = failure
+    registry.answers[company_path("urn:b")] = (200, [{"company_name": "B"}])
+    assert await client.names(["urn:a", "urn:b"]) == {"urn:a": "", "urn:b": "B"}
+
+
+async def test_names_without_a_token_or_a_registry():
+    registry, client = client_of(token=None)
+    assert await client.names(["urn:a"]) == {"urn:a": ""}
+    assert registry.paths == []
+    registry, client = client_of(url=None)
+    assert await client.names(["urn:a"]) == {"urn:a": ""}
+    assert registry.paths == []
+
+
+async def test_identifiers_are_one_encoded_segment():
+    registry, client = client_of()
+    await client.names(["urn:ifric:a/b c"])
+    assert registry.paths == ["/company/get-company-details/urn%3Aifric%3Aa%2Fb%20c"]
+    registry, client = client_of()
+    with pytest.raises(NoBuilder):
+        await client.builder("../../admin")
+    assert registry.paths == ["/company/assets/..%2F..%2Fadmin/manufacturer"]
+
+
+async def test_names_are_asked_once_each_and_a_few_at_a_time():
+    registry, client = client_of()
+    ids = [f"urn:{n}" for n in range(40)] * 2
+    await client.names(ids)
+    assert len(registry.paths) == 40
+    assert 1 < registry.most_in_flight <= 8
+
+
+async def test_too_many_names_are_refused():
+    registry, client = client_of()
+    with pytest.raises(Refused) as caught:
+        await client.names([f"urn:{n}" for n in range(MAX_RESOLVED + 1)])
+    assert caught.value.kind == "invalid" and registry.paths == []
+
+
+# ── Builders ────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"company_ifric_id": BUILDER, "company_name": "Builder GmbH"},
+        [{"company_ifric_id": BUILDER, "company_name": "Builder GmbH"}],
+        {"company": {"company_ifric_id": BUILDER, "company_name": "Builder GmbH"}},
+    ],
+)
+async def test_builder_from_every_form(body):
+    registry, client = client_of()
+    registry.answers[asset_path()] = (200, body)
+    builder = await client.builder(MACHINE)
+    assert (builder.company_id, builder.name) == (BUILDER, "Builder GmbH")
+
+
+async def test_builder_without_a_name_uses_its_id():
+    registry, client = client_of()
+    registry.answers[asset_path()] = (200, {"company_ifric_id": BUILDER})
+    assert (await client.builder(MACHINE)).name == BUILDER
+
+
+@pytest.mark.parametrize(
+    ("answer", "reason"),
+    [
+        ((200, {"company": None, "message": "No company data"}), "does not know the machine"),
+        ((404, {"message": "x"}), "does not know the machine"),
+        ((200, {"company_name": "No ID"}), "named no company"),
+        ((403, {"message": "not a party"}), "not a party"),
+        ((401, {"message": "x"}), "refused the dataspace token"),
+        ((503, {"message": "x"}), "failed"),
+        (httpx.ConnectError("x"), "can't be reached"),
+        (httpx.ReadTimeout("x"), "did not answer in time"),
+    ],
+)
+async def test_each_reason_for_no_builder(answer, reason):
+    registry, client = client_of()
+    registry.answers[asset_path()] = answer
+    with pytest.raises(NoBuilder, match=reason) as caught:
+        await client.builder(MACHINE)
+    assert "registry.test" not in str(caught.value)
+
+
+async def test_no_builder_without_a_token():
+    registry, client = client_of(token=None)
+    with pytest.raises(NoBuilder, match="Not connected"):
+        await client.builder(MACHINE)
+    assert registry.paths == []
+
+
+async def test_builders_leave_out_machines_without_one():
+    registry, client = client_of()
+    registry.answers[asset_path("urn:m:1")] = (200, {"company_ifric_id": BUILDER, "company_name": "B"})
+    registry.answers[asset_path("urn:m:2")] = (200, {"company": None})
+    registry.answers[asset_path("urn:m:3")] = (403, {"message": "x"})
+    assert await client.builders(["urn:m:1", "urn:m:2", "urn:m:3"]) == {"urn:m:1": "B"}
+
+
+# ── Factories ───────────────────────────────────────────────────────────────
+
+
+async def test_factory_with_owner_and_location():
+    registry, client = client_of()
+    registry.answers[factory_path()] = (
+        200,
+        {"factory_id": FACTORY_ID, "location_name": "Plant", "city": "Berlin", "country": "Germany"},
+    )
+    registry.answers[factory_path("/owner")] = (200, {"company_name": "Owner AG", "email": "hidden@example.org"})
+    assert await client.factory(FACTORY_ID) == {
+        "id": FACTORY_ID,
+        "name": "Plant",
+        "owner": "Owner AG",
+        "location": {"city": "Berlin", "country": "Germany"},
+    }
+
+
+@pytest.mark.parametrize(
+    "owner", [(403, {"message": "x"}), (200, {"owner": None}), (500, {"message": "x"}), httpx.ConnectError("x")]
+)
+async def test_factory_without_a_readable_owner(owner):
+    registry, client = client_of()
+    registry.answers[factory_path()] = (200, {"factory_id": FACTORY_ID, "location_name": "Plant"})
+    registry.answers[factory_path("/owner")] = owner
+    answer = await client.factory(FACTORY_ID)
+    assert answer["owner"] is None and answer["location"] is None and answer["name"] == "Plant"
+
+
+async def test_unknown_factory_and_no_factory_id():
+    registry, client = client_of()
+    registry.answers[factory_path()] = (200, {"factory": None, "message": "x"})
+    with pytest.raises(Refused) as caught:
+        await client.factory(FACTORY_ID)
+    assert caught.value.kind == "not_found"
+    with pytest.raises(Refused) as caught:
+        await client.factory(None)
+    assert caught.value.kind == "not_found"
+
+
+@pytest.mark.parametrize("answer", [(403, {"message": "x"}), (502, {"message": "x"}), httpx.ConnectError("x")])
+async def test_factory_unavailable(answer):
+    registry, client = client_of()
+    registry.answers[factory_path()] = answer
+    with pytest.raises(Refused) as caught:
+        await client.factory(FACTORY_ID)
+    assert caught.value.kind == "unavailable" and "registry.test" not in caught.value.message
+
+
+# ── Health ──────────────────────────────────────────────────────────────────
+
+
+async def ifric_check(registry, token="tok", participant=FACTORY, url=REGISTRY):  # noqa: S107
+    client = RegistryClient(make_settings(ifric_url=url), lambda: token, transport=registry.transport())
+
+    class Connection:
+        participant_id = participant
+
+    class Gateway:
+        connection = Connection()
+
+    settings = make_settings()
+    service = HealthService(
+        settings, Migrator(settings.postgres_memory_url.get_secret_value()), gateway=Gateway(), registry=client
+    )
+    checks = (await service.report(fresh=True))["checks"]
+    return next(c for c in checks if c["id"] == "ifric")
+
+
+async def test_health_ok():
+    registry = Registry()
+    registry.answers[company_path(FACTORY)] = (200, [{"company_name": "Me"}])
+    check = await ifric_check(registry)
+    assert check["status"] == "ok" and check["label"] == "IFRIC registry"
+
+
+@pytest.mark.parametrize("status", [401, 403])
+async def test_health_treats_refusals_as_failures(status):
+    registry = Registry()
+    registry.answers[company_path(FACTORY)] = (status, {"message": "x"})
+    check = await ifric_check(registry)
+    assert check["status"] == "error" and "refused the dataspace token" in check["detail"]
+
+
+async def test_health_when_down_or_failing():
+    registry = Registry()
+    registry.answers[company_path(FACTORY)] = httpx.ConnectError("x")
+    assert (await ifric_check(registry))["status"] == "error"
+    registry.answers[company_path(FACTORY)] = (500, {"message": "x"})
+    assert (await ifric_check(registry))["status"] == "error"
+
+
+async def test_health_without_a_token():
+    check = await ifric_check(Registry(), participant=None)
+    assert check["status"] == "degraded" and "Not connected" in check["detail"]
+
+
+async def test_health_not_configured_does_not_count():
+    settings = make_settings()
+    service = HealthService(settings, Migrator(settings.postgres_memory_url.get_secret_value()))
+    report = await service.report(fresh=True)
+    check = next(c for c in report["checks"] if c["id"] == "ifric")
+    assert check["status"] == "ok" and "No IFRIC" in check["detail"] and report["overall"] == "error"
+
+
+# ── Through the application ─────────────────────────────────────────────────
+
+
+class Both(Dataspace):
+    def __init__(self) -> None:
+        super().__init__()
+        self.registry = Registry()
+
+    async def handle(self, request):
+        if request.url.host == "registry.test":
+            return await self.registry.handle(request)
+        return await super().handle(request)
+
+
+def app_with(space, **settings):
+    script = StepScript("clarified")
+    agent = AgentDeps(
+        llm=script.model(),
+        context=FakeContextSource(sample_entities()),
+        history=FakeHistorySource(sample_history()),
+        machines=MachineResolver(CLOSED_HTTP),
+    )
+    values = gateway_settings(llm_provider="scripted", ifric_url=REGISTRY, factory_id=FACTORY_ID, **settings)
+    return create_app(values, agent=agent, gateway_transport=space.transport())
+
+
+def test_routes_and_peer_names():
+    space = Both()
+    registry = space.registry
+    registry.answers[company_path(BUILDER)] = (200, [{"company_name": "Builder GmbH"}])
+    registry.answers[asset_path()] = (200, {"company_ifric_id": BUILDER, "company_name": "Builder GmbH"})
+    registry.answers[factory_path()] = (200, {"factory_id": FACTORY_ID, "location_name": "Plant"})
+    with TestClient(app_with(space, gateway_client_secret=SECRET)) as client:
+        assert client.get("/api/ifric/config").json() == {"configured": True, "factory_id": FACTORY_ID}
+        assert client.get("/api/ifric/status").json()["state"] == "degraded"
+        # Not connected yet: a name is empty, and the peer list isn't available at all.
+        assert client.post("/api/ifric/resolve", json={"ids": [BUILDER]}).json() == {BUILDER: ""}
+        assert client.get("/api/ifric/factory").status_code == 503
+        assert client.post("/api/gateway/connect", json={}).json()["state"] == "connected"
+        registry.answers[company_path(FACTORY)] = (403, {"message": "x"})
+        assert client.get("/api/ifric/status").json()["state"] == "error"
+        registry.answers[company_path(FACTORY)] = (200, [{"company_name": "Me"}])
+        assert client.get("/api/ifric/status").json()["state"] == "ok"
+        assert client.post("/api/ifric/resolve", json={"ids": [BUILDER]}).json() == {BUILDER: "Builder GmbH"}
+        builders = client.post("/api/ifric/resolve-builders", json={"machine_ids": [MACHINE, "urn:x"]}).json()
+        assert builders == {MACHINE: "Builder GmbH"}
+        assert client.get("/api/ifric/factory").json()["name"] == "Plant"
+        peers = client.get("/api/gateway/peers").json()
+        assert peers[0]["name"] == "Builder GmbH" and peers[0]["id"] == BUILDER
+        assert client.get(f"/api/gateway/peers/{BUILDER}/capabilities").json()["name"] == "Builder GmbH"
+        # The registry going away leaves the peer with its ID.
+        registry.answers[company_path(BUILDER)] = httpx.ConnectError("x")
+        assert client.get("/api/gateway/peers").json()[0]["name"] == BUILDER
+        too_many = client.post("/api/ifric/resolve", json={"ids": [f"u{n}" for n in range(MAX_RESOLVED + 1)]})
+        assert too_many.status_code == 422
+
+
+def test_not_configured_routes():
+    space = Both()
+    settings = gateway_settings(llm_provider="scripted")
+    agent = AgentDeps(
+        llm=StepScript("clarified").model(),
+        context=FakeContextSource(sample_entities()),
+        history=FakeHistorySource(sample_history()),
+        machines=MachineResolver(CLOSED_HTTP),
+    )
+    with TestClient(create_app(settings, agent=agent, gateway_transport=space.transport())) as client:
+        assert client.get("/api/ifric/config").json()["configured"] is False
+        assert client.get("/api/ifric/status").json()["state"] == "not_configured"
+        assert client.get("/api/ifric/factory").status_code == 404  # no factory ID either
+        assert space.registry.paths == []
+
+
+# ── The stub of the local environment ───────────────────────────────────────
+
+
+def test_the_stub_answers_like_the_registry():
+    assert ifric_stub.answer_for("/company/get-company-details/urn%3Anobody") == []
+    assert ifric_stub.answer_for(f"/company/get-company-details/{ifric_stub.BUILDER}")[0]["company_name"]
+    assert ifric_stub.answer_for("/company/assets/urn%3Angsi-ld%3AMachine%3Ax/manufacturer")["company_ifric_id"]
+    assert ifric_stub.answer_for("/company/assets/urn%3Aother/manufacturer")["company"] is None
+    assert ifric_stub.answer_for("/company/factories/urn%3Anone") == {
+        "factory": None,
+        "message": "No factory data found",
+    }
+    assert ifric_stub.answer_for(f"/company/factories/{ifric_stub.FACTORY}/owner")["company_name"]
+    assert ifric_stub.answer_for("/anything") is None
+
+
+# ── What must not exist ─────────────────────────────────────────────────────
+
+ROOT = pathlib.Path(__file__).resolve().parents[2]
+RETIRED = re.compile("IFRIC_" + "REFRESH_TOKEN|company/" + r"products")
+SKIPPED = {"node_modules", ".venv", "dist", "archive", ".git", "__pycache__", "test-results", "playwright-report"}
+
+
+def current_files():
+    for path in ROOT.rglob("*"):
+        if path.is_file() and not SKIPPED & set(path.relative_to(ROOT).parts):
+            yield path
+
+
+def test_retired_names_appear_nowhere():
+    found = [str(p) for p in current_files() if RETIRED.search(p.read_text(errors="ignore"))]
+    assert found == []
+
+
+def test_nothing_in_the_agent_reaches_the_registry():
+    sources = (ROOT / "backend" / "agent" / "xana_agent").rglob("*")
+    hits = [str(p) for p in sources if p.is_file() and p.suffix in (".py", ".md") and "ifric" in p.read_text().lower()]
+    assert hits == []
+
+
+def test_ifric_url_is_read_from_the_environment(monkeypatch):
+    monkeypatch.setenv("IFRIC_URL", "registry:4007")
+    assert load_settings(_env_file=None).ifric_url == "http://registry:4007"

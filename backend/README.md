@@ -30,6 +30,14 @@ The client secret is entered on the Dataspace screen or set in `GATEWAY_CLIENT_S
 
 The health report's `connector` check reads through the participant's adapter, as the contract offers agents nothing that reaches the connector. A connector failing behind a working adapter doesn't show there.
 
+## IFRIC registry
+
+With `IFRIC_URL`, including its port (the registry's default is 4007), company names, machine builders and factory details come from the IFRIC registry, asked with the dataspace token. The registry and dataspace must share a realm, and a participant's ID must equal its company's `company_ifric_id`, or the registry refuses it. `FACTORY_ID` names the factory when the operator's token has no `ifric_factory_id`.
+
+A machine's builder is asked for with the machine's entity ID, so it has to be the registry's `asset_ifric_id`; if not, the machine has no known builder, and escalation says so. Machine names come from the context broker, as registry assets have none.
+
+A failed name lookup gives an empty name, and a screen shows the identifier. In the health report, `401` and `403` count as failures.
+
 ## Local environment
 
 Requirements: Docker with Compose. Run all commands from the repository root.
@@ -65,6 +73,8 @@ Data and models are kept in Docker volumes between runs. `docker compose -f back
 **With value hints:** add `--profile ontology`, which starts Fuseki and loads sample shapes and knowledge from `sample_data/ontology/`.
 
 **With a dataspace:** run one by its own instructions, and set `GATEWAY_URL`, `GATEWAY_KEYCLOAK_URL`, `GATEWAY_CLIENT_ID` and `SETTINGS_ENCRYPTION_KEY`.
+
+**With the IFRIC registry:** add `--profile ifric`, which starts a stub of the routes the backend uses, with `IFRIC_URL=http://ifric:4007` and `FACTORY_ID=urn:ngsi-ld:Factory:plant-north`. To use the real one, run it from its own repository, on the dataspace's realm.
 
 **With alerts:** add `--profile alerts`, which starts Alerta (9.0.4, as on the platform, with its severities) and sends sample alerts in the form the platform's rules give them. The key is `local-development-only-key` unless `ALERTA_API_KEY` is set. Without the profile, the Alerts screen says that Alerta is unavailable, and runs show that source as unavailable.
 

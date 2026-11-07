@@ -16,7 +16,8 @@
 
 /**
  * The dataspace area served by the backend (`/api/gateway`): connection, peers, capabilities,
- * capability requests and policies. Names of peers and builders come from a later phase.
+ * capability requests and policies, with names from the IFRIC registry (`/api/ifric`). Answers keyed
+ * by identifier aren't key-mapped: an identifier stays as it is.
  */
 import { DataError } from '../../errors'
 import { request, seg } from './http'
@@ -43,4 +44,7 @@ export const dataspace = {
       body: { consumer_id: peerId, capability, action: POLICY_ACTION[action] },
     })
   },
+  resolveNames: (ids = []) => request(AREA, 'POST', '/api/ifric/resolve', { raw: true, body: { ids } }),
+  resolveBuilders: (machineIds = []) =>
+    request(AREA, 'POST', '/api/ifric/resolve-builders', { raw: true, body: { machine_ids: machineIds } }),
 }
