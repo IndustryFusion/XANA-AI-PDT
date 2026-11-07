@@ -35,6 +35,6 @@
 
 ## 7. Review follow-ups
 
-- [ ] 7.1 Decide on the parsed query; verify the forms that got past the earlier check are refused, against a real Fuseki, and that the platform's queries are not
-- [ ] 7.2 Give errors as data on every path; verify HTML, a redirect, odd JSON and too large an answer
-- [ ] 7.3 Show why there are no hints; verify a wrong base on a real Fuseki, and the editor in a browser
+- [x] 7.1 Decide on the parsed query; verify the forms that got past the earlier check are refused, against a real Fuseki, and that the platform's queries are not
+- [x] 7.2 Give errors as data on every path; verify HTML, a redirect, odd JSON and too large an answer
+- [x] 7.3 Show why there are no hints; verify a wrong base on a real Fuseki, and the editor in a browser
