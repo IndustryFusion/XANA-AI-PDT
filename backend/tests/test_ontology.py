@@ -292,6 +292,7 @@ def test_query_allows_plain_reads_whatever_their_text_holds(query):
 def test_a_false_refusal_says_why_and_what_to_do():
     message = refusal_of('SELECT * WHERE { ?s ?p "the service record" }')
     assert "holds the word service" in message and "Rewrite it" in message
+    assert "holds the word service" in refusal_of("ASK { \u017fervice <urn:a> { ?s ?p ?o } }")
     assert "code point" in refusal_of('ASK { ?s ?p "\\u0061" }')
     assert "too complex" in refusal_of("SELECT * WHERE " + "{ " * 300 + "?s ?p ?o " + "} " * 300)
 
@@ -330,6 +331,7 @@ async def test_parsing_does_not_hold_up_the_event_loop():
             last = now
 
     ticker = asyncio.create_task(ticking())
+    await asyncio.sleep(0.02)  # it is ticking before the parse starts
     fuseki = Fuseki()
     started = time.perf_counter()
     await source(fuseki).query(worst_query())
