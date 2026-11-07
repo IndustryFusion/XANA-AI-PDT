@@ -35,9 +35,10 @@ from typing import Any, Literal
 from app.errors import Refused, conflict, invalid, not_found, unavailable
 from app.memory.migrate import MigrationError, Migrator
 from app.memory.store import IncidentStore, RunStore, StoreUnavailable
+from app.runs.escalation import DELIVERY, FINAL_STATUSES, Escalator, NotPossible, Plan, incident_message
 from app.runs.files import Attachment, check_files
 from app.runs.machines import MachineResolver
-from app.runs.model import ALLOWED, FAILED, RUNNING, STOPPED, RunState, outcome_state
+from app.runs.model import ALLOWED, AWAITING_MACHINE_BUILDER, FAILED, RUNNING, STOPPED, RunState, outcome_state
 from app.runs.stream import GOING_AWAY, QUEUE_LIMIT, UNKNOWN_RUN, Subscriber
 from xana_agent import Outcome, Rejection, RoundInput, StepEvent, Workflow
 from xana_agent.sources.base import IncidentMemory
@@ -46,8 +47,8 @@ log = logging.getLogger(__name__)
 
 MAX_ISSUE = 2000
 MAX_TEXT = 4000
-SHARING_TIER = "minimal"
-NO_ESCALATION = "Escalation to the machine builder is not available in this version."
+OUTBOX_POLL_S = 5
+NO_ESCALATION = "No dataspace is configured for this installation."
 NOT_REOPENABLE = "Only runs with a machine-builder conversation can be reopened, and this version has none."
 
 Work = Literal["analyse", "act"]
@@ -60,6 +61,7 @@ class RunRecord:
         self.lock = asyncio.Lock()
         self.task: asyncio.Task[None] | None = None
         self.subscribers: set[Subscriber] = set()
+        self.busy = False  # an operation is talking to the dataspace, without holding the lock
 
 
 class RunManager:
@@ -74,7 +76,12 @@ class RunManager:
         queue_limit: int = QUEUE_LIMIT,
         clock: Callable[[], datetime] | None = None,
         model_problem: Callable[[], Awaitable[str | None]] | None = None,
+        escalator: Escalator | None = None,
+        outbox_poll_s: float = OUTBOX_POLL_S,
     ) -> None:
+        self._escalator = escalator
+        self._outbox_poll_s = outbox_poll_s
+        self._outbox_task: asyncio.Task[None] | None = None
         self._store = store
         self._incidents = incidents
         self._workflow = workflow
@@ -94,6 +101,8 @@ class RunManager:
 
     async def start_up(self) -> None:
         """Restores stored runs if the memory database is reachable; otherwise the first request retries."""
+        if self._escalator is not None:
+            self._outbox_task = asyncio.create_task(self._poll_outbox(), name="outbox status")
         try:
             await self.ready()
         except Refused as refused:
@@ -101,7 +110,7 @@ class RunManager:
 
     async def shut_down(self) -> None:
         """Cancels rounds in progress without changing their stored state; they run again after a restart."""
-        tasks = list(self._tasks)
+        tasks = [*self._tasks, *([self._outbox_task] if self._outbox_task else [])]
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
@@ -287,8 +296,156 @@ class RunManager:
 
     async def escalation_preflight(self, run_id: str) -> dict[str, Any]:
         await self.ready()
-        self._record(run_id)
-        return {"possible": False, "reason": NO_ESCALATION, "recipient": None, "data": [], "sharing_tier": SHARING_TIER}
+        rec = self._record(run_id)
+        if self._escalator is None:
+            return {"possible": False, "reason": NO_ESCALATION, "recipient": None, "data": [], "sharing_tier": None}
+        return await self._escalator.preflight(rec.state)
+
+    async def escalate(self, run_id: str) -> dict[str, str]:
+        """Sends the incident to the machine builder. A failure leaves the status as it was, to try again."""
+        await self.ready()
+        rec = self._record(run_id)
+        if self._escalator is None:
+            raise unavailable(NO_ESCALATION)
+        async with rec.lock:
+            self._require(rec, "escalate")
+            rec.busy = True
+        try:
+            try:
+                plan = await self._escalator.plan(rec.state)
+            except NotPossible as reason:
+                raise unavailable(str(reason)) from None
+            return await self._send_escalation(rec, plan)
+        finally:
+            rec.busy = False
+
+    async def _send_escalation(self, rec: RunRecord, plan: Plan) -> dict[str, str]:
+        escalator = self._escalator
+        state = rec.state
+        ref = f"ESC-{state.incident_id}"
+        attempt = dict(state.attempt or {})
+        names: list[str] = attempt.get("files", [])
+        try:
+            if not attempt.get("files_message_id"):
+                files = await escalator.files(state, plan.sharing)
+                names = [name for name, _ in files]
+                await self._add_policy_check(rec, plan, names)
+                attempt = {"files": names, "files_message_id": await escalator.send_files(plan, files)}
+                await self._remember_attempt(rec, attempt)
+            if not attempt.get("conversation_id"):
+                attempt["conversation_id"] = await escalator.conversation_of(attempt["files_message_id"])
+                await self._remember_attempt(rec, attempt)
+            request_id = await escalator.send_request(
+                plan, attempt["conversation_id"], incident_message(state, ref, plan, names)
+            )
+        except Refused as refused:
+            await self._add_failure(rec, refused.message, attempt)
+            raise
+        return await self._mark_escalated(rec, plan, ref, attempt, request_id)
+
+    async def _mark_escalated(
+        self, rec: RunRecord, plan: Plan, ref: str, attempt: dict[str, Any], request_id: str
+    ) -> dict[str, str]:
+        now = self._now().isoformat()
+        escalation = {
+            "ref": ref,
+            "recipient": plan.recipient(),
+            "tier": plan.sharing.tier,
+            "data": plan.sharing.data(),
+            "files": attempt["files"],
+            "sent_at": now,
+        }
+        step_input = {
+            "escalation_ref": ref,
+            "recipient": plan.builder.name,
+            "tier": plan.sharing.tier,
+            "sent": [item["label"] for item in plan.sharing.data()],
+        }
+        outbox = (
+            {"message_id": attempt["files_message_id"], "status": "pending", "kind": "files"},
+            {"message_id": request_id, "status": "pending", "kind": "request"},
+        )
+        async with rec.lock:
+            step = self._step("escalate", step_input, {"conversation_id": attempt["conversation_id"]}, rec.state.round)
+            await self._change(
+                rec,
+                step=step,
+                status=AWAITING_MACHINE_BUILDER,
+                data={"escalation_ref": ref, "builder": plan.builder.name},
+                escalation=escalation,
+                outbox=outbox,
+                conversation_id=attempt["conversation_id"],
+                attempt=None,
+            )
+        return {"status": AWAITING_MACHINE_BUILDER, "escalation_ref": ref}
+
+    async def _add_policy_check(self, rec: RunRecord, plan: Plan, names: list[str]) -> None:
+        sharing = plan.sharing
+        output = {
+            "tier": sharing.tier,
+            "recipient": plan.builder.name,
+            "sent": [item["label"] for item in sharing.data()],
+            "files": names,
+            "withheld": [f"{item['label']}: {item['reason']}" for item in sharing.withheld],
+            "decision": f"Sent under the tier {sharing.tier}; nothing beyond it, or the builder's access, goes out.",
+        }
+        async with rec.lock:
+            await self._change(rec, step=self._step("policy_check", {"tier": sharing.tier}, output, rec.state.round))
+
+    async def _remember_attempt(self, rec: RunRecord, attempt: dict[str, Any]) -> None:
+        async with rec.lock:
+            await self._change(rec, attempt=dict(attempt))
+
+    async def _add_failure(self, rec: RunRecord, reason: str, attempt: dict[str, Any]) -> None:
+        output = {"error": reason, "files_sent": bool(attempt.get("files_message_id"))}
+        async with rec.lock:
+            try:
+                await self._change(rec, step=self._step("escalate_failed", {}, output, rec.state.round))
+            except Refused as refused:
+                log.warning("Run %s: a failed escalation was not recorded: %s", rec.state.run_id, refused.message)
+
+    async def outbox_status(self, run_id: str) -> list[dict[str, Any]]:
+        await self.ready()
+        return self._record(run_id).state.outbox_status()
+
+    # ── Outbox status ────────────────────────────────────────────────────────
+
+    async def _poll_outbox(self) -> None:
+        while True:
+            await asyncio.sleep(self._outbox_poll_s)
+            try:
+                await self.check_outbox()
+            except Exception:
+                log.exception("The outbox status could not be checked")
+
+    async def check_outbox(self) -> None:
+        """Asks about every message not yet final. One that can't be asked about stays as it is, for the next time."""
+        for rec in list(self._runs.values()):
+            if any(entry["status"] == "pending" for entry in rec.state.outbox):
+                await self._check_run_outbox(rec)
+
+    async def _check_run_outbox(self, rec: RunRecord) -> None:
+        answers = {}
+        for entry in rec.state.outbox:
+            if entry["status"] != "pending":
+                continue
+            try:
+                answers[entry["message_id"]] = await self._escalator.gateway.message_status(entry["message_id"])
+            except Refused as refused:
+                log.info("Run %s: delivery not known yet: %s", rec.state.run_id, refused.message)
+        async with rec.lock:
+            changed = False
+            outbox = []
+            for entry in rec.state.outbox:
+                answer = answers.get(entry["message_id"])
+                if answer and answer["status"] in FINAL_STATUSES:
+                    entry = {**entry, "status": DELIVERY[answer["status"]]}
+                    if answer.get("error_message"):
+                        entry["error"] = answer["error_message"]
+                    changed = True
+                outbox.append(entry)
+            if changed:
+                await self._change(rec, outbox=tuple(outbox))
 
     async def reopen(self, run_id: str) -> None:
         await self.ready()
@@ -316,6 +473,8 @@ class RunManager:
             return run_id
 
     def _require(self, rec: RunRecord, operation: str) -> None:
+        if rec.busy:
+            raise conflict("The run is being sent to the machine builder. Try again when that has finished.")
         if rec.state.status not in ALLOWED[operation]:
             allowed = " or ".join(ALLOWED[operation])
             raise conflict(f"The run is {rec.state.status}; {_NAMES[operation]} is possible only when it is {allowed}.")
@@ -438,6 +597,7 @@ _NAMES = {
     "confirm": "confirming or rejecting",
     "stop": "stopping",
     "archive": "archiving",
+    "escalate": "escalating",
 }
 
 

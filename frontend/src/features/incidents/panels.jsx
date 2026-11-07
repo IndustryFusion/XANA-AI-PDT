@@ -16,8 +16,9 @@
 
 import { useId, useState } from 'react'
 import { runs } from '../../data'
+import { useData } from '../../data/useData'
 import { CLOSE_OUTCOMES } from '../../data/conversationActs'
-import { Button, Card, useToast } from '../../ui/components'
+import { Button, Card, StatusBadge, useToast } from '../../ui/components'
 import { ConfidenceMeter, ConfirmDialog, FileAttachments } from '../../ui/structured'
 import { percent } from '../../ui/format'
 import { paths, useRoute } from '../../app/router'
@@ -239,7 +240,31 @@ export function WaitingPanel({ run }) {
       <p className="muted">
         Escalated as <span className="mono">{run.escalationRef}</span>. Replies, requests and recommendations appear in the conversation.
       </p>
+      <EscalationDelivery run={run} />
     </Card>
+  )
+}
+
+const DELIVERY_POLL_MS = 3000
+const SENT_KINDS = { files: 'Machine data', request: 'Incident' }
+
+/** Delivery of what the escalation sent, for as long as it isn't final. */
+function EscalationDelivery({ run }) {
+  const sent = (run.outbox ?? []).filter((o) => SENT_KINDS[o.kind])
+  const unfinished = sent.some((o) => o.status === 'pending')
+  const polled = useData('runs', 'getOutboxStatus', [run.runId], { enabled: sent.length > 0, refreshMs: unfinished ? DELIVERY_POLL_MS : 0 })
+  const current = (polled.data ?? sent).filter((o) => SENT_KINDS[o.kind])
+  if (current.length === 0) return null
+  return (
+    <ul className="plain-list stack" aria-label="Delivery of the escalation">
+      {current.map((o) => (
+        <li key={o.messageId} className="row">
+          <span>{SENT_KINDS[o.kind]}</span>
+          <StatusBadge kind="delivery" value={o.status} />
+          {o.error && <span className="muted">{o.error}</span>}
+        </li>
+      ))}
+    </ul>
   )
 }
 

@@ -117,6 +117,10 @@ class GatewayConnection:
             "expires_at": claims.get("exp"),
         }
 
+    def has_expired(self) -> bool:
+        """Connected earlier, and the token has run out."""
+        return self._token is not None and self.token() is None
+
     def _state(self) -> str:
         if not self.configured:
             return "not_configured"

@@ -217,7 +217,7 @@ describe('delegation to the mock', () => {
   test('the backend serves runs, incidents, entities and health; the mock serves everything else', () => {
     expect(backend.SERVED).toEqual({
       session: ['getAuthConfig', 'getSession', 'signIn', 'signOut', 'getFactory'],
-      runs: ['listActiveRuns', 'startRun', 'getRun', 'subscribeRun', 'clarify', 'confirmResolution', 'escalationPreflight', 'reopenRun', 'stopRun', 'archiveRun'],
+      runs: ['listActiveRuns', 'startRun', 'getRun', 'subscribeRun', 'clarify', 'confirmResolution', 'escalationPreflight', 'escalate', 'getOutboxStatus', 'reopenRun', 'stopRun', 'archiveRun'],
       incidents: ['listIncidents', 'getIncident', 'reopenIncident'],
       entities: [
         'getStats', 'listTypes', 'listAttributes', 'queryEntities', 'getEntity', 'updateAttributes', 'appendAttributes',
@@ -230,7 +230,6 @@ describe('delegation to the mock', () => {
     })
     expect(backend.session.signIn).not.toBe(mock.session.signIn)
     expect(backend.info.signInHint).toBeUndefined()
-    expect(backend.runs.escalate).toBe(mock.runs.escalate)
     expect(backend.runs.sendConversationAct).toBe(mock.runs.sendConversationAct)
     expect(backend.system.getServiceSettings).toBe(mock.system.getServiceSettings)
     expect(backend.runs.startRun).not.toBe(mock.runs.startRun)

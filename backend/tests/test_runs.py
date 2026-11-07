@@ -379,16 +379,17 @@ async def test_archive_moves_the_run_to_history(url):
 # ── Phase 1 limits ───────────────────────────────────────────────────────────
 
 
-async def test_escalation_preflight_says_not_available(url):
+async def test_escalation_preflight_without_a_dataspace(url):
     async with running(make_app(url)) as client:
         run_id = await to_confirmation(client)
         response = await client.get(f"/api/agent/escalate-preflight/{run_id}")
         unknown = await client.get("/api/agent/escalate-preflight/nope")
     assert response.json() == {
         "possible": False,
-        "reason": "Escalation to the machine builder is not available in this version.",
+        "reason": "No dataspace is configured for this installation.",
         "recipient": None,
         "data": [],
+        "withheld": [],
         "sharing_tier": "minimal",
     }
     assert unknown.status_code == 404

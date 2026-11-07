@@ -115,6 +115,8 @@ def make_app(
     script: Script | None = None,
     context: FakeContextSource | None = None,
     transport: httpx.MockTransport | None = None,
+    gateway_transport: httpx.AsyncBaseTransport | None = None,
+    alerts: Any = None,
     **settings: Any,
 ) -> FastAPI:
     script = script or Script()
@@ -124,8 +126,11 @@ def make_app(
         context=context or GatedContext(sample_entities()),
         history=FakeHistorySource(sample_history()),
         machines=MachineResolver(CLOSED_HTTP, transport=transport or broker(down=True)),
+        alerts=alerts,
     )
-    app = create_app(make_settings(postgres_memory_url=url, **settings), agent=agent)
+    app = create_app(
+        make_settings(postgres_memory_url=url, **settings), agent=agent, gateway_transport=gateway_transport
+    )
     app.state.script = script
     app.state.context = agent.context
     return app
