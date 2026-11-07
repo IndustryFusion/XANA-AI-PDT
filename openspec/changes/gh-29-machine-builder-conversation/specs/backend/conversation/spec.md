@@ -111,6 +111,10 @@ Nothing SHALL be sent to a peer except by an operator's request.
 - **WHEN** the grant went out and its data failed, and the operator declines
 - **THEN** it is refused as `conflict`, and approving again sends the data
 
+#### Scenario: A grant that never arrived
+- **WHEN** the delivery of a grant failed
+- **THEN** the operator can decline, and access this backend approved goes back, or approve, and a new grant goes
+
 #### Scenario: A half-finished escalation reopened by the builder
 - **WHEN** a run whose escalation never finished receives a request or recommendation, and the operator approves or answers
 - **THEN** it is refused as `conflict`, and nothing is sent
