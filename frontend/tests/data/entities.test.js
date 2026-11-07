@@ -262,3 +262,24 @@ describe('allowed range in words', () => {
     [undefined, null],
   ])('%j', (hint, text) => expect(rangeText(hint)).toBe(text))
 })
+
+describe('attribute status and the search limit', () => {
+  test('a deleted attribute is reported with when it went', async () => {
+    await entities.deleteAttribute(SENSOR, 'value')
+    const states = await entities.getAttributeStatus(SENSOR)
+    expect(states.value.deleted).toBe(true)
+    expect(Date.parse(states.value.observedAt)).not.toBeNaN()
+    expect(await entities.getAttributeStatus('urn:ngsi-ld:Machine:nope')).toEqual({})
+  })
+
+  test('a capped search and a capped history say so', async () => {
+    writeControls({ searchCap: 2 })
+    const found = await entities.queryEntities({ type: 'Sensor', q: 'value>-1000', limit: 1000 })
+    expect(found.limited).toMatchObject({ scanned: 2 })
+    expect(found.limited.total).toBeGreaterThan(2)
+    const points = await entities.getAttributeHistory(SENSOR, 'value', { from: new Date(Date.now() - 3600_000 * 24).toISOString() })
+    expect(points).toHaveLength(2)
+    expect(points.limited).toEqual({ newest: 2 })
+    writeControls({ searchCap: null })
+  })
+})

@@ -31,6 +31,7 @@ from urllib.parse import urlsplit
 
 import httpx
 from websockets.asyncio.client import connect
+from websockets.exceptions import InvalidStatus
 
 MACHINE = "laser-cutter-01"
 STATE = pathlib.Path(".smoke-run")
@@ -51,6 +52,20 @@ def wait_for_machine(client: httpx.Client) -> str:
         if time.monotonic() > deadline:
             fail(f"could not start a run: {response.status_code} {response.text}")
         time.sleep(5)
+
+
+async def check_stream_origin(url: str, host: str | None) -> None:
+    """The live updates stream takes the UI's own page, through the frontend's proxy, and no other."""
+    target = urlsplit(url)
+    address = host or target.netloc
+    uri = f"ws://{address}/api/ngsi/ws"
+    async with connect(uri, host=target.hostname, port=target.port or 80, origin=f"http://{address}"):
+        pass
+    try:
+        async with connect(uri, host=target.hostname, port=target.port or 80, origin="https://elsewhere.example"):
+            fail("the live updates stream took a page from another origin")
+    except InvalidStatus:
+        pass
 
 
 async def stream_until_waiting(url: str, host: str | None, run_id: str) -> list[str]:
@@ -80,6 +95,7 @@ def run(client: httpx.Client, url: str, host: str | None) -> None:
     print("screen address: ok")
 
     run_id = wait_for_machine(client)
+    asyncio.run(check_stream_origin(url, host))
     steps = asyncio.run(stream_until_waiting(url, host, run_id))
     if missing := [step for step in ANALYSIS if step not in steps]:
         fail(f"the stream did not deliver {missing}: {steps}")

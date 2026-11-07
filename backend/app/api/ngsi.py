@@ -35,12 +35,15 @@ from pydantic import BaseModel
 from app.errors import invalid
 from app.ngsi.fetch import fetch_document
 from app.ngsi.live import Watcher
+from app.ngsi.stream import drop_connection, origin_allowed
 from app.ngsi.timeshift import TimeShift
 
 router = APIRouter(prefix="/api/ngsi", tags=["explorer"])
 
 KEEPALIVE_S = 20
+SEND_TIMEOUT_S = 10
 OVERFLOW_CODE = 1013
+ORIGIN_REFUSED_CODE = 4403
 
 
 class ImportUrl(BaseModel):
@@ -49,6 +52,15 @@ class ImportUrl(BaseModel):
 
 class TypeNames(BaseModel):
     types: list[str]
+
+
+def _answer(found: list) -> Any:
+    """A list. If it stopped early, a header says how far it got: the body stays what the broker's would be."""
+    limited = getattr(found, "limited", None)
+    if not limited:
+        return list(found)
+    text = ", ".join(f"{key}={value}" for key, value in limited.items())
+    return JSONResponse(list(found), headers={"X-Results-Limited": text})
 
 
 def _attributes(body: Any) -> dict[str, Any]:
@@ -80,8 +92,11 @@ async def query_entities(
     id_pattern: str | None = None,
     q: str | None = None,
     limit: int = 100,
-) -> list[dict]:
-    return await request.app.state.broker.query(entity_type=type, entity_id=id, id_pattern=id_pattern, q=q, limit=limit)
+) -> Any:
+    found = await request.app.state.broker.query(
+        entity_type=type, entity_id=id, id_pattern=id_pattern, q=q, limit=limit
+    )
+    return _answer(found)
 
 
 @router.patch("/entities/{entity_id:path}/attrs", status_code=204)
@@ -142,8 +157,8 @@ async def history(
     start: str | None = Query(None, alias="from"),
     end: str | None = Query(None, alias="to"),
     dataset_id: str | None = None,
-) -> list[dict]:
-    return await request.app.state.attribute_history.values(entity_id, attribute, start, end, dataset_id)
+) -> Any:
+    return _answer(await request.app.state.attribute_history.values(entity_id, attribute, start, end, dataset_id))
 
 
 @router.get("/attr-status")
@@ -178,12 +193,17 @@ async def subscription_health(request: Request) -> dict:
 
 @router.websocket("/ws")
 async def changes(websocket: WebSocket, type: str | None = None, ids: str | None = None) -> None:
-    """Changes as they happen. A client that falls behind is closed, and reconnects."""
+    """Changes as they happen. A client that falls behind or stops reading is closed, and reconnects."""
+    settings = websocket.app.state.settings
+    if not origin_allowed(websocket.headers.get("origin"), websocket.headers.get("host"), settings.ws_allowed_origins):
+        await websocket.close(code=ORIGIN_REFUSED_CODE)
+        return
     await websocket.accept()
     live = websocket.app.state.live
     watcher = live.watch(type, [i for i in (ids or "").split(",") if i])
     keepalive = getattr(websocket.app.state, "stream_keepalive_s", KEEPALIVE_S)
-    sender = asyncio.create_task(_send(websocket, watcher, keepalive))
+    send_timeout = getattr(websocket.app.state, "stream_send_timeout_s", SEND_TIMEOUT_S)
+    sender = asyncio.create_task(_send(websocket, watcher, keepalive, send_timeout))
     receiver = asyncio.create_task(_receive(websocket))
     try:
         await asyncio.wait({sender, receiver}, return_when=asyncio.FIRST_COMPLETED)
@@ -194,19 +214,22 @@ async def changes(websocket: WebSocket, type: str | None = None, ids: str | None
         await asyncio.wait({sender, receiver})
 
 
-async def _send(websocket: WebSocket, watcher: Watcher, keepalive: float) -> None:
+async def _send(websocket: WebSocket, watcher: Watcher, keepalive: float, send_timeout: float) -> None:
     with contextlib.suppress(WebSocketDisconnect, RuntimeError):
-        while True:
-            # What arrived in time is delivered first, in order, and only then does it close.
-            if watcher.overflowed and watcher.queue.empty():
-                await websocket.close(code=OVERFLOW_CODE)
-                return
-            try:
-                change = await asyncio.wait_for(watcher.queue.get(), keepalive)
-            except TimeoutError:
-                await websocket.send_json({"type": "keepalive"})
-                continue
-            await websocket.send_json(change)
+        try:
+            while True:
+                # What arrived in time is delivered first, in order, and only then does it close.
+                if watcher.overflowed and watcher.queue.empty():
+                    await asyncio.wait_for(websocket.close(code=OVERFLOW_CODE), send_timeout)
+                    return
+                try:
+                    message = await asyncio.wait_for(watcher.queue.get(), keepalive)
+                except TimeoutError:
+                    message = {"type": "keepalive"}
+                await asyncio.wait_for(websocket.send_json(message), send_timeout)
+        except TimeoutError:
+            # The socket is full and nothing reads it, so a close frame wouldn't get out either.
+            drop_connection(websocket)
 
 
 async def _receive(websocket: WebSocket) -> None:

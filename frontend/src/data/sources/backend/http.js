@@ -42,6 +42,12 @@ async function refusal(area, response) {
   return new DataError(area, kind, `The backend answered HTTP ${response.status}.`)
 }
 
+/** `scanned=5000, total=5300` from the header of a list that stopped early, as numbers. */
+function limitOf(header) {
+  if (!header) return null
+  return Object.fromEntries(header.split(',').map((part) => part.trim().split('=')).map(([k, v]) => [k, Number(v)]))
+}
+
 function query(params = {}) {
   const entries = Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== '')
   return entries.length ? `?${new URLSearchParams(entries).toString()}` : ''
@@ -75,7 +81,10 @@ export async function request(area, method, path, { params, body, raw = false } 
   if (response.status === 204) return undefined
   const text = await response.text()
   if (!text) return undefined
-  return raw ? JSON.parse(text) : fromBackend(JSON.parse(text))
+  const result = raw ? JSON.parse(text) : fromBackend(JSON.parse(text))
+  const limited = limitOf(response.headers?.get('X-Results-Limited'))
+  if (limited && Array.isArray(result)) result.limited = limited
+  return result
 }
 
 /** A path segment from an identifier. */

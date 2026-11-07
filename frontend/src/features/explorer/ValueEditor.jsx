@@ -44,7 +44,12 @@ export default function ValueEditor({ label, initial, entityType, attribute, onS
   const range = rangeText(hints.data)
 
   useEffect(() => { inputRef.current?.focus() }, [])
-  useEffect(() => { setActive(-1) }, [text])
+
+  /** A new text ends any choice in the list, at once: Enter right after a pick must save, not pick again. */
+  function changeText(next) {
+    setText(next)
+    setActive(-1)
+  }
 
   async function save() {
     setBusy(true)
@@ -71,7 +76,7 @@ export default function ValueEditor({ label, initial, entityType, attribute, onS
       setActive((a) => (a <= 0 ? options.length - 1 : a - 1))
     } else if (e.key === 'Enter') {
       e.preventDefault()
-      if (active >= 0 && options[active] !== undefined) setText(options[active])
+      if (active >= 0 && options[active] !== undefined) changeText(options[active])
       else if (!busy) save()
     }
   }
@@ -90,7 +95,7 @@ export default function ValueEditor({ label, initial, entityType, attribute, onS
           aria-controls={listed ? ids.list : undefined}
           aria-activedescendant={active >= 0 && listed ? optionId(active) : undefined}
           aria-invalid={error ? true : undefined} aria-describedby={error ? ids.error : undefined}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => changeText(e.target.value)}
           onKeyDown={onKeyDown}
         />
         <button type="button" className="icon-btn icon-btn--ok" onClick={save} disabled={busy} aria-label={`Save ${label}`} title="Save">✓</button>
@@ -104,7 +109,7 @@ export default function ValueEditor({ label, initial, entityType, attribute, onS
               key={h} id={optionId(i)} role="option" aria-selected={i === active}
               className="value-editor__option mono"
               onMouseDown={(e) => e.preventDefault()}
-              onClick={() => { setText(h); inputRef.current?.focus() }}
+              onClick={() => { changeText(h); inputRef.current?.focus() }}
             >
               {h}
             </li>

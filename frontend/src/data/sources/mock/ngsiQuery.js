@@ -212,6 +212,7 @@ export function compileQuery({ type, id, idPattern, q, limit } = {}) {
   check(tree)
   return {
     limit: max,
+    needsFilter: !!(tree || pattern),
     test: (e) => (!types || types.includes(e.type))
       && (!ids || ids.includes(e.id))
       && (!pattern || pattern.test(e.id))

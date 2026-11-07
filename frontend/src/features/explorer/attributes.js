@@ -108,5 +108,25 @@ export function parseInput(text, current, member) {
   return trimmed
 }
 
-/** Attributes with recorded history are those with an observation time. Relationship changes are recorded too. */
-export const hasHistory = (attr) => !Array.isArray(attr) && !!attr?.observedAt && ['property', 'relationship'].includes(attributeKind(attr))
+/**
+ * Whether an attribute has history to offer: it has an observation time, or the store has rows
+ * for it, as the platform records every change whether or not it states a time.
+ */
+export const hasHistory = (attr, recorded = false) => !Array.isArray(attr) && (!!attr?.observedAt || recorded) && ['property', 'relationship'].includes(attributeKind(attr))
+
+/** The latest recorded state of an attribute: by its exact name, or its IRI ending in that name. */
+export function statusOf(states, name) {
+  if (!states) return null
+  if (states[name]) return states[name]
+  const key = Object.keys(states).find((k) => k.endsWith(`/${name}`) || k.endsWith(`#${name}`))
+  return key ? states[key] : null
+}
+
+/** Whether two attribute values are the same, whatever the order of their members. */
+export function sameValue(a, b) {
+  if (a === b) return true
+  if (!a || !b || typeof a !== 'object' || typeof b !== 'object') return false
+  if (Array.isArray(a) !== Array.isArray(b)) return false
+  const keys = Object.keys(a)
+  return keys.length === Object.keys(b).length && keys.every((key) => sameValue(a[key], b[key]))
+}

@@ -17,7 +17,9 @@
 the time-series database (TEST_TSDB_URL). Rows are written in the platform's table layout, with
 the columns it has, and full IRIs as attribute names."""
 
+import asyncio
 import os
+import time
 import uuid
 from datetime import UTC, datetime, timedelta
 
@@ -247,6 +249,168 @@ def test_stopped_services_give_502():
     assert client.get("/api/ngsi/history", params={"entity_id": "urn:x", "attribute": "a"}).status_code == 502
 
 
+@pytest.fixture
+def matrix(api):
+    """Entities for each operator of `frontend/docs/data-interface.md`, on a real broker."""
+    kind = f"Op{uuid.uuid4().hex[:8]}"
+    ids = {name: f"urn:test:op:{uuid.uuid4().hex[:10]}" for name in ("run", "idle", "bare")}
+    body = [
+        {
+            "id": ids["run"],
+            "type": kind,
+            "status": {"type": "Property", "value": "running"},
+            "temp": {"type": "Property", "value": 12.5, "acc": {"type": "Property", "value": 2}},
+            "partOf": {"type": "Relationship", "object": "urn:line:a"},
+            "cfg": {"type": "JsonProperty", "json": {"mode": "auto"}},
+            "shifts": {"type": "ListProperty", "valueList": ["early", "late"]},
+            "label": {"type": "LanguageProperty", "languageMap": {"en": "Press", "de": "Presse"}},
+            f"{IRI}state": {"type": "Property", "value": "ON"},
+        },
+        {
+            "id": ids["idle"],
+            "type": kind,
+            "status": {"type": "Property", "value": "idle"},
+            "temp": {"type": "Property", "value": 99},
+            f"{IRI}state": {"type": "Property", "value": "OFF"},
+        },
+        {"id": ids["bare"], "type": kind},
+    ]
+    assert {r["result"] for r in api.post("/api/ngsi/import", json=body).json()} == {"created"}
+    yield kind, ids
+    api.post("/api/ngsi/delete-by-types", json={"types": [kind]})
+
+
+@needs_broker
+@pytest.mark.parametrize(
+    ("expression", "expected"),
+    [
+        ("status", {"run", "idle"}),
+        ("!status", {"bare"}),
+        ("!nosuch", {"run", "idle", "bare"}),
+        ('status=="running"', {"run"}),
+        ("status==running", {"run"}),
+        ('status!="running"', {"idle"}),
+        ('status=="running","idle"', {"run", "idle"}),
+        ('status~="^run"', {"run"}),
+        ('status~="run.*"', {"run"}),
+        ('status!~="^run"', {"idle"}),
+        ("temp>50", {"idle"}),
+        ("temp>=99", {"idle"}),
+        ("temp<50", {"run"}),
+        ("temp<=12.5", {"run"}),
+        ("temp==1..50", {"run"}),
+        ("temp==13..100", {"idle"}),
+        ("temp.acc>=2", {"run"}),
+        ("temp.acc", {"run"}),
+        ("!temp.acc", {"idle", "bare"}),
+        ('partOf=="urn:line:a"', {"run"}),
+        ('cfg[mode]=="auto"', {"run"}),
+        ('shifts=="late"', {"run"}),
+        ('label=="Presse"', {"run"}),
+        ('status=="running";!nosuch', {"run"}),
+        ('(status=="running"|status=="idle");temp', {"run", "idle"}),
+        ('status=="running"|temp==90..100', {"run", "idle"}),
+        (f'{IRI}state=="ON"', {"run"}),
+        (f'{IRI}state~="^O"', {"run", "idle"}),
+        (f"!{IRI}state", {"bare"}),
+    ],
+)
+def test_every_documented_operator_on_a_real_broker(api, matrix, expression, expected):
+    kind, ids = matrix
+    answer = api.get("/api/ngsi/entities", params={"type": kind, "q": expression, "limit": 1000})
+    assert answer.status_code == 200, answer.text
+    assert {e["id"] for e in answer.json()} == {ids[name] for name in expected}
+
+
+@needs_broker
+@pytest.mark.parametrize("bad", ["a=={", "a==}", "((", "a==", "!", "a~=", 'a~="("'])
+def test_malformed_expressions_are_client_errors_on_a_real_broker(api, matrix, bad):
+    answer = api.get("/api/ngsi/entities", params={"type": matrix[0], "q": bad})
+    assert answer.status_code == 422, answer.text
+
+
+@needs_broker
+def test_a_search_over_the_cap_says_so_on_a_real_broker(api):
+    kind = f"Big{uuid.uuid4().hex[:8]}"
+    entities = [
+        {"id": f"urn:test:big:{kind}:{i:05d}", "type": kind, "n": {"type": "Property", "value": i}} for i in range(5300)
+    ]
+    try:
+        assert {r["result"] for r in api.post("/api/ngsi/import", json=entities).json()} == {"created"}
+        answer = api.get("/api/ngsi/entities", params={"type": kind, "q": 'n~="^xx"', "limit": 1000})
+        assert answer.status_code == 200
+        assert answer.headers["X-Results-Limited"] == "scanned=5000, total=5300"
+    finally:
+        api.post("/api/ngsi/delete-by-types", json={"types": [kind]})
+
+
+@needs_broker
+def test_a_catastrophic_pattern_on_a_real_broker_does_not_hold_up_the_answer(api, matrix):
+    kind, ids = matrix
+    patch = {"status": {"value": "a" * 40 + "!"}}
+    assert api.patch(f"/api/ngsi/entities/{ids['idle']}/attrs", json=patch).status_code == 204
+    started = time.perf_counter()
+    assert api.get("/api/ngsi/entities", params={"type": kind, "q": 'status~="(a+)+$"'}).json() == []
+    assert time.perf_counter() - started < 5
+
+
+@needs_broker
+def test_two_adds_of_one_attribute_never_both_succeed_on_a_real_broker(api, entity):
+    async def race(name):
+        transport = httpx.ASGITransport(app=api.app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://t") as client:
+
+            async def add(value):
+                body = {name: {"type": "Property", "value": value}}
+                return (await client.post(f"{path(entity)}/attrs", json=body)).status_code
+
+            return await asyncio.gather(add("A"), add("B"))
+
+    for i in range(10):
+        codes = asyncio.run(race(f"{IRI}race{i}"))
+        assert sorted(codes) == [204, 409]
+
+
+@needs_broker
+def test_a_remote_context_never_reaches_a_real_broker(api):
+    """The address is internal and would answer: the reason mustn't show it, and the broker mustn't ask."""
+    context = "http://127.0.0.1:9/never-fetched.jsonld"
+    answer = api.post("/api/ngsi/import", json=[{"@context": context, "id": unique(), "type": "T"}])
+    assert answer.status_code == 207
+    assert answer.json()[0]["result"] == "failed"
+    assert "127.0.0.1" not in answer.json()[0]["reason"]
+
+
+@needs_broker
+def test_identifier_dots_are_refused_on_a_real_broker(api, entity):
+    assert api.delete(f"{path(entity)}/attrs", params={"name": ".."}).status_code in (404, 422)
+    assert api.get(path(entity)).status_code == 200
+
+
+@needs_broker
+def test_deleting_a_sub_attribute_across_datasets(api):
+    entity_id = unique()
+    limit = {"type": "Property", "value": 9}
+    body = {
+        "id": entity_id,
+        "type": "T",
+        "many": [
+            {"type": "Property", "value": 1, "datasetId": "urn:d:1", "limit": limit},
+            {"type": "Property", "value": 2, "datasetId": "urn:d:2", "limit": limit},
+            {"type": "Property", "value": 3, "datasetId": "urn:d:3"},
+        ],
+    }
+    try:
+        assert api.post("/api/ngsi/import", json=[body]).json()[0]["result"] == "created"
+        params = {"name": "many", "sub_attribute": "limit"}
+        assert api.delete(f"/api/ngsi/entities/{entity_id}/attrs", params=params).status_code == 204
+        stored = api.get(f"/api/ngsi/entities/{entity_id}").json()["many"]
+        assert {i["datasetId"]: i["value"] for i in stored} == {"urn:d:1": 1, "urn:d:2": 2, "urn:d:3": 3}
+        assert all("limit" not in i for i in stored)
+    finally:
+        api.delete(f"/api/ngsi/entities/{entity_id}")
+
+
 # History, in the platform's layout -----------------------------------------------------------
 
 
@@ -337,6 +501,27 @@ def test_a_real_postgrest_takes_hostile_names_literally(api, recorded, hostile):
     answer = api.get("/api/ngsi/history", params={"entity_id": recorded["id"], "attribute": hostile})
     assert answer.status_code == 200
     assert answer.json() == []
+
+
+@needs_history
+def test_an_unescaped_quote_would_widen_a_real_filter_but_this_one_does_not(api, recorded):
+    """Unescaped, this name adds `entityId.eq...` as another option of the `or`, and every row would match."""
+    hostile = f'x",entityId.eq."{recorded["id"]}'
+    answer = api.get("/api/ngsi/history", params={"entity_id": recorded["id"], "attribute": hostile})
+    assert answer.status_code == 200
+    assert answer.json() == []
+
+
+@needs_history
+def test_like_wildcards_match_only_themselves_on_a_real_postgrest(api, recorded):
+    params = {"entity_id": recorded["id"]}
+    assert [p["value"] for p in api.get("/api/ngsi/history", params={**params, "attribute": "temp"}).json()] == [
+        40,
+        41,
+        99,
+    ]
+    assert api.get("/api/ngsi/history", params={**params, "attribute": "tem_"}).json() == []
+    assert api.get("/api/ngsi/history", params={**params, "attribute": "t%"}).json() == []
 
 
 @needs_history

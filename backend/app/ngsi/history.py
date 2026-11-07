@@ -36,6 +36,7 @@ import httpx
 
 from app.config import Settings
 from app.errors import Refused, bad_gateway, invalid, unauthorized
+from app.ngsi.broker import Limited
 from app.ngsi.failures import reason_from, unreachable
 
 SERVICE = "The history service (PostgREST)"
@@ -97,8 +98,9 @@ def attribute_filter(name: str) -> tuple[str, str]:
         return ("attributeId", f"eq.{name}")
     if "*" in name:
         raise invalid("An attribute name can't hold *.")
+    literal = name.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
     options = [f"attributeId.eq.{quoted(name)}"]
-    options += [f"attributeId.like.{quoted(f'*{mark}{name}')}" for mark in "/#"]
+    options += [f"attributeId.like.{quoted(f'*{mark}{literal}')}" for mark in "/#"]
     return ("or", f"({','.join(options)})")
 
 
@@ -149,8 +151,8 @@ class AttributeHistory:
         start: str | None = None,
         end: str | None = None,
         dataset_id: str | None = None,
-    ) -> list[dict[str, Any]]:
-        """Values oldest first, the newest `MAX_ROWS` of them."""
+    ) -> Limited:
+        """Values oldest first, the newest `MAX_ROWS` of them, saying so if there may be more."""
         params: list[tuple[str, str | int]] = [
             ("entityId", f"eq.{entity_id}"),
             attribute_filter(attribute),
@@ -169,7 +171,9 @@ class AttributeHistory:
         rows = await self.read(self._attributes, [*params, ("parentId", "is.null")])
         if not rows:
             rows = await self.read(self._attributes, params)
-        points = []
+        points = Limited()
+        if len(rows) >= MAX_ROWS:
+            points.limited = {"newest": MAX_ROWS}
         for row in reversed(rows):
             point = {
                 "at": row.get("observedAt"),

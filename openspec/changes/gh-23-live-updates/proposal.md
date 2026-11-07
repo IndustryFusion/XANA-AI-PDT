@@ -12,7 +12,7 @@ Operators working in the Data Explorer should see changes to the twin as they ha
 - `/api/ngsi/ws` streams changes to the browser. `/api/ngsi/subscription-health` reports the state.
 - It starts after sign-in, or at startup when sign-in is off, and removes the subscription on sign-out and shutdown.
 - If the broker is unavailable, the explorer works without live updates, says so, and recovers.
-- Settings: `MQTT_BROKER_URL`, `MQTT_MGMT_URL`, `MQTT_BROKER_NOTIFY_URL`.
+- Settings: `MQTT_BROKER_URL`, `MQTT_MGMT_URL`, `MQTT_BROKER_NOTIFY_URL`, `WS_ALLOWED_ORIGINS`.
 - A new runtime dependency, an MQTT client (see design).
 - EMQX in the local environment under a profile.
 

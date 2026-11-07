@@ -67,6 +67,7 @@ class Settings(BaseSettings):
     ngsi_url: str = "http://localhost:9090"
     ngsi_tenant: str | None = None
     ngsi_context_url: str | None = None
+    ngsi_allowed_contexts: str | None = None
     pgrest_url: str = "http://pgrest:3000"
     fuseki_url: str = "http://fuseki:3030"
     fuseki_dataset: str = "iff"
@@ -74,6 +75,7 @@ class Settings(BaseSettings):
     mqtt_broker_url: str = "mqtt://emqx-listeners:1883"
     mqtt_mgmt_url: str = "http://emqx-dashboard:18083"
     mqtt_broker_notify_url: str | None = None
+    ws_allowed_origins: str | None = None
     timescale_db_url: SecretStr = SecretStr("postgresql://xana@localhost:5432/tsdb")
     timescale_table: str = "attributes"
     timescale_entity_table: str = "entities"

@@ -15,4 +15,8 @@ The Data explorer SHALL show attribute changes as they happen when live updates 
 
 #### Scenario: Live updates return
 - **WHEN** live updates work again
-- **THEN** the indicator shows it, and changes appear again with no reload
+- **THEN** the indicator shows it, what is shown is read again, so that changes from the outage appear, and later changes appear with no reload
+
+#### Scenario: Only what changed is highlighted
+- **WHEN** a notification holds the whole entity, and one attribute differs from what is shown
+- **THEN** only that attribute is highlighted
