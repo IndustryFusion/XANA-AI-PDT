@@ -17,10 +17,10 @@
 
 ## 3. Verification with real services
 
-- [ ] 3.1 Levels on the dashboard and the Dataspace screen as the gateway reports them, after approving and denying capabilities for peers; verify against the dataspace's gateway with more than one peer
-- [ ] 3.2 The approval panel against a real data request, before and after changing the builder's access; verify on the same services
+- [x] 3.1 Levels on the dashboard and the Dataspace screen as the gateway reports them, after approving and denying capabilities for peers; verify against the dataspace's gateway with more than one peer
+- [x] 3.2 The approval panel against a real data request, before and after changing the builder's access; verify on the same services
 - [ ] 3.3 Names from a real IFRIC registry, and the screens with the registry stopped; verify in a browser
-- [ ] 3.4 The configuration panel in a browser; verify it shows no secret
+- [x] 3.4 The configuration panel in a browser; verify it shows no secret
 
 ## 4. Documents
 
