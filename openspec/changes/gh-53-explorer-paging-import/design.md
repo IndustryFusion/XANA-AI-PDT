@@ -14,6 +14,16 @@ The explorer keeps `offset` in the URL with the rest of the query, and offers ne
 
 Alternative: cursor-based paging. The broker pages by offset, and an offset in the URL can be shared.
 
+### A stable order
+
+Measured on Scorpio during implementation: without an order, its pages of one query overlap and leave entities out (12 of 57 when paging by 7), although each page is what the broker answers. Asked with `orderBy=id`, it orders by ID and the pages fit together. So every paged read, including the backend's own scan when it evaluates an expression, asks for `orderBy=id`. A broker that doesn't know the parameter ignores it, as Scorpio does with an unknown order. Results are therefore in ID order, and "what the broker returns for the same query" means for the same query with that order.
+
+Alternative: read every match and page in the backend. That costs a full read per page, which the broker's paging is there to avoid.
+
+### Past the last match
+
+The broker counts 0 for a page past the last match. That isn't the total, so no total is given then.
+
 ### Attributes to return
 
 `attrs` is a comma-separated list of attribute names, written as in a query expression: a full IRI, or a term of the configured context. It goes to the broker as `attrs`, and what the broker returns is the answer: only those attributes, and only entities that have at least one of them. When the backend evaluates the expression itself, it matches on whole entities and then keeps only the named attributes, so the answer is the same as the broker's for the same query.

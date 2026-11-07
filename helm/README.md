@@ -63,6 +63,8 @@ Alerts use `alertaUrl`, which must end in `/api`. Set the key with `XANA_ALERTA_
 
 Machine events use `callbackBaseUrl`, the backend as Scorpio reaches it, and `XANA_EVENT_WEBHOOK_SECRET`, or `EVENT_WEBHOOK_SECRET` in the existing secret. With nobody signed in, they need a Keycloak client with a service account and read access to Scorpio: `keycloakServiceClientId`, and `XANA_KEYCLOAK_SERVICE_CLIENT_SECRET`, or `KEYCLOAK_SERVICE_CLIENT_SECRET` in the existing secret. The platform has no such client, so one has to be created. On data with full IRIs, set `machineWatchType` and `machineWatchAttributes` to the platform's names, with `status` in full. Alerts need the plugin loaded in Alerta, which the platform's chart doesn't do. See [Machine events](../backend/README.md#machine-events).
 
+Finished runs move to incident history after `autoArchiveAfterS` seconds without a change, 3600 by default; `XANA_AUTO_ARCHIVE_AFTER_S` overrides it, and `0` turns it off.
+
 Value hints read `fusekiUrl` and `fusekiDataset`. Set `fusekiGraphBase` to `http://<Fuseki's external host>/<realm>`, as the platform names its graphs after that host.
 
 Live updates use `mqttBrokerUrl`, `mqttMgmtUrl` and, if Scorpio reaches the broker at another address, `mqttBrokerNotifyUrl`. Operators need `Factory-Admin` or `Factory-Reader` on client `scorpio`. A page served from another address than the UI's needs `WS_ALLOWED_ORIGINS` in `extraConfig`.

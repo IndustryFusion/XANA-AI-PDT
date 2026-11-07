@@ -32,7 +32,7 @@ function fakeFetch(routes = {}) {
     const route = routes[key] ?? { status: 404, body: { error: { kind: 'not_found', message: `No route ${key}` } } }
     if (route.reject) throw route.reject
     const text = route.body === undefined ? '' : typeof route.body === 'string' ? route.body : JSON.stringify(route.body)
-    return new Response(route.status === 204 ? null : text, { status: route.status ?? 200 })
+    return new Response(route.status === 204 ? null : text, { status: route.status ?? 200, headers: route.headers })
   })
   fn.calls = calls
   vi.stubGlobal('fetch', fn)
@@ -352,6 +352,26 @@ describe('entities', () => {
     expect(new URLSearchParams(fn.calls[0].search).get('id_pattern')).toBe('urn:.*')
     await entities.queryEntitiesAt('2026-01-01T00:00:00Z', { type: 'T' })
     expect(new URLSearchParams(fn.calls[1].search).get('at')).toBe('2026-01-01T00:00:00Z')
+  })
+
+  test('paging, attributes and has-attribute go to the backend, and the total comes back', async () => {
+    const fn = fakeFetch({ 'GET /api/ngsi/entities': { body: [{ id: 'urn:a', type: 'T' }], headers: { 'X-Total-Count': '23' } } })
+    const found = await entities.queryEntities({ type: 'T', limit: 5, offset: 10, attrs: 'a,b', hasAttr: 'c' })
+    const params = new URLSearchParams(fn.calls[0].search)
+    expect([params.get('offset'), params.get('attrs'), params.get('has_attr'), params.get('limit')]).toEqual(['10', 'a,b', 'c', '5'])
+    expect(found.total).toBe(23)
+  })
+
+  test('without a total header there is no total', async () => {
+    fakeFetch({ 'GET /api/ngsi/entities': { body: [] } })
+    expect((await entities.queryEntities({ type: 'T' })).total).toBeUndefined()
+  })
+
+  test('the past keeps its limit: no paging or attributes are sent', async () => {
+    const fn = fakeFetch({ 'GET /api/ngsi/timeshift/entities': { body: [] } })
+    await entities.queryEntitiesAt('2026-01-01T00:00:00Z', { type: 'T', offset: 10, attrs: 'a', hasAttr: 'c' })
+    const params = new URLSearchParams(fn.calls[0].search)
+    expect([params.get('offset'), params.get('attrs'), params.get('has_attr')]).toEqual([null, null, null])
   })
 
   test('deleting names the attribute as a parameter, as it may be an IRI', async () => {

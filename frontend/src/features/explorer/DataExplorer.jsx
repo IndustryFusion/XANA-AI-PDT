@@ -28,7 +28,7 @@ import { useLiveUpdates } from './useLiveUpdates'
 import './explorer.css'
 
 /** Result list: matching entities as collapsible nodes, and an opened entity that is not among them. */
-function EntityList({ result, query, standalone, renderNode }) {
+function EntityList({ result, query, standalone, renderNode, onPage }) {
   const invalid = result.status === 'error' && result.error?.kind === 'invalid'
   let content
   if (!hasCriteria(query)) {
@@ -45,7 +45,7 @@ function EntityList({ result, query, standalone, renderNode }) {
         isEmpty={(list) => list.length === 0}
         empty={<EmptyState title="No entities matched the query.">Change the type, ID or conditions and apply the query again.</EmptyState>}
       >
-        {(list) => <EntityNodes list={list} query={query} renderNode={renderNode} />}
+        {(list) => <EntityNodes list={list} query={query} renderNode={renderNode} paged={!!onPage} />}
       </DataView>
     )
   }
@@ -65,18 +65,39 @@ function EntityList({ result, query, standalone, renderNode }) {
           </div>
         )}
         {content}
+        {onPage && hasCriteria(query) && result.data && <Pager list={result.data} query={query} onPage={onPage} />}
       </div>
     </Card>
   )
 }
 
-function EntityNodes({ list, query, renderNode }) {
+/** Previous and next page. Next is offered while the total says there is more, or, without one, after a full page. */
+function Pager({ list, query, onPage }) {
   const limit = Number(query.limit)
+  const offset = Number(query.offset) || 0
+  const more = list.total != null ? offset + list.length < list.total : list.length >= limit
+  if (offset === 0 && !more) return null
+  return (
+    <nav className="row entity-list__pager" aria-label="Result pages">
+      <Button size="sm" disabled={offset === 0} onClick={() => onPage(Math.max(0, offset - limit))}>Previous page</Button>
+      <Button size="sm" disabled={!more} onClick={() => onPage(offset + limit)}>Next page</Button>
+    </nav>
+  )
+}
+
+function EntityNodes({ list, query, renderNode, paged }) {
+  const limit = Number(query.limit)
+  const offset = Number(query.offset) || 0
+  const total = list.total
+  let count = `${list.length} ${list.length === 1 ? 'entity' : 'entities'}${list.length >= limit ? ` (limit of ${limit} reached)` : ''}`
+  if (paged && (offset > 0 || (total != null && total > list.length) || list.length >= limit)) {
+    count = list.length === 0
+      ? `No entities from ${offset + 1} on${total != null ? ` of ${total}` : ''}`
+      : `Entities ${offset + 1}–${offset + list.length}${total != null ? ` of ${total}` : ''}`
+  }
   return (
     <div className="stack">
-      <p className="muted entity-list__count">
-        {list.length} {list.length === 1 ? 'entity' : 'entities'}{list.length >= limit ? ` (limit of ${limit} reached)` : ''}
-      </p>
+      <p className="muted entity-list__count" role="status">{count}</p>
       <ul className="entity-nodes" aria-label="Matching entities">
         {list.map((e) => <li key={e.id}>{renderNode(e.id, e)}</li>)}
       </ul>
@@ -140,7 +161,7 @@ export default function DataExplorer() {
 
   const types = useData('entities', at ? 'listTypesAt' : 'listTypes', at ? [at] : [], { refreshKey })
   const attributes = useData('entities', 'listAttributes', [], { refreshKey })
-  const request = toRequest(query)
+  const request = toRequest(query, { past: !!at })
   const list = useData('entities', at ? 'queryEntitiesAt' : 'queryEntities', at ? [at, request] : [request], { enabled: hasCriteria(query), refreshKey })
 
   const listed = list.data ?? []
@@ -217,11 +238,12 @@ export default function DataExplorer() {
         query={query}
         types={types.data ?? []}
         attributes={attributes.data ?? []}
+        past={!!at}
         error={listError ?? typesError}
         onApply={(next) => navigate(explorerPath({ ...next, at: query.at }))}
       />
 
-      <EntityList result={list} query={query} standalone={standalone} renderNode={renderNode} />
+      <EntityList result={list} query={query} standalone={standalone} renderNode={renderNode} onPage={at ? null : (offset) => navigate(explorerPath({ ...query, offset: String(offset) }))} />
 
       <ImportDialog open={dialog === 'import'} onClose={() => setDialog(null)} onImported={refresh} />
       <DeleteByTypeDialog open={dialog === 'delete'} types={types.data ?? []} onClose={() => setDialog(null)} onDeleted={refresh} />

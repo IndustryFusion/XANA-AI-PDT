@@ -44,18 +44,21 @@ function ConditionRow({ index, condition, attributes, onChange, onRemove }) {
  * conditions become the NGSI-LD expression shown below it. `error` is the
  * reason the last query was rejected.
  */
-export default function QueryBar({ query, types, attributes, error, onApply }) {
+export default function QueryBar({ query, types, attributes, error, onApply, past = false }) {
   const parsed = parseExpression(query.q)
-  const [form, setForm] = useState({ type: query.type, id: query.id, idPattern: query.idPattern, limit: query.limit })
+  const [form, setForm] = useState({ type: query.type, id: query.id, idPattern: query.idPattern, limit: query.limit, hasAttr: query.hasAttr ?? '' })
+  const [selected, setSelected] = useState(() => (query.attrs ? query.attrs.split(',').filter(Boolean) : []))
   const [conditions, setConditions] = useState(parsed?.conditions ?? [])
   const [combine, setCombine] = useState(parsed?.combine ?? 'and')
-  const ids = { type: useId(), id: useId(), pattern: useId(), limit: useId(), expr: useId(), error: useId() }
+  const ids = { type: useId(), id: useId(), pattern: useId(), limit: useId(), expr: useId(), error: useId(), attrs: useId(), has: useId() }
+  const choices = [...new Set([...attributes, ...selected, ...(form.hasAttr ? [form.hasAttr] : [])])]
   const expression = parsed || conditions.length ? buildExpression(conditions, combine) : query.q
   const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }))
 
   function submit(e) {
     e.preventDefault()
-    onApply({ ...form, q: expression })
+    // A new query starts again at the first page.
+    onApply({ ...form, q: expression, attrs: selected.join(','), offset: '0' })
   }
 
   return (
@@ -83,6 +86,29 @@ export default function QueryBar({ query, types, attributes, error, onApply }) {
             <input id={ids.limit} type="number" min="1" max="1000" value={form.limit} onChange={set('limit')} />
           </div>
         </div>
+
+        {!past && (
+          <div className="field-row">
+            <div className="field">
+              <label className="field__label" htmlFor={ids.has}>Has attribute</label>
+              <select id={ids.has} value={form.hasAttr} onChange={set('hasAttr')}>
+                <option value="">Any</option>
+                {choices.map((a) => <option key={a} value={a}>{a}</option>)}
+              </select>
+            </div>
+            <div className="field">
+              <label className="field__label" htmlFor={ids.attrs}>Attributes to return</label>
+              <select
+                id={ids.attrs} multiple size={Math.min(5, Math.max(2, choices.length))} value={selected}
+                onChange={(e) => setSelected([...e.target.selectedOptions].map((o) => o.value))}
+                aria-describedby={`${ids.attrs}-hint`}
+              >
+                {choices.map((a) => <option key={a} value={a}>{a}</option>)}
+              </select>
+              <p id={`${ids.attrs}-hint`} className="muted field__hint">None selected returns every attribute.</p>
+            </div>
+          </div>
+        )}
 
         <fieldset className="plain-fieldset stack query-builder">
           <legend className="field__label">Attribute conditions</legend>

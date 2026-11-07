@@ -25,7 +25,8 @@ import { MAX_DEPTH } from '../../src/features/explorer/AttributeLine'
 import { hasHistory, sameValue, statusOf } from '../../src/features/explorer/attributes'
 import ValueEditor from '../../src/features/explorer/ValueEditor'
 import { HIGHLIGHT_MS } from '../../src/features/explorer/EntityNode'
-import { renderApp } from '../helpers'
+import { renderApp, renderAppWith } from '../helpers'
+import { entities } from '../../src/data'
 
 const controls = { authEnabled: false }
 const FACTORY = 'urn:ngsi-ld:Factory:plant-north'
@@ -815,5 +816,94 @@ describe('comparing attribute values', () => {
     expect(sameValue({ a: 1 }, { a: 1, b: 2 })).toBe(false)
     expect(sameValue([1], { 0: 1 })).toBe(false)
     expect(sameValue(undefined, { a: 1 })).toBe(false)
+  })
+})
+
+describe('paging, attributes to return and has-attribute', () => {
+  const kind = 'PagedThing'
+  const things = (n = 23) => Array.from({ length: n }, (_, i) => ({
+    id: `urn:test:paged:${String(i).padStart(2, '0')}`,
+    type: kind,
+    n: { type: 'Property', value: i },
+    ...(i % 3 === 0 ? { mark: { type: 'Property', value: 'x' } } : {}),
+  }))
+  const ids = async () => (await nodeHeadings()).map((h) => h.closest('[data-entity]')?.getAttribute('data-entity'))
+
+  test('pages forwards and backwards to the end, with the page in the URL', async () => {
+    const user = userEvent.setup()
+    const all = things()
+    open(`${paths.explorer()}?type=${kind}&limit=10`)
+    addEntities(...all)
+    await user.click(await screen.findByRole('button', { name: 'Apply query' }))
+    await waitFor(async () => expect(await nodeHeadings()).toHaveLength(10))
+    expect(within(await listRegion()).getByText('Entities 1–10 of 23')).toBeVisible()
+    const seen = await ids()
+    await user.click(screen.getByRole('button', { name: 'Next page' }))
+    await waitFor(() => expect(within(screen.getByRole('region', { name: 'Entities' })).getByText('Entities 11–20 of 23')).toBeVisible())
+    expect(window.location.search).toContain('offset=10')
+    seen.push(...await ids())
+    await user.click(screen.getByRole('button', { name: 'Next page' }))
+    await waitFor(() => expect(within(screen.getByRole('region', { name: 'Entities' })).getByText('Entities 21–23 of 23')).toBeVisible())
+    seen.push(...await ids())
+    expect(screen.getByRole('button', { name: 'Next page' })).toBeDisabled()
+    expect(seen).toEqual(all.map((e) => e.id))
+    await user.click(screen.getByRole('button', { name: 'Previous page' }))
+    await waitFor(() => expect(within(screen.getByRole('region', { name: 'Entities' })).getByText('Entities 11–20 of 23')).toBeVisible())
+  })
+
+  test('a URL with a page opens that page, and a new query starts at the first', async () => {
+    const user = userEvent.setup()
+    open(`${paths.explorer()}?type=${kind}&limit=10&offset=20`)
+    addEntities(...things())
+    await user.click(await screen.findByRole('button', { name: 'Apply query' }))
+    await waitFor(async () => expect(await nodeHeadings()).toHaveLength(10))
+    expect(window.location.search).not.toContain('offset=')
+  })
+
+  test('the page from the URL is shown', async () => {
+    renderAppWith(() => addEntities(...things()), { path: `${paths.explorer()}?type=${kind}&limit=10&offset=20`, controls })
+    await waitFor(async () => expect(await nodeHeadings()).toHaveLength(3))
+    expect(within(await listRegion()).getByText('Entities 21–23 of 23')).toBeVisible()
+  })
+
+  test('has attribute lists only entities that have it, each whole', async () => {
+    const user = userEvent.setup()
+    renderAppWith(() => addEntities(...things()), { path: `${paths.explorer()}?type=${kind}&limit=50`, controls })
+    const has = await screen.findByLabelText('Has attribute')
+    await within(has).findByRole('option', { name: 'mark' })
+    await user.selectOptions(has, 'mark')
+    await user.click(screen.getByRole('button', { name: 'Apply query' }))
+    await waitFor(async () => expect(await nodeHeadings()).toHaveLength(8))
+    expect(window.location.search).toContain('hasAttr=mark')
+    const found = await entities.queryEntities({ type: kind, hasAttr: 'mark', limit: 50 })
+    expect(found.every((e) => 'mark' in e && 'n' in e)).toBe(true)
+  })
+
+  test('attributes to return keep only those attributes', async () => {
+    const user = userEvent.setup()
+    renderAppWith(() => addEntities(...things()), { path: `${paths.explorer()}?type=${kind}&limit=50`, controls })
+    const select = await screen.findByLabelText('Attributes to return')
+    await within(select).findByRole('option', { name: 'mark' })
+    await user.selectOptions(select, ['mark'])
+    await user.click(screen.getByRole('button', { name: 'Apply query' }))
+    await waitFor(async () => expect(await nodeHeadings()).toHaveLength(8))
+    expect(window.location.search).toContain('attrs=mark')
+    const found = await entities.queryEntities({ type: kind, attrs: 'mark', limit: 50 })
+    expect(found.every((e) => Object.keys(e).sort().join() === 'id,mark,type')).toBe(true)
+  })
+
+  test('the import dialog says that import replaces, and re-importing without an attribute removes it', async () => {
+    const user = userEvent.setup()
+    open(paths.explorer())
+    await user.click(await screen.findByRole('button', { name: 'Import…' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Import entities' })
+    const doc = [{ id: MACHINE, type: 'Machine', name: { type: 'Property', value: 'Renamed' } }]
+    const file = new File([JSON.stringify(doc)], 'machine.json', { type: 'application/json' })
+    await user.upload(within(dialog).getByLabelText('File with NGSI-LD entities (JSON)'), file)
+    expect(await within(dialog).findByText(/Import replaces:/)).toBeVisible()
+    expect(Object.keys(entityStored(MACHINE)).length).toBeGreaterThan(3)
+    await user.click(within(dialog).getByRole('button', { name: /^Import 1 entities$/ }))
+    expect(await within(dialog).findByText(/Import finished: 0 created, 1 updated, 0 failed/)).toBeVisible()
+    expect(Object.keys(entityStored(MACHINE)).sort()).toEqual(['id', 'name', 'type'])
   })
 })

@@ -101,12 +101,26 @@ export function createEntitiesArea(store) {
   const requireEntity = (id) => find(id) ?? (() => { throw err('not_found', `There is no entity ${id}.`) })()
   const now = () => new Date().toISOString()
 
+  /** As the backend: `offset` skips matches, `attrs` keeps only those attributes (and only entities with one),
+   *  `hasAttr` keeps entities that have it, whole. `total` is given when every entity was searched. */
   function query(list, params) {
     const { test, limit, needsFilter } = compileQuery(params)
+    const offset = params.offset == null || params.offset === '' ? 0 : Number(params.offset)
+    if (!Number.isInteger(offset) || offset < 0) throw err('invalid', 'The offset must be a whole number from 0.')
+    const names = String(params.attrs ?? '').split(',').map((n) => n.trim()).filter(Boolean)
+    const having = String(params.hasAttr ?? '').trim()
+    if (having.includes(',')) throw err('invalid', 'Name one attribute for the has-attribute filter.')
     const cap = currentControls().searchCap
     const capped = cap != null && needsFilter && list.length > cap
-    const found = structuredClone((capped ? list.slice(0, cap) : list).filter(test).slice(0, limit))
+    const matched = (capped ? list.slice(0, cap) : list).filter(test)
+      .filter((e) => !having || having in e)
+      .filter((e) => !names.length || names.some((n) => n in e))
+    const project = (e) => (names.length
+      ? Object.fromEntries(Object.entries(e).filter(([k]) => k === 'id' || k === 'type' || names.includes(k)))
+      : e)
+    const found = structuredClone(matched.slice(offset, offset + limit).map(project))
     if (capped) found.limited = { scanned: cap, total: list.length }
+    else Object.defineProperty(found, 'total', { value: matched.length, enumerable: false })
     return found
   }
 
@@ -280,6 +294,8 @@ export function createEntitiesArea(store) {
           const existing = state.entities.find((e) => e.id === id)
           if (existing && existing.type !== raw.type) return fail(`An entity with this ID exists with the type ${existing.type}.`)
           if (existing) {
+            // Replaced, as the broker does: attributes that are not in the file are removed.
+            for (const key of Object.keys(existing)) if (!RESERVED.includes(key)) delete existing[key]
             Object.assign(existing, structuredClone(attrs))
             results.push({ id, result: 'updated', reason: null })
           } else {
@@ -344,7 +360,8 @@ export function createEntitiesArea(store) {
     }),
 
     listTypesAt: withControls((at) => [...new Set(entitiesAt(parseMoment(at)).map((e) => e.type))].sort()),
-    queryEntitiesAt: withControls((at, params = {}) => query(entitiesAt(parseMoment(at)), params)),
+    // The past keeps its limit: no paging or attribute selection there.
+    queryEntitiesAt: withControls((at, { offset: _o, attrs: _a, hasAttr: _h, ...params } = {}) => query(entitiesAt(parseMoment(at)), params)),
 
     subscribeEntities(params = {}, onEvent) {
       const sub = { params: params ?? {}, onEvent }

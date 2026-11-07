@@ -96,9 +96,13 @@ export function createRunEngine(store, { speed = () => 1, connected = () => true
     },
 
     /** Removes a run from playback (archive). */
+    /** The run was archived: its watchers learn it is gone, as the backend's stream tells them. */
     remove(runId) {
       clear(runId)
       interrupted.delete(runId)
+      const error = new DataError('runs', 'not_found', `Run ${runId} was archived.`)
+      for (const listener of listeners.get(runId) ?? []) listener({ type: 'error', error })
+      listeners.delete(runId)
     },
 
     snapshot(runId) {
