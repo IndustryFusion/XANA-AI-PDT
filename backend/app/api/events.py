@@ -18,16 +18,18 @@
 from __future__ import annotations
 
 import hmac
+import json
 from typing import Any
 
 from fastapi import APIRouter, Request
 
-from app.errors import invalid, unauthorized
+from app.errors import Refused, invalid, unauthorized
 from app.events.worker import alert_event, ngsi_events
 
 router = APIRouter(prefix="/events", tags=["events"])
 
 REFUSED = "This call needs the webhook secret."
+MAX_BODY = 10 * 1024 * 1024
 
 
 def _check_secret(request: Request) -> None:
@@ -39,8 +41,13 @@ def _check_secret(request: Request) -> None:
 
 
 async def _body(request: Request) -> Any:
+    received = bytearray()
+    async for chunk in request.stream():
+        received += chunk
+        if len(received) > MAX_BODY:
+            raise Refused("invalid", "The body is too large.", status=413)
     try:
-        return await request.json()
+        return json.loads(received)
     except (ValueError, RecursionError):
         raise invalid("The body isn't JSON that can be read.") from None
 
