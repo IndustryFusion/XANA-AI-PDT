@@ -31,6 +31,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from app.errors import invalid
+from app.ngsi.broker import check_document
 from app.ngsi.fetch import fetch_document
 from app.ngsi.timeshift import TimeShift
 
@@ -57,6 +58,7 @@ def _answer(found: list) -> Any:
 def _attributes(body: Any) -> dict[str, Any]:
     if not isinstance(body, dict) or not body:
         raise invalid("Name at least one attribute.")
+    check_document(body)
     return body
 
 
@@ -130,6 +132,7 @@ async def delete_by_types(body: TypeNames, request: Request) -> list[dict]:
 async def import_entities(body: Annotated[Any, Body()], request: Request) -> JSONResponse:
     if not isinstance(body, list):
         raise invalid("Import expects a list of NGSI-LD entities.")
+    check_document(body)
     results = await request.app.state.broker.import_entities(body)
     partial = any(item["result"] == "failed" for item in results)
     return JSONResponse(results, status_code=207 if partial else 200)

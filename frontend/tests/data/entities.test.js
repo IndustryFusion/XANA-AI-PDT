@@ -18,7 +18,7 @@ import { areas } from '../../src/data'
 import { store } from '../../src/data/sources/mock'
 import { writeControls } from '../../src/data/sources/mock/controls'
 import { LIVE_UPDATE_MS, SAMPLE_DOCUMENTS } from '../../src/data/sources/mock/entitiesArea'
-import { parseQuery } from '../../src/data/sources/mock/ngsiQuery'
+import { matches, parseQuery } from '../../src/data/sources/mock/ngsiQuery'
 import { resetMock } from '../helpers'
 
 const { entities } = areas
@@ -266,5 +266,22 @@ describe('attribute status and the search limit', () => {
     expect(points).toHaveLength(2)
     expect(points.limited).toEqual({ newest: 2 })
     writeControls({ searchCap: null })
+  })
+})
+
+describe('patterns are the text as written', () => {
+  test.each([
+    ['serial~=20', 'M20-A', true],
+    ['serial!~=20', 'M20-A', false],
+    ['serial~=20.0', 'M20-A', false],
+    ['serial~=true', 'not-true-1', true],
+    ['serial!~=true', 'M20-A', true],
+    ['serial~="M","Z"', 'Z-1', true],
+    ['serial~="M","Z"', 'A-1', false],
+    ['serial!~="M","Z"', 'Z-1', false],
+    ['serial!~="M","Z"', 'A-1', true],
+    ['serial~=1..5', '11115', true],
+  ])('%s on %s', (q, value, found) => {
+    expect(matches({ id: 'urn:e', type: 'T', serial: { type: 'Property', value } }, parseQuery(q))).toBe(found)
   })
 })

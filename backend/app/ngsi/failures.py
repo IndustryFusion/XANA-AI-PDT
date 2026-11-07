@@ -25,12 +25,21 @@ import httpx
 from app.errors import Refused, bad_gateway, conflict, invalid, not_found, unauthorized
 
 MAX_REASON = 500
+# Enough for any reason worth showing, and what bounds the time the patterns below can take.
+MAX_READ = 4 * MAX_REASON
 _ADDRESS = re.compile(r"\b[A-Za-z][A-Za-z0-9+.\-]*://[^\s\"'<>]+")
+# Without a scheme: an IP address, a name with a port, or a cluster-internal name. An `urn:a:12` is none of them.
+_BARE_ADDRESS = re.compile(
+    r"\[?/?\b\d{1,3}(?:\.\d{1,3}){3}(?::\d+)?\]?"
+    r"|(?<![\w:.\-])[A-Za-z0-9][\w.\-]*:\d{2,5}\b"
+    r"|\b[A-Za-z0-9][\w\-]*(?:\.[\w\-]+)*\.(?:svc|local|internal|cluster)\b(?:\.[\w\-]+)*"
+)
 
 
 def scrubbed(reason: str) -> str:
     """A service's reason, without any address in it: those can be internal ones."""
-    return _ADDRESS.sub("[address]", reason)[:MAX_REASON]
+    bounded = reason[:MAX_READ]
+    return _BARE_ADDRESS.sub("[address]", _ADDRESS.sub("[address]", bounded))[:MAX_REASON]
 
 
 def reason_from(response: httpx.Response) -> str | None:

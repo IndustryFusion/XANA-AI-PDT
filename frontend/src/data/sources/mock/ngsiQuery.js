@@ -70,7 +70,7 @@ export function parseQuery(text) {
     if (!op) return { op: 'exists', path: p }
     pos += op.length
     skip()
-    return { op, path: p, value: value() }
+    return { op, path: p, value: op === '~=' || op === '!~=' ? patterns() : value() }
   }
 
   function name() {
@@ -106,14 +106,30 @@ export function parseQuery(text) {
       pos++
       return out
     }
-    const m = /^[^;|)",]+/.exec(src.slice(pos))
-    if (!m || !m[0].trim()) fail('expected a value')
-    pos += m[0].length
-    const raw = m[0].trim()
+    const raw = bare()
     if (raw === 'true') return true
     if (raw === 'false') return false
     if (/^-?\d+(\.\d+)?$/.test(raw)) return Number(raw)
     return raw
+  }
+
+  function bare() {
+    const m = /^[^;|)",]+/.exec(src.slice(pos))
+    if (!m || !m[0].trim()) fail('expected a value')
+    pos += m[0].length
+    return m[0].trim()
+  }
+
+  /** A pattern is text as written: `20` is not a number, and `true` is not a boolean. */
+  function pattern() {
+    skip()
+    return src[pos] === '"' ? single() : bare()
+  }
+
+  function patterns() {
+    const list = [pattern()]
+    while (src[pos] === ',') { pos++; list.push(pattern()) }
+    return list.length === 1 ? list[0] : { list }
   }
 
   function value() {
@@ -167,9 +183,12 @@ function compare(a, op, b) {
     return op === '==' ? eq : !eq
   }
   if (op === '~=' || op === '!~=') {
-    let re
-    try { re = new RegExp(String(b)) } catch { throw invalid(`"${b}" is not a valid pattern.`) }
-    return re.test(String(a)) === (op === '~=')
+    const found = (b && typeof b === 'object' ? b.list : [b]).some((item) => {
+      let re
+      try { re = new RegExp(item) } catch { throw invalid(`"${item}" is not a valid pattern.`) }
+      return re.test(String(a))
+    })
+    return found === (op === '~=')
   }
   if (typeof a === 'number' && typeof b === 'number') {
     return { '>': a > b, '>=': a >= b, '<': a < b, '<=': a <= b }[op]
