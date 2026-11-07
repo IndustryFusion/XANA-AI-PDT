@@ -634,3 +634,85 @@ async def test_peers_and_access_levels_answer_in_time_with_the_registry_hanging(
         await asyncio.wait_for(read(), 8)
         assert asyncio.get_running_loop().time() - started < NAMES_WITHIN_S + 1
     await conn.close()
+
+
+class Slow(Registry):
+    """A healthy registry that takes `seconds` per answer, or longer for some paths."""
+
+    def __init__(self, seconds: float, slower: dict[str, float] | None = None) -> None:
+        super().__init__()
+        self.seconds = seconds
+        self.slower = slower or {}
+
+    async def handle(self, request: httpx.Request) -> httpx.Response:
+        raw = request.url.raw_path.decode()
+        self.paths.append(raw)
+        await asyncio.sleep(self.slower.get(raw, self.seconds))
+        answer = self.answers.get(raw, (200, {"company": None}))
+        if isinstance(answer, Exception):
+            raise answer
+        return httpx.Response(answer[0], json=answer[1])
+
+
+def slow_client(registry):
+    return RegistryClient(make_settings(ifric_url=REGISTRY), lambda: "t", transport=registry.transport())
+
+
+async def test_the_kept_directory_names_companies_while_the_registry_is_down():
+    registry, client = client_of()
+    registry.answers[company_path(PEER)] = (403, {"message": "Forbidden"})
+    registry.answers[DIRECTORY] = directory((PEER, "Peer Werke"))
+    assert await client.names([PEER]) == {PEER: "Peer Werke"}
+    for path in (company_path(PEER), DIRECTORY):
+        registry.answers[path] = httpx.ConnectError("refused")  # the registry goes away
+    assert await client.names([PEER]) == {PEER: "Peer Werke"}  # from the directory kept for 300 s
+    assert await client.names([PEER, BUILDER]) == {PEER: "Peer Werke", BUILDER: ""}
+
+
+async def test_a_long_list_on_a_slow_healthy_registry_does_not_pause_it():
+    registry = Slow(0.4)
+    registry.answers[company_path(BUILDER)] = (200, {"company_name": "Builder GmbH"})
+    client = slow_client(registry)
+    ids = [f"urn:ifric:many-{n}" for n in range(80)]
+    started = asyncio.get_running_loop().time()
+    await client.names(ids)  # more than the time allows: the rest is left out of this answer only
+    assert asyncio.get_running_loop().time() - started < NAMES_WITHIN_S + 0.5
+    asked = len(registry.paths)
+    assert await client.names([BUILDER]) == {BUILDER: "Builder GmbH"}  # still asked
+    assert len(registry.paths) > asked
+
+
+async def test_one_server_error_does_not_pause_the_other_ids():
+    registry, client = client_of()
+    broken = "urn:ifric:broken"
+    registry.answers[company_path(broken)] = (500, {"message": "boom"})
+    others = [f"urn:ifric:fine-{n}" for n in range(11)]
+    for n, other in enumerate(others):
+        registry.answers[company_path(other)] = (200, {"company_name": f"Fine {n}"})
+    names = await client.names([broken, *others])
+    assert names == {broken: ""} | {other: f"Fine {n}" for n, other in enumerate(others)}
+    assert await client.names([others[0]]) == {others[0]: "Fine 0"}
+
+
+async def test_repeated_server_errors_pause_the_registry():
+    registry, client = client_of()
+    ids = [f"urn:ifric:down-{n}" for n in range(3)]
+    for i in ids:
+        registry.answers[company_path(i)] = (503, {"message": "down"})
+    registry.answers[DIRECTORY] = (503, {"message": "down"})
+    await client.names(ids)
+    asked = len(registry.paths)
+    assert await client.names(["urn:ifric:other"]) == {"urn:ifric:other": ""}
+    assert len(registry.paths) == asked
+
+
+async def test_a_slow_directory_is_read_once_in_the_background_and_kept_for_next_time():
+    registry = Slow(0.01, slower={DIRECTORY: 4.0})
+    registry.answers[company_path(PEER)] = (403, {"message": "Forbidden"})
+    registry.answers[DIRECTORY] = directory((PEER, "Peer Werke"))
+    client = slow_client(registry)
+    first, second = await asyncio.gather(client.names([PEER]), client.names([PEER]))
+    assert first == second == {PEER: ""}  # the time was up before the directory came
+    await asyncio.sleep(1.5)  # the read goes on and is kept
+    assert await client.names([PEER]) == {PEER: "Peer Werke"}
+    assert registry.paths.count(DIRECTORY) == 1
