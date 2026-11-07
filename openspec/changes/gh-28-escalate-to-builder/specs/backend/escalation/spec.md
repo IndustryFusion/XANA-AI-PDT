@@ -44,6 +44,10 @@ Before sending, the backend SHALL filter the data to `DATA_SHARING_POLICY` and t
 - **WHEN** the tier is `timeseries` and access is allowed
 - **THEN** entity data, related entities and history are sent
 
+#### Scenario: History without related entities
+- **WHEN** history is allowed and related entities aren't, also for a grant of history alone
+- **THEN** the history holds only the machine's own signals
+
 #### Scenario: Access not allowed
 - **WHEN** the tier includes a capability whose access is `on-request`, `pending` or `denied`
 - **THEN** its data is withheld, and the policy check names it with the reason
