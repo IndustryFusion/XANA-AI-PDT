@@ -93,6 +93,7 @@ class Dataspace:
         self.message_status: dict[str, str] = {}
         self.fail_status: dict[str, str] = {}
         self.conversations: dict[str, dict[str, Any]] = {}
+        self.refused: list[dict[str, Any]] = []
         self.inbox: list[dict[str, Any]] = []
         self.acks: list[str] = []
         self.downloads: dict[str, bytes] = {}
@@ -229,12 +230,32 @@ class Dataspace:
         conversation = self.conversations.get(body.get("conversation_id"))
         if conversation and conversation["state"].startswith("CLOSED") and body["performative"] != "close":
             if body["performative"] != "reopen" or conversation["outcome"] in ("escalated", "superseded"):
-                return httpx.Response(
-                    409, json={"error": "conversation_state_violation", "reason": "conversation_closed"}
-                )
+                return self._refuse(body, "conversation_closed")
+        if (
+            conversation
+            and conversation["state"] == "ESCALATING"
+            and conversation.get("escalated_by") == BUILDER
+            and body["performative"] in ("close", "deescalate")
+        ):
+            return self._refuse(body, "not_escalator")
         answer = self._accepted(body)
         self._move(body)
         return answer
+
+    def _refuse(self, body: dict[str, Any], reason: str) -> httpx.Response:
+        """As the contract says: a refused send is kept, and listed with `applied: false`."""
+        message_id = f"refused-{len(self.refused) + 1}"
+        self.refused.append({**body, "message_id": message_id})
+        conversation = self.conversations[body["conversation_id"]]
+        return httpx.Response(
+            409,
+            json={
+                "error": "conversation_state_violation",
+                "reason": reason,
+                "message_id": message_id,
+                "conversation_state": conversation["state"],
+            },
+        )
 
     def _move(self, body: dict[str, Any]) -> None:
         conversation = self.conversations.setdefault(body["conversation_id"], {"state": "OPEN", "outcome": None})
@@ -254,8 +275,33 @@ class Dataspace:
                 "direction": "sent",
                 "performative": m.get("performative"),
                 "payload": m.get("payload"),
+                "in_reply_to": m.get("in_reply_to"),
+                "capability": m.get("capability"),
+                "outcome": m.get("outcome"),
+                "has_files": m.get("kind") == "files",
+                "applied": True,
+                "status": self.message_status.get(m["message_id"], "notified"),
             }
             for m in self.sent
+            if m["conversation_id"] == conversation_id
+        ]
+        messages += [
+            {
+                "message_id": m["message_id"],
+                "direction": "sent",
+                "performative": m.get("performative"),
+                "payload": m.get("payload"),
+                "in_reply_to": m.get("in_reply_to"),
+                "capability": m.get("capability"),
+                "applied": False,
+                "status": "rejected",
+            }
+            for m in self.refused
+            if m["conversation_id"] == conversation_id
+        ]
+        messages += [
+            {"message_id": m["message_id"], "direction": "received", "performative": m.get("performative")}
+            for m in self.inbox
             if m["conversation_id"] == conversation_id
         ]
         return httpx.Response(200, json={"conversation_id": conversation_id, **known, "messages": messages})

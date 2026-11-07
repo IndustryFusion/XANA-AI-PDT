@@ -23,6 +23,7 @@
 import { KNOWLEDGE_BASE_ENABLED, OPERATIONS } from './interface'
 import { DataError, toDataError } from './errors'
 import * as backendSource from './sources/backend'
+import { basePath } from './sources/backend/http'
 import * as mockSource from './sources/mock'
 
 export { DataError } from './errors'
@@ -32,6 +33,9 @@ export {
 } from './interface'
 
 export const DATA_SOURCE_SETTING = 'VITE_DATA_SOURCE'
+
+/** A link to a backend address, for a browser to follow, under the backend's prefix. */
+export const filesHref = (url) => `${basePath()}${url}`
 const SOURCES = { mock: mockSource, backend: backendSource }
 export const AVAILABLE_SOURCES = Object.keys(SOURCES)
 

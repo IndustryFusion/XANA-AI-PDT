@@ -76,8 +76,8 @@ Every other operation (the optional knowledge base, and service settings) comes 
 | `confirmResolution(runId, { confirmed, text, files })` | confirm, or reject with reason (required) and files | `{ status }` | `conflict`, `invalid` |
 | `escalationPreflight(runId)` | run ID | `{ possible, reason \| null, recipient: { id, name } \| null, data: [{ label, category }], sharingTier }` | `not_found` |
 | `escalate(runId)` | run ID; possible while the run is `awaiting_input` or `awaiting_confirmation` | `{ status, escalationRef }` | `conflict`, `unavailable` |
-| `approveDataRequest(runId, { approved, note })` | decision on a data request beyond the sharing tier | `{ status }` | `conflict` |
-| `replyToRecommendation(runId, { action, message })` | `resolved` \| `still_failing` \| `escalate` | `{ status }` | `conflict`, `invalid` |
+| `approveDataRequest(runId, { approved, note, requestId })` | decision on the data request shown; `conflict` if another is waiting by now | `{ status }` | `conflict` |
+| `replyToRecommendation(runId, { action, message, recommendationId })` | `resolved` \| `still_failing` \| `escalate`, on the recommendation shown; `conflict` if another is waiting by now | `{ status }` | `conflict`, `invalid` |
 | `sendConversationAct(runId, { act, outcome, text, inReplyTo })` | `inform`, `request`, `grant`, `deny`, `escalate` (ask for direct contact), `deescalate` (end direct contact), `close` (with `outcome`), `cancel` | `{ status, convState }` | `conflict`, `invalid` |
 | `askAgent(runId, message)` | free text to the incident agent | `{ reply }` | `unavailable`, `conflict` |
 | `getOutboxStatus(runId)` | run ID | `[{ messageId, status }]` delivery status (`pending`, `delivered`, `failed`) of sent messages | `not_found` |
@@ -116,11 +116,11 @@ On the backend source, the output of an `observe` step holds `alerts`: `[{ id, r
 | `awaiting_confirmation` | `{ rootCause, recommendedAction, confidence, rejected: [{ rootCause, recommendedAction, reason, at }] }` |
 | `awaiting_machine_builder` | `{ escalationRef, builder }` |
 | `awaiting_operator_approval` | `{ escalationRef, builder, requestId, text, tier, requested[], withinTier[], needsApproval[] }`; items are `{ label, category }` |
-| `awaiting_recommendation_review` | `{ escalationRef, builder, summary, actions[] }` (actions in order) |
+| `awaiting_recommendation_review` | `{ escalationRef, builder, recommendationId, summary, actions[] }` (actions in order) |
 | `mb_closed` | `{ outcome, reason, reopenable, recordedBy: machine_builder \| operator }` |
 | `completed` | `{ rootCause, recommendedAction, confidence, incidentLogged, resolvedBy? }` |
 | `failed` | `{ error, node }` |
-| `stopped` | `{ by, reason, reopenable, outcome? }` |
+| `stopped` | `{ by, reason, reopenable, outcome?, closePending?, closeProblem? }`: with `closePending`, the machine builder hasn't been told yet, and archiving is refused as `conflict` |
 
 **Conversation.** The conversation with the machine builder is part of the step list: every message is a `message` step with output `{ messageId, sender: agent \| operator \| machine_builder, act, text, convState, inReplyTo?, outcome?, dataRequest?, recommendation?, internal? }`. `convState` is the conversation state after the message: `open`, `direct_contact_operator`, `direct_contact_machine_builder` or `closed`. `internal` messages (questions to the incident agent and its answers, notes) are never sent to the machine builder. Which acts are valid in which state is defined once in `src/data/conversationActs.js`, used by screens and data sources alike. `policy_check` steps record what was sent under which data-sharing tier and what was withheld; `suggest` steps carry the agent's suggested next acts `{ suggestions: [{ act, text }] }`.
 

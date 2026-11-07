@@ -29,10 +29,10 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from app.dataspace.gateway import GatewayClient
-from app.dataspace.sharing import LABELS, TIERS, Sharing
+from app.dataspace.sharing import ALLOWED_ACCESS, LABELS, TIERS, Sharing
 from app.errors import Refused, conflict, invalid, not_found, unavailable
 from app.memory.store import IncidentStore, RunStore
-from app.runs.escalation import Escalator
+from app.runs.escalation import DELIVERY, Escalator
 from app.runs.model import (
     AWAITING_MACHINE_BUILDER,
     AWAITING_OPERATOR_APPROVAL,
@@ -40,6 +40,7 @@ from app.runs.model import (
     COMPLETED,
     CONVERSATION,
     MB_CLOSED,
+    OPEN,
     STOPPED,
     RunState,
 )
@@ -57,6 +58,31 @@ GRANT_DAYS = 30
 NOT_REOPENABLE = ("escalated", "superseded")
 OUTCOME_TO_SEND = {"not_resolved": "failed"}
 PROTOCOL_ACTS = ("inform", "request", "escalate", "deescalate")
+
+
+def clean(value: Any) -> Any:
+    """A peer's data without what the database can't store: NUL and lone surrogates, at any depth."""
+    if isinstance(value, str):
+        return value.replace("\x00", "").encode("utf-8", "ignore").decode("utf-8")
+    if isinstance(value, list):
+        return [clean(item) for item in value]
+    if isinstance(value, dict):
+        return {clean(key): clean(item) for key, item in value.items()}
+    return value
+
+
+def conversation_of(state: RunState) -> str | None:
+    """The run's conversation, also while its escalation is half finished: files accepted, request not."""
+    return state.conversation_id or (state.attempt or {}).get("conversation_id")
+
+
+def sent_rows(conversation: dict[str, Any]) -> list[dict[str, Any]]:
+    """What this side sent. The gateway keeps a refused send in the list too, marked: that was not sent."""
+    return [
+        m
+        for m in conversation.get("messages") or []
+        if m.get("direction") == "sent" and m.get("applied") is not False and m.get("status") != "rejected"
+    ]
 
 
 def conversation_state(conversation: dict[str, Any], me: str | None) -> str:
@@ -163,6 +189,7 @@ def waiting_status(state: RunState) -> tuple[str, dict[str, Any]]:
     if found := pending_recommendation(state):
         recommendation = found["recommendation"]
         return AWAITING_RECOMMENDATION_REVIEW, base | {
+            "recommendation_id": found["message_id"],
             "summary": recommendation["summary"],
             "actions": recommendation["actions"],
         }
@@ -189,13 +216,17 @@ class ConversationDesk:
         self._unknown_logged: set[str] = set()
         self._reconciled: set[str] = set()
 
+    async def ready(self) -> None:
+        await self._m.ready()
+
     # ── Receiving ────────────────────────────────────────────────────────────
 
     def _run_of(self, conversation_id: str) -> RunRecord | None:
-        return next((r for r in self._m.records() if r.state.conversation_id == conversation_id), None)
+        return next((r for r in self._m.records() if conversation_of(r.state) == conversation_id), None)
 
     async def receive(self, message: dict[str, Any]) -> bool:
         """Handles one message. True when it is safely stored and can be acknowledged."""
+        message = clean(message)
         message_id, conversation_id = message.get("message_id"), message.get("conversation_id")
         if await self._runs.was_processed(message_id):
             return True
@@ -204,18 +235,29 @@ class ConversationDesk:
         state_now = conversation_state(conversation, self._gateway.connection.participant_id)
         step = self._message_step(message, state_now, rec.state.round if rec else 1)
         if rec is None:
-            if await self._incidents.add_late_message(conversation_id, step, message_id):
-                return True
+            return await self._receive_late(message, step)
+        await self._take_files(rec.state.run_id, message, step)
+        async with rec.lock:
+            current = self._m.is_current(rec)
+            if current:
+                await self._apply(rec, message, step, conversation)
+        if not current:  # archived while this message was in hand
+            return await self._receive_late(message, step)
+        if _worth_reviewing(step["output"]):
+            self._m.spawn(self.review(rec, message_id), f"review {message_id}")
+        return True
+
+    async def _receive_late(self, message: dict[str, Any], step: dict[str, Any]) -> bool:
+        """A message for a conversation already archived goes on its record, with its files."""
+        message_id, conversation_id = message.get("message_id"), message.get("conversation_id")
+        run_id = await self._incidents.run_of_conversation(conversation_id)
+        if run_id is None:
             if message_id not in self._unknown_logged:
                 self._unknown_logged.add(message_id)
                 log.warning("A message belongs to no run or incident, and stays unacknowledged: %s", message_id)
             return False
-        await self._take_files(rec, message, step)
-        async with rec.lock:
-            await self._apply(rec, message, step, conversation)
-        if _worth_reviewing(step["output"]):
-            self._m.spawn(self.review(rec, message_id), f"review {message_id}")
-        return True
+        await self._take_files(run_id, message, step)
+        return await self._incidents.add_late_message(conversation_id, step, message_id)
 
     def _message_step(self, message: dict[str, Any], state_now: str, round_: int) -> dict[str, Any]:
         act = str(message.get("performative") or "inform")
@@ -239,12 +281,12 @@ class ConversationDesk:
         at = message.get("received_at") or message.get("created_at") or self._m.now().isoformat()
         return {"node": "message", "input": None, "output": output, "at": at, "round": round_}
 
-    async def _take_files(self, rec: RunRecord, message: dict[str, Any], step: dict[str, Any]) -> None:
+    async def _take_files(self, run_id: str, message: dict[str, Any], step: dict[str, Any]) -> None:
         if not message.get("has_files"):
             return
         message_id = message["message_id"]
         output = step["output"]
-        output["files_url"] = f"/api/agent/message-files/{rec.state.run_id}/{message_id}"
+        output["files_url"] = f"/api/agent/message-files/{run_id}/{message_id}"
         try:
             content = await self._gateway.download(message_id, MAX_STORED_FILE)
         except Refused as refused:
@@ -257,7 +299,7 @@ class ConversationDesk:
             output.pop("files_url")
             return
         if content is not None:
-            await self._runs.save_file(message_id, rec.state.run_id, content)
+            await self._runs.save_file(message_id, run_id, content)
 
     async def _apply(
         self, rec: RunRecord, message: dict[str, Any], step: dict[str, Any], conversation: dict[str, Any]
@@ -278,7 +320,7 @@ class ConversationDesk:
                     "recorded_by": "machine_builder",
                 },
             }
-        elif output["act"] == "reopen" and not closed and state.status in (MB_CLOSED, STOPPED):
+        elif output["act"] == "reopen" and not closed and state.status in (MB_CLOSED, STOPPED, COMPLETED):
             status, data = waiting_status(grown)
             fields = {"status": status, "data": data}
         elif not closed and state.status in CONVERSATION:
@@ -287,12 +329,9 @@ class ConversationDesk:
                 fields = {"status": status, "data": data}
         await self._m.change(rec, step=step, processed=message["message_id"], **fields)
 
-    async def read_file(self, run_id: str, message_id: str) -> AsyncIterator[bytes]:
-        """A received file bundle: stored, or from the gateway if it was too large to store."""
+    async def read_file(self, message_id: str) -> AsyncIterator[bytes]:
+        """A received file bundle, whatever became of the run: stored, or from the gateway if too large to store."""
         await self._m.ready()
-        rec = self._m.record(run_id)
-        if not any(m.get("message_id") == message_id and m.get("files_url") for m in messages_of(rec.state)):
-            raise not_found("This run has no such files.")
         stored = await self._runs.read_file(message_id)
         if stored is not None:
 
@@ -300,7 +339,17 @@ class ConversationDesk:
                 yield stored
 
             return once()
-        return self._gateway.iter_download(message_id)
+        if not await self._runs.was_processed(message_id):
+            raise not_found("There are no such files.")
+        chunks = self._gateway.iter_download(message_id)
+        first = await anext(chunks, b"")  # so that a refusal is an answer, not a broken download
+
+        async def rest() -> AsyncIterator[bytes]:
+            yield first
+            async for chunk in chunks:
+                yield chunk
+
+        return rest()
 
     # ── Reviews and questions ────────────────────────────────────────────────
 
@@ -390,6 +439,8 @@ class ConversationDesk:
             log.warning("Run %s: no review: %s", rec.state.run_id, failure.reason)
             return
         async with rec.lock:
+            if not self._m.is_current(rec):
+                return  # archived meanwhile
             for step in self._agent_steps(rec.state, reply, reviewed=message_id):
                 await self._m.change(rec, step=step)
 
@@ -413,14 +464,29 @@ class ConversationDesk:
             rec.busy = False
 
     def _receiver(self, state: RunState) -> str:
-        return state.escalation["recipient"]["id"]
+        if state.escalation:
+            return state.escalation["recipient"]["id"]
+        receiver = (state.attempt or {}).get("receiver")
+        if not receiver:
+            raise unavailable("The machine builder of this half-finished escalation isn't known.")
+        return receiver
+
+    async def _conversation_id(self, rec: RunRecord) -> str:
+        """The conversation, asking the gateway if the escalation failed before it was known."""
+        if found := conversation_of(rec.state):
+            return found
+        attempt = rec.state.attempt or {}
+        found = await self._escalator.conversation_of(attempt["files_message_id"])
+        async with rec.lock:
+            await self._m.change(rec, attempt={**attempt, "conversation_id": found})
+        return found
 
     async def _send(self, rec: RunRecord, act: str, text: str, **fields: Any) -> dict[str, Any]:
         """Sends a message and stores it as a step, with its delivery to follow."""
         state = rec.state
         payload = {"text": text} if text else {}
         answer = await self._gateway.send_message(
-            self._receiver(state), performative=act, conversation_id=state.conversation_id, payload=payload, **fields
+            self._receiver(state), performative=act, conversation_id=conversation_of(state), payload=payload, **fields
         )
         output = {
             "message_id": answer["message_id"],
@@ -439,7 +505,7 @@ class ConversationDesk:
 
     async def _read_state(self, state: RunState, act: str) -> str:
         try:
-            conversation = await self._gateway.conversation(state.conversation_id)
+            conversation = await self._gateway.conversation(conversation_of(state))
         except Refused as refused:
             log.info("The conversation's state was not read: %s", refused.message)
             return "closed" if act == "close" else last_state(state)
@@ -465,7 +531,7 @@ class ConversationDesk:
             pending = pending_request(state)
             if pending is None or (in_reply_to and pending["message_id"] != in_reply_to):
                 raise invalid("Only a request naming a capability can be granted or denied. Answer with inform.")
-            await self.decide(run_id, act == "grant", text)
+            await self.decide(run_id, act == "grant", text, in_reply_to)
             return {"status": rec.state.status, "conv_state": last_state(rec.state)}
         if act == "close" or act == "cancel":
             return await self._close(rec, act, text, outcome)
@@ -503,26 +569,52 @@ class ConversationDesk:
                 "outcome": outcome or sent,
                 "reopenable": sent not in NOT_REOPENABLE,
             }
-            await self._store_sent(rec, step, status=STOPPED, data=data)
+            await self._store_sent(rec, step, status=STOPPED, data=await self._as_closed(rec, step, data))
         return {"status": STOPPED, "conv_state": "closed"}
+
+    async def _as_closed(self, rec: RunRecord, step: dict[str, Any], data: dict[str, Any]) -> dict[str, Any]:
+        """A close that came too late changed nothing: the conversation's own outcome is the true one."""
+        if step["output"].get("applied") is not False:
+            return data
+        try:
+            outcome = (await self._gateway.conversation(conversation_of(rec.state))).get("outcome")
+        except Refused as refused:
+            log.info("The outcome of a conversation was not read: %s", refused.message)
+            return data
+        step["output"]["outcome"] = outcome
+        return data | {"outcome": outcome, "reopenable": outcome not in NOT_REOPENABLE}
 
     # ── Data requests and recommendations ────────────────────────────────────
 
-    async def decide(self, run_id: str, approved: bool, note: str) -> dict[str, str]:
+    async def decide(self, run_id: str, approved: bool, note: str, request_id: str | None = None) -> dict[str, str]:
         await self._m.ready()
         rec = self._m.record(run_id)
         async with self._sending(rec, (AWAITING_OPERATOR_APPROVAL,), "deciding on a data request"):
             request = pending_request(rec.state)
             if request is None:
                 raise conflict("No data request is waiting.")
+            if request_id and request["message_id"] != request_id:
+                raise conflict("This data request is no longer the one waiting. Look at the current one.")
             if approved:
                 await self._grant(rec, request, note)
             else:
+                await self._withdraw_approval(rec, request)
                 step = await self._send(
                     rec, "deny", note, capability=request["capability"], in_reply_to=request["message_id"]
                 )
                 await self._store_sent(rec, step)
         return {"status": rec.state.status}
+
+    async def _withdraw_approval(self, rec: RunRecord, request: dict[str, Any]) -> None:
+        """A grant that failed left access approved by this backend. The operator declined, so it goes back."""
+        left_approved = any(
+            step["node"] == "grant_failed"
+            and step["output"].get("request_id") == request["message_id"]
+            and step["output"].get("policy_approved")
+            for step in rec.state.steps
+        )
+        if left_approved:
+            await self._gateway.set_policy(self._receiver(rec.state), request["capability"], "reset")
 
     async def _grant(self, rec: RunRecord, request: dict[str, Any], note: str) -> None:
         state = rec.state
@@ -532,9 +624,13 @@ class ConversationDesk:
             m.get("act") == "grant" and m.get("in_reply_to") == request["message_id"] for m in messages_of(state)
         )
         names: list[str] = []
+        approved_here = False
         try:
             if not granted:
+                access = await self._gateway.access(consumer=receiver)
+                before = next((item.get("status") for item in access if item.get("capability") == capability), None)
                 await self._gateway.set_policy(receiver, capability, "approve")
+                approved_here = before not in ALLOWED_ACCESS
                 expires = (datetime.now(UTC) + timedelta(days=GRANT_DAYS)).isoformat()
                 step = await self._send(
                     rec,
@@ -545,6 +641,7 @@ class ConversationDesk:
                     authorization={"scope": "conversation", "expires_at": expires, "constraints": {}},
                 )
                 await self._store_sent(rec, step)
+                granted, approved_here = True, False
             sharing = Sharing(state.escalation["tier"], (capability,), ())
             files = await self._escalator.files(rec.state, sharing) if capability in LABELS else []
             names = [name for name, _ in files]
@@ -565,7 +662,12 @@ class ConversationDesk:
                     step=self._m.make_step(
                         "grant_failed",
                         None,
-                        {"error": refused.message, "request_id": None, "granted": granted},
+                        {
+                            "error": refused.message,
+                            "request_id": request["message_id"],
+                            "granted": granted,
+                            "policy_approved": approved_here,
+                        },
                         state.round,
                     ),
                 )
@@ -586,7 +688,9 @@ class ConversationDesk:
             outbox = (*rec.state.outbox, entry) if entry else rec.state.outbox
             await self._m.change(rec, step=step, status=status, data=data, outbox=outbox)
 
-    async def answer_recommendation(self, run_id: str, action: str, message: str) -> dict[str, str]:
+    async def answer_recommendation(
+        self, run_id: str, action: str, message: str, recommendation_id: str | None = None
+    ) -> dict[str, str]:
         await self._m.ready()
         rec = self._m.record(run_id)
         if action not in ("resolved", "still_failing", "escalate"):
@@ -595,6 +699,8 @@ class ConversationDesk:
             found = pending_recommendation(rec.state)
             if found is None:
                 raise conflict("No recommendation is waiting.")
+            if recommendation_id and found["message_id"] != recommendation_id:
+                raise conflict("This recommendation is no longer the one waiting. Look at the current one.")
             marker = self._m.make_step(
                 "recommendation_reply", None, {"message_id": found["message_id"], "action": action}, rec.state.round
             )
@@ -607,6 +713,12 @@ class ConversationDesk:
                     outcome="resolved",
                 )
                 step["output"]["conv_state"] = "closed"
+                if step["output"].get("applied") is False:  # closed otherwise meanwhile: nothing was resolved here
+                    data = await self._as_closed(rec, step, {"by": "operator", "reason": step["output"]["text"]})
+                    async with rec.lock:
+                        await self._m.change(rec, step=marker)
+                    await self._store_sent(rec, step, status=STOPPED, data=data)
+                    return {"status": rec.state.status}
                 data = {
                     "root_cause": recommendation["summary"],
                     "recommended_action": "; ".join(recommendation["actions"]),
@@ -634,38 +746,57 @@ class ConversationDesk:
 
     async def reconcile(self, rec: RunRecord) -> dict[str, Any]:
         """Adds what the gateway says this side sent and the run doesn't hold: a send accepted, and not stored."""
-        state = rec.state
-        conversation = await self._gateway.conversation(state.conversation_id)
-        known = {m.get("message_id") for m in messages_of(state)} | {e["message_id"] for e in state.outbox}
-        missing = [
-            m
-            for m in conversation.get("messages") or []
-            if m.get("direction") == "sent" and m.get("message_id") not in known
-        ]
-        now = conversation_state(conversation, self._gateway.connection.participant_id)
-        for message in missing:
-            act = str(message.get("performative") or "inform")
-            output = {
-                "message_id": message.get("message_id"),
-                "sender": "operator",
-                "act": act,
-                "text": text_of(message),
-                "in_reply_to": message.get("in_reply_to"),
-                "capability": message.get("capability"),
-                "outcome": message.get("outcome"),
-                "conv_state": now,
-            }
-            step = {
-                "node": "message",
-                "input": None,
-                "output": output,
-                "at": message.get("created_at"),
-                "round": state.round,
-            }
-            entry = {"message_id": output["message_id"], "status": "pending", "kind": "message"}
-            async with rec.lock:
-                await self._m.change(rec, step=step, outbox=(*rec.state.outbox, entry))
+        conversation = clean(await self._gateway.conversation(rec.state.conversation_id))
+        await self._add_missing(rec, conversation)
         return conversation
+
+    async def _add_missing(self, rec: RunRecord, conversation: dict[str, Any]) -> bool:
+        """False if it couldn't look, as a send in progress can be at the gateway and not yet stored."""
+        now = conversation_state(conversation, self._gateway.connection.participant_id)
+        async with rec.lock:
+            if rec.busy or not self._m.is_current(rec):
+                return False
+            state = rec.state
+            known = {m.get("message_id") for m in messages_of(state)} | {e["message_id"] for e in state.outbox}
+            missing = [m for m in sent_rows(conversation) if m.get("message_id") not in known]
+            for message in missing:
+                output = {
+                    "message_id": message.get("message_id"),
+                    "sender": "operator",
+                    "act": str(message.get("performative") or "inform"),
+                    "text": text_of(message),
+                    "in_reply_to": message.get("in_reply_to"),
+                    "capability": message.get("capability"),
+                    "outcome": message.get("outcome"),
+                    "conv_state": now,
+                }
+                at = message.get("created_at") or self._m.now().isoformat()
+                step = {"node": "message", "input": None, "output": output, "at": at, "round": state.round}
+                entry = {"message_id": output["message_id"], "status": "pending", "kind": "message"}
+                await self._m.change(rec, step=step, outbox=(*rec.state.outbox, entry))
+            if missing and rec.state.status in CONVERSATION:
+                status, data = self._status_after(rec.state, conversation, now, missing)
+                await self._m.change(rec, status=status, data=data)
+        return True
+
+    def _status_after(
+        self, state: RunState, conversation: dict[str, Any], now: str, added: list[dict[str, Any]]
+    ) -> tuple[str, dict[str, Any]]:
+        """The status once what was missing is in: closed if the conversation is, otherwise from the steps."""
+        if now != "closed":
+            return waiting_status(state)
+        outcome = conversation.get("outcome")
+        closes = [m for m in added if m.get("performative") == "close"]
+        if closes:
+            reason = text_of(closes[-1]) or "Closed by the operator."
+            data = {"by": "operator", "reason": reason, "outcome": outcome, "reopenable": outcome not in NOT_REOPENABLE}
+            return STOPPED, data
+        return MB_CLOSED, {
+            "outcome": outcome,
+            "reason": "The machine builder closed the conversation.",
+            "reopenable": outcome not in NOT_REOPENABLE,
+            "recorded_by": "machine_builder",
+        }
 
     async def on_start(self) -> None:
         """Once per run after a start: what a restart may have left."""
@@ -674,7 +805,9 @@ class ConversationDesk:
             if not state.conversation_id or state.run_id in self._reconciled:
                 continue
             with contextlib.suppress(Refused):
-                await self.reconcile(rec)
+                conversation = clean(await self._gateway.conversation(state.conversation_id))
+                if not await self._add_missing(rec, conversation):
+                    continue
                 self._reconciled.add(state.run_id)
                 for message_id in self.unreviewed(rec.state):
                     self._m.spawn(self.review(rec, message_id), f"review {message_id}")
@@ -729,47 +862,76 @@ class ConversationDesk:
         return {"status": MB_CLOSED}
 
     async def stop(self, rec: RunRecord, reason: str | None) -> dict[str, str]:
-        """Stops a run with an open conversation, telling the machine builder."""
-        async with self._sending(rec, CONVERSATION, "stopping"):
+        """Stops a run with an open conversation, telling the machine builder.
+
+        Also one whose escalation is half finished: the machine builder has its files, so it is told too.
+        """
+        unfinished = rec.state.conversation_id is None
+        stop_round = {"after_save": lambda: self._m.cancel(rec)} if unfinished else {}
+        async with self._sending(rec, OPEN if unfinished else CONVERSATION, "stopping"):
             data = {
                 "by": "operator",
                 "reason": reason or "Stopped by the operator",
                 "outcome": "withdrawn",
-                "reopenable": True,
+                "reopenable": not unfinished,
             }
             try:
+                await self._conversation_id(rec)
                 step = await self._send(rec, "close", reason or "", outcome="withdrawn")
             except Refused as refused:
-                if refused.kind == "conflict":
-                    log.info("Run %s: the conversation had closed already: %s", rec.state.run_id, refused.message)
-                else:
-                    data["close_pending"] = True
-                    data["close_problem"] = refused.message
+                data |= await self._close_problem(rec, refused)
                 async with rec.lock:
-                    await self._m.change(rec, status=STOPPED, data=data)
+                    await self._m.change(
+                        rec, status=STOPPED, data=data, conversation_id=conversation_of(rec.state), **stop_round
+                    )
                 return {"status": STOPPED}
             step["output"]["conv_state"] = "closed"
-            await self._store_sent(rec, step, status=STOPPED, data=data)
+            data = await self._as_closed(rec, step, data)
+            conversation_id = conversation_of(rec.state)
+            await self._store_sent(rec, step, status=STOPPED, data=data, conversation_id=conversation_id, **stop_round)
         return {"status": STOPPED}
 
+    async def _close_problem(self, rec: RunRecord, refused: Refused) -> dict[str, Any]:
+        """What a refused close leaves to do. Only a conversation that has closed needs nothing more."""
+        found = conversation_of(rec.state)
+        if refused.kind == "conflict" and found:
+            try:
+                conversation = await self._gateway.conversation(found)
+            except Refused as problem:
+                log.info("The conversation's state was not read: %s", problem.message)
+            else:
+                if str(conversation.get("state", "")).startswith("CLOSED"):
+                    log.info("Run %s: the conversation had closed already: %s", rec.state.run_id, refused.message)
+                    return {}
+        return {"close_pending": True, "close_problem": refused.message}
+
     async def retry_closes(self) -> None:
-        """A close that couldn't be sent. Repeating one is safe under the protocol."""
+        """A close that couldn't be sent or delivered. Repeating one is safe under the protocol."""
         for rec in self._m.records():
             if not rec.state.data.get("close_pending") or rec.busy:
                 continue
             try:
-                step = await self._send(rec, "close", rec.state.data.get("reason") or "", outcome="withdrawn")
+                async with self._sending(rec, (STOPPED,), "repeating a close"):
+                    await self._repeat_close(rec)
             except Refused as refused:
-                if refused.kind != "conflict":
-                    continue
-                step = None
-            data = {k: v for k, v in rec.state.data.items() if k not in ("close_pending", "close_problem")}
-            if step is None:
-                async with rec.lock:
-                    await self._m.change(rec, data=data)
-                continue
-            step["output"]["conv_state"] = "closed"
-            await self._store_sent(rec, step, data=data)
+                log.info("Run %s: the close waits: %s", rec.state.run_id, refused.message)
+
+    async def _repeat_close(self, rec: RunRecord) -> None:
+        conversation = await self._gateway.conversation(await self._conversation_id(rec))
+        me = self._gateway.connection.participant_id
+        if conversation_state(conversation, me) == "direct_contact_machine_builder":
+            return  # only the machine builder can end that, and each refused try would stay listed at the gateway
+        done = {k: v for k, v in rec.state.data.items() if k not in ("close_pending", "close_problem")}
+        outcome = OUTCOME_TO_SEND.get(done.get("outcome"), done.get("outcome")) or "withdrawn"
+        try:
+            step = await self._send(rec, "close", done.get("reason") or "", outcome=outcome)
+        except Refused as refused:
+            problem = await self._close_problem(rec, refused)
+            async with rec.lock:
+                await self._m.change(rec, data=done | problem, conversation_id=conversation_of(rec.state))
+            return
+        step["output"]["conv_state"] = "closed"
+        await self._store_sent(rec, step, data=done, conversation_id=conversation_of(rec.state))
 
     async def reopen(self, run_id: str) -> dict[str, str]:
         await self._m.ready()
@@ -793,6 +955,15 @@ class ConversationDesk:
         if conversation.get("outcome") in NOT_REOPENABLE:
             raise conflict(f"This conversation was closed as {conversation['outcome']} and cannot be reopened.")
         escalation = incident["escalation"]
+        # All that was sent before stays known, so that it isn't taken for a send that wasn't stored.
+        outbox = tuple(
+            {
+                "message_id": m["message_id"],
+                "status": DELIVERY.get(m.get("status"), "pending"),
+                "kind": "files" if m.get("has_files") else "message",
+            }
+            for m in sent_rows(conversation)
+        )
         if str(conversation.get("state", "")).startswith("CLOSED"):
             await self._gateway.send_message(
                 escalation["recipient"]["id"], performative="reopen", conversation_id=conversation_id, payload={}
@@ -809,6 +980,7 @@ class ConversationDesk:
             steps=steps,
             escalation=escalation,
             conversation_id=conversation_id,
+            outbox=outbox,
         )
-        _, data = waiting_status(state)
-        return replace(state, data=data)
+        status, data = waiting_status(state)
+        return replace(state, status=status, data=data)

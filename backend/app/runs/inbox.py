@@ -48,6 +48,8 @@ class InboxPoller:
         while True:
             try:
                 await self.poll_once()
+            except Refused as refused:
+                log.info("The inbox waits: %s", refused.message)
             except Exception:
                 log.exception("The inbox could not be polled")
             await asyncio.sleep(self._interval)
@@ -57,6 +59,8 @@ class InboxPoller:
         if self._gateway.connection.token() is None:
             return 0
         async with self._one_at_a_time:
+            # Before a message can be taken for one of an archived incident's, or of no run.
+            await self._desk.ready()
             await self._desk.on_start()
             await self._desk.retry_closes()
             try:

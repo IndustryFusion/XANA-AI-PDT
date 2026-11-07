@@ -25,6 +25,18 @@ The backend SHALL poll the inbox every `INBOX_POLL_INTERVAL_S`, store what arriv
 - **WHEN** a message arrives for an archived incident
 - **THEN** it is added to the incident's record and acknowledged
 
+#### Scenario: Text that can't be stored
+- **WHEN** a peer's message holds a NUL or a lone surrogate
+- **THEN** those are left out, and the message is stored and acknowledged
+
+#### Scenario: Files after archiving or reopening
+- **WHEN** an incident was archived or reopened, or a message arrives after archiving
+- **THEN** its files can still be downloaded, by the message's identifier
+
+#### Scenario: Archived while a message is in hand
+- **WHEN** a run is archived while a message for it is being handled
+- **THEN** the message goes on the incident's record, and the run stays archived
+
 #### Scenario: Files
 - **WHEN** a message has files
 - **THEN** they are downloaded and stored, and the operator can get them
@@ -75,6 +87,10 @@ Nothing SHALL be sent to a peer except by an operator's request.
 - **WHEN** an operator sends `inform`, `request`, `escalate`, `deescalate` or `close`
 - **THEN** that performative is sent in the conversation, appears as a message step, and its delivery is shown
 
+#### Scenario: A refused send stays unsent
+- **WHEN** the gateway lists a send as `applied: false` or `rejected`
+- **THEN** no check of the conversation, restart or refresh takes it for sent, and a refused `grant` doesn't count as granted
+
 #### Scenario: Refused by the conversation's rules
 - **WHEN** the gateway refuses with `409` or `422`
 - **THEN** the operator gets a `conflict` or `invalid` with the reason, and no step says it was sent
@@ -82,6 +98,14 @@ Nothing SHALL be sent to a peer except by an operator's request.
 #### Scenario: Grant
 - **WHEN** an operator approves a data request
 - **THEN** access is approved, `grant` is sent with an authorization, and then only that capability's data, in reply, with a policy check
+
+#### Scenario: A decision on what was shown
+- **WHEN** a decision or an answer names a request or recommendation that is no longer the one waiting
+- **THEN** it is refused as `conflict`, and nothing is sent
+
+#### Scenario: Declined after a failed grant
+- **WHEN** a grant's message failed after this backend had approved the access, and the operator declines
+- **THEN** that approval is reset. Access approved before it stays
 
 #### Scenario: Grant fails after the message
 - **WHEN** `grant` was sent and the files fail
@@ -112,6 +136,14 @@ A restart SHALL lose nothing.
 #### Scenario: Mid-conversation
 - **WHEN** the backend restarts in mid-conversation
 - **THEN** the run has every step and status, what arrived meanwhile is handled, and nothing is handled twice
+
+#### Scenario: Status after what was missing is added
+- **WHEN** a close or deny accepted before a restart is added
+- **THEN** the run's status follows: closed if the conversation is, otherwise from its steps
+
+#### Scenario: A send in progress
+- **WHEN** a check of the conversation meets a send in progress
+- **THEN** it adds nothing, and a first check after a start is done again later
 
 #### Scenario: Sent, and stopped before storing
 - **WHEN** a message was accepted by the gateway, and the backend stopped before storing it

@@ -159,7 +159,7 @@ class Escalator:
             if ADJACENTS in sharing.allowed:
                 contents[ADJACENTS] = await self._related(entity)
             if HISTORY in sharing.allowed:
-                contents[HISTORY] = await self._signal_history(entity)
+                contents[HISTORY] = await self._signal_history(entity, ADJACENTS in sharing.allowed)
         except Refused:
             raise
         except SourceUnavailable as error:
@@ -179,9 +179,9 @@ class Escalator:
         related = await self._context.related(entity, MAX_RELATED)
         return [{"entity": item, "active_alerts": await self._active_alerts(item["id"])} for item in related]
 
-    async def _signal_history(self, entity: dict[str, Any]) -> list[dict[str, Any]]:
-        """The machine's own signals and those of its sensors and parts, which is where a platform keeps most."""
-        related = await self._context.related(entity, MAX_RELATED)
+    async def _signal_history(self, entity: dict[str, Any], with_related: bool) -> list[dict[str, Any]]:
+        """The machine's own signals, and those of its sensors and parts only if related entities may go too."""
+        related = await self._context.related(entity, MAX_RELATED) if with_related else []
         ids = [entity["id"], *(item["id"] for item in related)]
         signals = await self._history.recent(ids, HISTORY_WINDOW)
         return [
