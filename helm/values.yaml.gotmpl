@@ -51,6 +51,9 @@ config:
   KEYCLOAK_SERVICE_CLIENT_ID: {{ . | quote }}
   {{- end }}
   MACHINE_WATCH_TYPE: {{ .Values.machineWatchType | quote }}
+  {{- with env "XANA_LANGFUSE_HOST" | default .Values.langfuseHost }}
+  LANGFUSE_HOST: {{ . | quote }}
+  {{- end }}
   AUTO_ARCHIVE_AFTER_S: {{ env "XANA_AUTO_ARCHIVE_AFTER_S" | default .Values.autoArchiveAfterS | quote }}
   MACHINE_WATCH_ATTRIBUTES: {{ .Values.machineWatchAttributes | quote }}
   {{- with .Values.gatewayUrl }}

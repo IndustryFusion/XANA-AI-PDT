@@ -469,7 +469,7 @@ LLM_PROVIDER_NAME=                   # name operators see, for example OpenVINO
 ANTHROPIC_API_KEY=... / OPENAI_API_KEY=...   # secret; required for that provider
 OPENAI_BASE_URL=                     # OpenAI-compatible server: OpenVINO Model Server, IONOS; no key needed if set
 LANGFUSE_PUBLIC_KEY=... / LANGFUSE_SECRET_KEY=...  # optional tracing; secret
-LANGFUSE_HOST=
+LANGFUSE_HOST=                      # your Langfuse server (or LANGFUSE_BASE_URL); empty: Langfuse's default
 
 # Agent behaviour
 DECISION_CONFIDENCE_THRESHOLD=0.9   # runs below this ask for clarification

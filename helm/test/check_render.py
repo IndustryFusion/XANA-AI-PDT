@@ -116,6 +116,20 @@ def check_auto_archive_setting(chart: str) -> None:
     assert "AUTO_ARCHIVE_AFTER_S" not in render(chart)["ConfigMap/x-backend"]["data"]  # the backend's default
 
 
+def check_tracing_address(chart: str) -> None:
+    rendered = render(
+        chart,
+        "config.LANGFUSE_HOST=https://traces.example.org",
+        f"secrets.values.LANGFUSE_PUBLIC_KEY={SECRET_VALUE}-public",
+        f"secrets.values.LANGFUSE_SECRET_KEY={SECRET_VALUE}",
+    )
+    config = rendered["ConfigMap/x-backend"]["data"]
+    assert config["LANGFUSE_HOST"] == "https://traces.example.org"
+    assert SECRET_VALUE not in str(config) and SECRET_VALUE not in str(rendered["Deployment/x-backend"])
+    assert {"LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY"} <= set(rendered["Secret/x-backend"]["stringData"])
+    assert "LANGFUSE_HOST" not in render(chart)["ConfigMap/x-backend"]["data"]
+
+
 def check_database_ca(chart: str) -> None:
     without = render(chart)
     assert "POSTGRES_SSLROOTCERT" not in without["ConfigMap/x-backend"]["data"]
@@ -150,6 +164,7 @@ CHECKS = (
     check_no_secret_in_a_config_map,
     check_machine_events_settings,
     check_auto_archive_setting,
+    check_tracing_address,
     check_database_ca,
     check_restricted_pods,
 )

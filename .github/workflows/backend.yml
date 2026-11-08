@@ -85,6 +85,11 @@ jobs:
       - name: Service tests (including database tests)
         run: pytest tests
 
+      - name: Traces to a stand-in server, with the tracing package
+        run: |
+          pip install -e ".[tracing]"
+          pytest tests/test_tracing_real.py tests/test_tracing.py
+
       - name: Local environment file
         run: docker compose -f compose.yaml config --quiet
 

@@ -238,7 +238,7 @@ The machine ontology and SHACL shapes are read from Fuseki (`FUSEKI_URL`, `FUSEK
 - **Ollama:** the prompt size is limited by `LLM_NUM_CTX` (default 32768). Lower it if the server runs out of memory.
 - **Failures:** a malformed answer is retried up to three times. If the model is unavailable, starting a run, clarifying, rejecting a resolution and reopening an incident answer `unavailable` (503) within `HEALTH_TIMEOUT_S`.
 - **Health:** `/api/diagnostics` also lists `models`: `[{name, role, provider, available}]`.
-- **Tracing (optional):** install with `pip install -e ".[tracing]"` and set `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY`. Model calls are traced with the run ID as session, plus the machine and round. Without the keys or the package, nothing is traced and nothing changes.
+- **Tracing (optional):** install with `pip install -e ".[tracing]"` and set `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY`. Traces go to `LANGFUSE_HOST`, or `LANGFUSE_BASE_URL`, its newer name, such as your own Langfuse server; without either, to Langfuse's default. Two different addresses stop the backend at startup. Model calls are traced with the run ID as session, plus the machine and round. Without the keys or the package, nothing is traced and nothing changes.
 
 ## Deployment
 
