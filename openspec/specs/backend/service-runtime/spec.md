@@ -272,3 +272,48 @@ The health report SHALL hold checks for `memory`, `timeseries`, `broker`, `llm`,
 #### Scenario: A change
 - **WHEN** a client sends anything to `/api/config` with another method
 - **THEN** it is refused, and nothing changes
+
+### Requirement: Why the dataspace is not connected
+When the backend is not connected to a configured dataspace, the `dataspace_connector` check SHALL say why the last attempt failed, and whether the backend is still trying, without addresses, tokens or secrets.
+
+#### Scenario: Still trying
+- **WHEN** connecting at startup failed because the dataspace can't be reached
+- **THEN** `dataspace_connector` is `degraded`, and its detail gives the reason and says that the backend tries again
+
+#### Scenario: Stopped trying
+- **WHEN** connecting failed because the credential was rejected
+- **THEN** `dataspace_connector` is `degraded`, and its detail says that the credential was rejected and that the backend does not try again by itself
+
+#### Scenario: Connected afterwards
+- **WHEN** a later attempt succeeds
+- **THEN** the detail no longer names the earlier failure
+
+### Requirement: Automatic archive setting
+The backend SHALL read `AUTO_ARCHIVE_AFTER_S`, a whole number of seconds, 3600 by default, where `0` turns automatic archiving off.
+
+#### Scenario: Default
+- **WHEN** the setting is not given
+- **THEN** finished runs are archived automatically after 3600 seconds
+
+#### Scenario: Invalid value
+- **WHEN** the value is negative or not a whole number
+- **THEN** the backend stops at startup with a message naming `AUTO_ARCHIVE_AFTER_S`
+
+### Requirement: Tracing address
+The backend SHALL send traces to the address in `LANGFUSE_HOST` or `LANGFUSE_BASE_URL`, and SHALL send nothing when the tracing keys are not set.
+
+#### Scenario: Address and keys
+- **WHEN** the keys and an address are set, and a run's round calls the model
+- **THEN** its traces reach that address (test with a stand-in server)
+
+#### Scenario: Either name
+- **WHEN** only `LANGFUSE_BASE_URL` is set, or only `LANGFUSE_HOST`
+- **THEN** that address is used
+
+#### Scenario: Two different addresses
+- **WHEN** `LANGFUSE_HOST` and `LANGFUSE_BASE_URL` are set to different addresses
+- **THEN** the backend stops at startup with a message naming both variables
+
+#### Scenario: No keys
+- **WHEN** an address is set and no keys
+- **THEN** no trace is sent, and the stand-in server gets no request

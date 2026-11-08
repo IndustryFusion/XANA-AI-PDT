@@ -81,3 +81,33 @@ The operator SHALL be able to check whether the machine builder has closed the c
 #### Scenario: Record a close
 - **WHEN** the operator records a close with outcome and reason and confirms
 - **THEN** the run moves to `mb_closed` and the thread notes that the close was recorded by the operator
+
+### Requirement: Close outcomes offered
+The close form SHALL offer resolved, not resolved, rejected, timed out and escalated in an open conversation and in one the operator escalated, and SHALL show what happened when an escalated close stops part way.
+
+#### Scenario: Outcomes in an open conversation
+- **WHEN** the operator chooses to close an open conversation
+- **THEN** resolved, not resolved, rejected, timed out and escalated are offered
+
+#### Scenario: Close as escalated from open
+- **WHEN** the operator closes an open conversation as escalated and confirms
+- **THEN** the thread shows the `escalate` and then the `close`, and the run is stopped and not reopenable
+
+#### Scenario: Escalate refused
+- **WHEN** the `escalate` of an escalated close is refused or not delivered
+- **THEN** the form stays with the reason, and the thread shows the `escalate`'s delivery
+
+### Requirement: The builder's current access when approving
+The approval panel for a data request SHALL show what the machine builder may access at this factory, read from the gateway when the panel opens and on request.
+
+#### Scenario: Current access
+- **WHEN** the operator opens the approval panel, on a real gateway
+- **THEN** each capability the builder may access here is shown with its status as the gateway has it at that moment
+
+#### Scenario: Changed meanwhile
+- **WHEN** the builder's access changes at the gateway while the panel is open, and the operator refreshes it
+- **THEN** the panel shows the new status
+
+#### Scenario: Read fails
+- **WHEN** the access can't be read
+- **THEN** the panel says so, and approving and denying still work
