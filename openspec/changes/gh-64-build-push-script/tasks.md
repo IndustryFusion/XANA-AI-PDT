@@ -13,5 +13,5 @@
 
 ## 3. CI and documents
 
-- [ ] 3.1 Run `./build.sh --no-push` and shellcheck in CI; verify on the Pull Request
+- [x] 3.1 Run `./build.sh --no-push` and shellcheck in CI; verify on the Pull Request
 - [x] 3.2 Update `helm/README.md` and `architecture.md`; verify by reading the build section
