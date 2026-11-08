@@ -102,7 +102,7 @@ jobs:
       - name: Check every environment renders
         working-directory: helm
         run: |
-          for environment in default production local; do
+          for environment in default production local localAndIonos; do
             helmfile -e "$environment" template > /dev/null
           done
       - name: Check secrets from the shell reach the Secret, and never the ConfigMap
@@ -111,15 +111,19 @@ jobs:
           XANA_ANTHROPIC_API_KEY: helmfile-test-value
         run: |
           pip install pyyaml
-          helmfile -e default template > rendered.yaml
-          python - <<'EOF'
+          for environment in default localAndIonos; do
+            helmfile -e "$environment" template > rendered.yaml
+            python - <<'EOF'
           import yaml
           docs = [d for d in yaml.safe_load_all(open("rendered.yaml")) if d]
           [secret] = [d for d in docs if d["kind"] == "Secret"]
           assert secret["stringData"]["ANTHROPIC_API_KEY"] == "helmfile-test-value"
           assert not [d for d in docs if d["kind"] == "ConfigMap" and "helmfile-test-value" in str(d)]
           EOF
+          done
           rm rendered.yaml
+      - name: Check the layering of localAndIonos, and that the check fails with the order reversed
+        run: python helm/test/check_environments.py helm
       - uses: helm/kind-action@v1
         with:
           cluster_name: xana

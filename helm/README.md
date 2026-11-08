@@ -30,6 +30,27 @@ kubectl -n iff exec deploy/xana-pdt-backend -- \
 
 `production` adds a pinned image tag and a TLS Secret: `helmfile -e production sync`.
 
+`localAndIonos` is production with the settings of a local-and-IONOS cluster: `default.yaml`, then `production.yaml`, then `localAndIonos.yaml`, a later file winning. Its file holds only placeholders, under the reserved `.invalid` domain or reading `replace-me`; fill in every one for your cluster before `helmfile -e localAndIonos sync`. A placeholder left in never reaches another host, as `.invalid` names don't resolve, but not every one fails loudly (see below):
+
+| Key | What to put there |
+|---|---|
+| `imageRegistry`, `imageTag` | Where `build.sh` pushed the images (see [Images](#images)) |
+| `ingressClass`, `ingressHost`, `ingressTlsSecret` | The cluster's Ingress class, XANA's host name (or `XANA_INGRESS_HOST`), and the TLS Secret for it |
+| `keycloakUrl` | The platform's Keycloak, with `/auth` if it has it |
+| `ngsiUrl`, `pgrestUrl`, `alertaUrl`, `fusekiUrl`, `mqttBrokerUrl`, `mqttMgmtUrl` | The context broker, history service, Alerta (ending in `/api`), ontology store, message broker and its management API, as the backend reaches them |
+| `databaseHost` | The PostgreSQL host with `tsdb` and `memory` |
+| `gatewayUrl`, `gatewayKeycloakUrl`, `ifricUrl` | The dataspace gateway, its Keycloak, and the IFRIC registry; with `gatewayUrl`, also `XANA_SETTINGS_ENCRYPTION_KEY` |
+
+What a placeholder left in does:
+
+- `imageRegistry` under `.invalid`: the Pods can't pull their images and stay in `ImagePullBackOff`. `imageTag: replace-me` does the same, unless your registry happens to hold a tag of that name.
+- An address under `.invalid` (`keycloakUrl`, the platform services, `databaseHost`, the dataspace): the backend starts, and the System screen and `/api/diagnostics` show that connection as failing. Sign-in fails with `keycloakUrl` left in, and runs can't be stored with `databaseHost` left in.
+- `ingressHost` under `.invalid`: the Ingress is created for a host no client asks for, so XANA isn't reachable through it, and nothing reports an error.
+- `ingressClass: replace-me`: no Ingress controller picks the Ingress up, so XANA isn't reachable from outside, and nothing reports an error. Check `kubectl -n iff get ingress` for an address.
+- `ingressTlsSecret: replace-me`: the controller doesn't find that Secret; most then serve their default certificate, so browsers warn.
+
+No secret goes into the file: secrets come from `XANA_*` shell variables or an existing Secret, as for the other environments (see [Secrets](#secrets)). In CI, `helm/test/check_environments.py` checks the layering, that the committed file holds only marked placeholders and no key named like a secret, and that no address `localAndIonos` renders is still inherited from `default.yaml` or `production.yaml`; your filled-in copy is yours to keep out of the repository.
+
 To remove the release: `helmfile -e default destroy`. Data in the database is kept.
 
 ## Configuration
