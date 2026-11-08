@@ -240,9 +240,10 @@ def create_app(
         machine_watch.start()
         if settings.gateway_url:
             inbox.start()
+            # With sign-in on as well: the backend's own client receives messages with nobody signed in.
+            gateway_connection.start()
         if not session.enabled:
             live.start()
-            gateway_connection.start()
         yield
         await machine_watch.stop()
         await event_worker.stop()
