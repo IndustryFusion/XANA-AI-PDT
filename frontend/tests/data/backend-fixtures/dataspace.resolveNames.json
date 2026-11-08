@@ -3,6 +3,9 @@
   "path": "/api/ifric/resolve",
   "status": 200,
   "body": {
-    "urn:example:xana-builder": "Machine Builder GmbH"
+    "urn:example:xana-builder": "Machine Builder GmbH",
+    "urn:example:xana-builder-2": "Second Builder KG",
+    "urn:example:xana-factory": "Factory Owner AG",
+    "urn:ifric:fac-1": "Factory Owner AG"
   }
 }

@@ -14,6 +14,7 @@
 // limitations under the License.
 //
 
+import { useMachineNames } from '../../app/machineNames'
 import { useEffect, useRef, useState } from 'react'
 import { runs } from '../../data'
 import { useRun } from '../../data/useRun'
@@ -32,6 +33,7 @@ import StepFeed from './StepFeed'
 
 export function RunHeader({ run }) {
   const [stopping, setStopping] = useState(false)
+  const machineName = useMachineNames([run.machineId])[run.machineId]
   return (
     <header className={`run-header toned toned--${toneOf('run', run.status)}`} data-status={run.status}>
       <div className="run-header__title">
@@ -41,7 +43,7 @@ export function RunHeader({ run }) {
       </div>
       <p className="run-header__issue">{run.issue}</p>
       <dl className="details run-header__details">
-        <dt>Machine</dt><dd><EntityRef id={run.machineId} /></dd>
+        <dt>Machine</dt><dd>{machineName && <span data-testid="machine-name">{machineName} </span>}<EntityRef id={run.machineId} /></dd>
         <dt>Started by</dt><dd data-testid="run-source">{runSourceLabel(run.source)}</dd>
         {run.escalationRef && <><dt>Escalation</dt><dd className="mono">{run.escalationRef}</dd></>}
         <dt>Run</dt><dd className="mono">{run.runId}</dd>

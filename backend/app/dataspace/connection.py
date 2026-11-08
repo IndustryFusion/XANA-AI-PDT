@@ -36,6 +36,7 @@ from app.config import Settings
 from app.dataspace.credentials import CredentialStore, StoredCredential
 from app.errors import Refused, conflict, invalid, unauthorized, unavailable
 from app.memory.store import StoreUnavailable
+from app.redact import mask_url
 
 log = logging.getLogger(__name__)
 
@@ -155,9 +156,14 @@ class GatewayConnection:
         return self._last_problem, self._retrying
 
     def config(self) -> dict[str, Any]:
+        """The connection's configuration, for operators: addresses masked, and never a secret, key or token."""
+        s = self._s
         return {
             "configured": self.configured,
-            "realm": self._s.gateway_keycloak_realm,
+            "gateway_url": mask_url(s.gateway_url) if s.gateway_url else None,
+            "keycloak_url": mask_url(s.gateway_keycloak_url) if s.gateway_url and s.gateway_keycloak_url else None,
+            "registry_url": mask_url(s.ifric_url) if s.ifric_url else None,
+            "realm": s.gateway_keycloak_realm,
             "client_id": self.client_in_use(),
             "sharing_tier": self._s.data_sharing_policy,
         }

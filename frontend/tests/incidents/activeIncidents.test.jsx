@@ -21,6 +21,8 @@ import { store } from '../../src/data/sources/mock'
 import { writeControls } from '../../src/data/sources/mock/controls'
 import { paths } from '../../src/app/router'
 import { renderApp, resetMock } from '../helpers'
+import { dataspace } from '../../src/data'
+import { DataError } from '../../src/data/errors'
 
 const controls = { authEnabled: false, speed: 50 }
 const open = (path) => renderApp({ path, controls })
@@ -179,6 +181,24 @@ describe('builder, filter and archive in the list', () => {
     const rows = await items()
     expect(within(rows[0]).getByTestId('run-builder')).toHaveTextContent('Machine builder: Builder GmbH')
     expect(within(rows[1]).queryByTestId('run-builder')).toBeNull()
+  })
+
+  test('machine names from the registry are shown in the rows, and IDs when it is unavailable', async () => {
+    const spy = vi.spyOn(dataspace, 'resolveMachines').mockImplementation(async (ids) => Object.fromEntries(ids.map((id) => [id, `Asset ${id.split(':').pop()}`])))
+    open('/incidents')
+    const rows = await items()
+    expect(await within(rows[0]).findByTestId('machine-name')).toHaveTextContent(`Asset ${store.get().runs[0].machineId.split(':').pop()}`)
+    spy.mockRestore()
+  })
+
+  test('without the registry the rows show machine IDs', async () => {
+    const spy = vi.spyOn(dataspace, 'resolveMachines').mockRejectedValue(new DataError('dataspace', 'unavailable', 'No registry.'))
+    open('/incidents')
+    const rows = await items()
+    await waitFor(() => expect(spy).toHaveBeenCalled())
+    expect(within(rows[0]).queryByTestId('machine-name')).toBeNull()
+    expect(rows[0]).toHaveTextContent('laser-cutter-01')
+    spy.mockRestore()
   })
 
   test('a builder without a name shows its ID', async () => {

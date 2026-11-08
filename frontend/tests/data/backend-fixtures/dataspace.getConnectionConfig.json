@@ -1,0 +1,14 @@
+{
+  "method": "GET",
+  "path": "/api/gateway/config",
+  "status": 200,
+  "body": {
+    "configured": true,
+    "gateway_url": "http://gateway.dataspace.example:8080",
+    "keycloak_url": "http://keycloak.dataspace.example:8080/auth",
+    "registry_url": "http://ifric.dataspace.example:4007",
+    "realm": "dataspace",
+    "client_id": "urn:example:xana-factory",
+    "sharing_tier": "minimal"
+  }
+}

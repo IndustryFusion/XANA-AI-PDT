@@ -95,6 +95,11 @@ async def peer_capabilities(peer_id: str, request: Request) -> dict[str, Any]:
     return await gateway(request).peer_capabilities(peer_id)
 
 
+@router.get("/access-levels")
+async def access_levels(request: Request) -> dict[str, Any]:
+    return await gateway(request).access_levels()
+
+
 @router.get("/policies")
 async def policies(request: Request) -> list[dict[str, Any]]:
     return await gateway(request).policies()

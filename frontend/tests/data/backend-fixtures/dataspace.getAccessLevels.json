@@ -1,0 +1,38 @@
+{
+  "method": "GET",
+  "path": "/api/gateway/access-levels",
+  "status": 200,
+  "body": {
+    "peers": [
+      {
+        "peer_id": "urn:example:xana-builder",
+        "access_level": "elevated",
+        "approved": [
+          "twin:history"
+        ],
+        "error": null,
+        "name": "Machine Builder GmbH"
+      },
+      {
+        "peer_id": "urn:example:xana-builder-2",
+        "access_level": "restricted",
+        "approved": [],
+        "error": null,
+        "name": "Second Builder KG"
+      },
+      {
+        "peer_id": "urn:example:xana-builder-3",
+        "access_level": "standard",
+        "approved": [],
+        "error": null,
+        "name": "urn:example:xana-builder-3"
+      }
+    ],
+    "counts": {
+      "standard": 1,
+      "elevated": 1,
+      "restricted": 1,
+      "unknown": 0
+    }
+  }
+}

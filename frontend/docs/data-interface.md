@@ -202,13 +202,16 @@ Entities are NGSI-LD entities in compacted form: `id`, `type` and one member per
 | `getConnection()` | — | `{ state: connected \| expired \| disconnected \| not_configured, participantId, expiresAt, credentialConfigured, sharingTier }`: `credentialConfigured` tells whether the configuration provides the credential for `connect`; `sharingTier` is the configured data-sharing tier (`minimal`, `adjacent` or `timeseries`; `null` when not configured) | `unavailable` |
 | `connect({ secret })` | credential; may be omitted when `credentialConfigured` | connection (as `getConnection`) | `unauthorized` (credential rejected), `unavailable` (gateway unreachable), `conflict` (not configured) |
 | `disconnect()` | — | nothing | `conflict` (not configured), `unavailable` |
-| `listPeers()` | — | `[{ id, name, capabilities[] }]` compatible participants | `unavailable` (also when not connected) |
+| `getConnectionConfig()` | — | `{ configured, gatewayUrl, keycloakUrl, registryUrl, realm, clientId }`: addresses with any password masked, the client in use; never a secret, key or token | `unavailable` |
+| `listPeers()` | — | `[{ id, name, capabilities[], accessLevel }]` compatible participants; `accessLevel` is `standard`, `elevated` or `restricted` (see `getAccessLevels`), or `null` when it couldn't be read | `unavailable` (also when not connected) |
+| `getAccessLevels()` | — | `{ peers: [{ peerId, name, accessLevel \| null, approved[], error }], counts: { standard, elevated, restricted, unknown } }`: from what each peer may access here, `elevated` with any capability approved for it, else `restricted` with any denied, else `standard`; a peer whose access can't be read is `unknown`, with the reason | `unavailable` (also when not connected) |
 | `getPeerCapabilities(peerId)` | peer ID | `{ peerId, name, atPeer: [{ capability, status }], here: [{ capability, status }] }`: what this factory may access at the peer, and what the peer may access here; `status` is `granted`, `denied` or `default` | `not_found`, `unavailable` (not connected) |
 | `listCapabilityRequests()` | — | `[{ id, requesterId, capability, purpose, requestedAt, status: pending \| approved \| denied, note, decidedAt }]` incoming requests, pending first, then newest first | `unavailable` (also when not connected) |
 | `decideCapabilityRequest(id, { approved, note })` | decision and optional note | updated request; approving grants the capability to the requester (`here` shows `granted`) | `conflict` (already decided; the message names the decision), `not_found` |
 | `setCapabilityPolicy({ peerId, capability, action })` | `action`: `grant`, `deny` or `reset` (back to default) for what the peer may access here | nothing | `invalid` (unknown action or capability), `not_found` (unknown peer), `unavailable` (not connected) |
 | `resolveNames(ids)` | registry IDs of participants | `{ [id]: name }`; unknown IDs are omitted | `unavailable` |
 | `resolveBuilders(machineIds)` | machine entity IDs | `{ [machineId]: builderName }`; machines without a known builder are omitted | `unavailable` |
+| `resolveMachines(machineIds)` | machine entity IDs | `{ [machineId]: assetName }` from the registry's asset records; machines it doesn't name are omitted | `unavailable` |
 
 **Capabilities and tiers.** `twin:direct` (the machine entity), `twin:adjacents` (linked components) and `twin:history` (signal history). The data-sharing tier is deployment configuration: `minimal` shares `twin:direct`, `adjacent` adds `twin:adjacents`, `timeseries` adds `twin:history`.
 

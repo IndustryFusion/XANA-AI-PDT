@@ -27,6 +27,8 @@ const POLICY_ACTION = { grant: 'approve', deny: 'deny', reset: 'reset' }
 
 export const dataspace = {
   getConnection: () => request(AREA, 'GET', '/api/gateway/status'),
+  getConnectionConfig: () => request(AREA, 'GET', '/api/gateway/config'),
+  getAccessLevels: () => request(AREA, 'GET', '/api/gateway/access-levels'),
   connect: ({ secret } = {}) => request(AREA, 'POST', '/api/gateway/connect', { body: { secret: secret ?? null } }),
   disconnect: async () => {
     await request(AREA, 'POST', '/api/gateway/disconnect')
@@ -47,4 +49,6 @@ export const dataspace = {
   resolveNames: (ids = []) => request(AREA, 'POST', '/api/ifric/resolve', { raw: true, body: { ids } }),
   resolveBuilders: (machineIds = []) =>
     request(AREA, 'POST', '/api/ifric/resolve-builders', { raw: true, body: { machine_ids: machineIds } }),
+  resolveMachines: (machineIds = []) =>
+    request(AREA, 'POST', '/api/ifric/resolve-machines', { raw: true, body: { machine_ids: machineIds } }),
 }

@@ -59,3 +59,6 @@
   margin: 0;
   padding: 0;
 }
+
+.tile__levels { gap: var(--space-2); flex-wrap: wrap; font-size: var(--text-sm); }
+.tile__levels .level--elevated { font-weight: 600; }

@@ -14,12 +14,14 @@
 // limitations under the License.
 //
 
-import { act, screen, within } from '@testing-library/react'
+import { act, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { store } from '../../src/data/sources/mock'
 import { writeControls } from '../../src/data/sources/mock/controls'
 import { REFRESH_KEY } from '../../src/features/dashboard/Dashboard'
-import { renderApp } from '../helpers'
+import { renderApp, resetMock } from '../helpers'
+import App from '../../src/App'
+import { dataspace } from '../../src/data'
 
 const open = { controls: { authEnabled: false } }
 const tile = (name) => screen.findByRole('region', { name })
@@ -135,5 +137,44 @@ describe('refresh', () => {
 
     await user.click(screen.getByRole('button', { name: 'Refresh now' }))
     expect(await within(incidents).findByText('1')).toBeVisible()
+  })
+})
+
+describe('access levels in the dataspace tile', () => {
+  test('counts peers per level and names those with elevated access', async () => {
+    resetMock({ path: '/', controls: open.controls })
+    const peers = store.get().peers
+    store.update((s) => {
+      s.dataspace.policies = {}
+      s.dataspace.policies[peers[0].id] = { 'twin:history': 'granted' }
+      s.dataspace.policies[peers[1].id] = { 'twin:adjacents': 'denied' }
+      return s
+    })
+    render(<App />)
+    const levels = await within(await tile('Dataspace')).findByRole('region', { name: 'Access levels' })
+    const count = (level) => levels.querySelector(`[data-level="${level}"]`).textContent
+    expect(count('elevated')).toBe('1 elevated')
+    expect(count('restricted')).toBe('1 restricted')
+    expect(count('standard')).toBe(`${peers.length - 2} standard`)
+    expect(within(levels).getByRole('list', { name: 'Peers with elevated access' })).toHaveTextContent(`${peers[0].name}: twin:history`)
+  })
+
+  test('peers whose access could not be read are counted as unknown', async () => {
+    const spy = vi.spyOn(dataspace, 'getAccessLevels').mockResolvedValue({
+      peers: [{ peerId: 'p1', name: 'P1', accessLevel: null, approved: [], error: 'unavailable' }],
+      counts: { standard: 0, elevated: 0, restricted: 0, unknown: 1 },
+    })
+    renderApp({ path: '/', ...open })
+    const levels = await within(await tile('Dataspace')).findByRole('region', { name: 'Access levels' })
+    expect(levels.querySelector('[data-level="unknown"]').textContent).toBe('1 unknown')
+    spy.mockRestore()
+  })
+
+  test('not connected: no levels, and the other tiles are unaffected', async () => {
+    renderApp({ path: '/', controls: { ...open.controls, connection: 'disconnected' } })
+    const t = await tile('Dataspace')
+    expect(await within(t).findByText('Not connected to the dataspace.')).toBeVisible()
+    expect(within(t).queryByRole('region', { name: 'Access levels' })).toBeNull()
+    expect(await tile('Active incidents')).toBeVisible()
   })
 })

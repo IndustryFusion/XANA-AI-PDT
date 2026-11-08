@@ -45,6 +45,7 @@ ACCESS_STATUS = {
     "denied": "denied",
 }
 POLICY_ACTIONS = ("approve", "deny", "reset")
+LEVELS = ("standard", "elevated", "restricted")
 DECISIONS = ("approve", "deny")
 
 NameLookup = Callable[[list[str]], Awaitable[dict[str, str]]]
@@ -245,16 +246,44 @@ class GatewayClient:
                 log.warning("The capabilities of a peer could not be read: %s", refused.message)
                 return None
 
-        found = await asyncio.gather(*(offered(peer_id) for peer_id in ids))
+        found, levels = await asyncio.gather(
+            asyncio.gather(*(offered(peer_id) for peer_id in ids)),
+            asyncio.gather(*(self._level_of(peer_id) for peer_id in ids)),
+        )
         return [
             {
                 "id": peer_id,
                 "name": names.get(peer_id) or peer_id,
                 "capabilities": capabilities or [],
                 "capabilities_unavailable": capabilities is None,
+                "access_level": level["access_level"],
             }
-            for peer_id, capabilities in zip(ids, found, strict=True)
+            for peer_id, capabilities, level in zip(ids, found, levels, strict=True)
         ]
+
+    async def _level_of(self, peer_id: str) -> dict[str, Any]:
+        """The peer's access level here, from the statuses the gateway reports, or no level and the reason."""
+        try:
+            here = await self.access(consumer=peer_id)
+        except Refused as refused:
+            log.warning("A peer's access could not be read: %s", refused.message)
+            return {"peer_id": peer_id, "access_level": None, "approved": [], "error": refused.message}
+        statuses = {item.get("capability"): item.get("status") for item in here}
+        approved = [capability for capability, status in statuses.items() if status == "approved"]
+        level = "elevated" if approved else "restricted" if "denied" in statuses.values() else "standard"
+        return {"peer_id": peer_id, "access_level": level, "approved": approved, "error": None}
+
+    async def access_levels(self) -> dict[str, Any]:
+        """Each compatible peer's access level here, with its name, and the number of peers per level."""
+        ids = [peer["participant_id"] for peer in await self.compatible()]
+        levels, names = await asyncio.gather(
+            asyncio.gather(*(self._level_of(peer_id) for peer_id in ids)), self.names(ids)
+        )
+        counts = {level: 0 for level in (*LEVELS, "unknown")}
+        for entry in levels:
+            counts[entry["access_level"] or "unknown"] += 1
+            entry["name"] = names.get(entry["peer_id"]) or entry["peer_id"]
+        return {"peers": list(levels), "counts": counts}
 
     async def peer_capabilities(self, peer_id: str) -> dict[str, Any]:
         if peer_id not in {peer["participant_id"] for peer in await self.compatible()}:
@@ -274,9 +303,12 @@ class GatewayClient:
 
         async def here(peer_id: str) -> dict[str, Any]:
             try:
-                return {"peer_id": peer_id, "capabilities": [_policy(i) for i in await self.access(consumer=peer_id)]}
+                found = await self.access(consumer=peer_id)
             except Refused as refused:
-                return {"peer_id": peer_id, "capabilities": [], "error": refused.message}
+                return {"peer_id": peer_id, "capabilities": [], "error": refused.message, "access_level": None}
+            statuses = [item.get("status") for item in found]
+            level = "elevated" if "approved" in statuses else "restricted" if "denied" in statuses else "standard"
+            return {"peer_id": peer_id, "capabilities": [_policy(i) for i in found], "access_level": level}
 
         return list(await asyncio.gather(*(here(peer_id) for peer_id in ids)))
 
