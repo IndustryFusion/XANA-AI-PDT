@@ -64,7 +64,9 @@ export function createRunRecord({ runId, machineId, issue, scenario, at, inciden
 
 export function summarize(run) {
   const { runId, incidentId, machineId, issue, status, startedAt, updatedAt, escalationRef, source } = run
-  return { runId, incidentId, machineId, issue, status, startedAt, updatedAt, escalationRef, source }
+  const recipient = run.escalation?.recipient
+  const machineBuilder = recipient?.id ? { id: recipient.id, name: recipient.name || null } : null
+  return { runId, incidentId, machineId, issue, status, startedAt, updatedAt, escalationRef, source, machineBuilder }
 }
 
 export function isReopenable(run) {

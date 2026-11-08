@@ -239,3 +239,7 @@
 .filters__search { grid-column: 1 / -1; }
 .filters input, .filters select { width: 100%; min-width: 0; }
 .not-escalated { margin-top: var(--space-3); }
+
+.run-list__filter { margin-bottom: var(--space-2); }
+.run-list__side { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
+.run-list__problem { flex-basis: 100%; margin: 0; font-size: var(--text-xs); }

@@ -172,6 +172,7 @@ Fields are snake_case. A refused request answers `{"error": {"kind", "message"}}
 - **Persistence:** every change is stored before the stream reports it. After a restart, open runs are listed again; a round that was in progress runs again from its start.
 - **Archiving:** always an operator's act: a finished run stays listed until then, also after a restart.
 - **Concurrency:** at most `MAX_CONCURRENT_ROUNDS` rounds run at once; others wait in status `running`.
+- **Automatic archive:** a finished run (`completed`, `failed`, `stopped`, `mb_closed`) with no change for `AUTO_ARCHIVE_AFTER_S` seconds (3600 by default) is archived as an operator archive would, checked every minute. A run whose close hasn't reached the machine builder, or one waiting for anyone, stays. `0` turns it off. The time counts from the run's last stored change, so a restart doesn't reset it.
 
 ## Configuration
 

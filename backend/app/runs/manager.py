@@ -44,6 +44,7 @@ from app.runs.model import (
     AWAITING_MACHINE_BUILDER,
     CONVERSATION,
     FAILED,
+    FINISHED,
     OPERATOR,
     OPERATOR_STEPS,
     RUNNING,
@@ -63,6 +64,7 @@ OUTBOX_POLL_S = 5
 CLOSE_RETRY_S = 60
 CLOSE_RETRY_MAX_S = 3600
 TRIGGERED_RETRY_AFTER_S = 300
+AUTO_ARCHIVE_SWEEP_S = 60  # at most this long after a run is due
 NO_ESCALATION = "No dataspace is configured for this installation."
 NOT_REOPENABLE = "Only runs with a machine-builder conversation can be reopened."
 
@@ -94,7 +96,10 @@ class RunManager:
         model_problem: Callable[[], Awaitable[str | None]] | None = None,
         escalator: Escalator | None = None,
         outbox_poll_s: float = OUTBOX_POLL_S,
+        auto_archive_after_s: float = 0,
     ) -> None:
+        self._auto_archive_after_s = auto_archive_after_s
+        self._sweep_task: asyncio.Task[None] | None = None
         self.desk: ConversationDesk | None = None
         self._escalator = escalator
         self._outbox_poll_s = outbox_poll_s
@@ -120,6 +125,8 @@ class RunManager:
         """Restores stored runs if the memory database is reachable; otherwise the first request retries."""
         if self._escalator is not None:
             self._outbox_task = asyncio.create_task(self._poll_outbox(), name="outbox status")
+        if self._auto_archive_after_s > 0:
+            self._sweep_task = asyncio.create_task(self._sweep(), name="automatic archive")
         try:
             await self.ready()
         except Refused as refused:
@@ -159,7 +166,7 @@ class RunManager:
 
     async def shut_down(self) -> None:
         """Cancels rounds in progress without changing their stored state; they run again after a restart."""
-        tasks = [*self._tasks, *([self._outbox_task] if self._outbox_task else [])]
+        tasks = [*self._tasks, *(t for t in (self._outbox_task, self._sweep_task) if t)]
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
@@ -387,20 +394,67 @@ class RunManager:
         await self.ready()
         rec = self._record(run_id)
         async with rec.lock:
-            self._require(rec, "archive")
-            if rec.state.data.get("close_pending"):
-                raise conflict(
-                    "The machine builder hasn't been told yet that this conversation is closed. "
-                    "It can be archived once that has gone out."
-                )
+            await self._archive_locked(rec)
+
+    async def _archive_locked(self, rec: RunRecord) -> None:
+        """Archives a run whose lock is held. The state is checked here, as it may have changed meanwhile."""
+        run_id = rec.state.run_id
+        if not self.is_current(rec):
+            raise not_found(f"Run {run_id} does not exist or was archived.")
+        self._require(rec, "archive")
+        if rec.state.data.get("close_pending"):
+            raise conflict(
+                "The machine builder hasn't been told yet that this conversation is closed. "
+                "It can be archived once that has gone out."
+            )
+        try:
+            await self._incidents.archive(rec.state, self._now())
+        except StoreUnavailable as error:
+            raise unavailable(f"{error} The run was not archived.") from None
+        del self._runs[run_id]
+        for sub in rec.subscribers:
+            sub.close(UNKNOWN_RUN, {"kind": "not_found", "message": f"Run {run_id} was archived."})
+        rec.subscribers.clear()
+
+    # ── Automatic archive ────────────────────────────────────────────────────
+
+    def _due(self, state: RunState) -> bool:
+        """Finished, nothing left to send, and unchanged for the configured time."""
+        if self._auto_archive_after_s <= 0 or state.status not in FINISHED or state.data.get("close_pending"):
+            return False
+        return state.updated_at <= self._now() - timedelta(seconds=self._auto_archive_after_s)
+
+    async def archive_due(self) -> list[str]:
+        """Archives every run that is due, as an operator archive would. Returns the run IDs archived."""
+        try:
+            await self.ready()
+        except Refused:
+            return []
+        archived = []
+        for rec in list(self._runs.values()):
+            if not self._due(rec.state):
+                continue
+            async with rec.lock:
+                # Reopened, sent a message, or archived by an operator while this waited.
+                if not self.is_current(rec) or rec.busy or not self._due(rec.state):
+                    continue
+                try:
+                    await self._archive_locked(rec)
+                except Refused as refused:
+                    log.warning("Run %s was not archived automatically: %s", rec.state.run_id, refused.message)
+                    continue
+            log.info("Run %s archived automatically", rec.state.run_id)
+            archived.append(rec.state.run_id)
+        return archived
+
+    async def _sweep(self) -> None:
+        every = min(AUTO_ARCHIVE_SWEEP_S, self._auto_archive_after_s)
+        while True:
+            await asyncio.sleep(every)
             try:
-                await self._incidents.archive(rec.state, self._now())
-            except StoreUnavailable as error:
-                raise unavailable(f"{error} The run was not archived.") from None
-            del self._runs[run_id]
-            for sub in rec.subscribers:
-                sub.close(UNKNOWN_RUN, {"kind": "not_found", "message": f"Run {run_id} was archived."})
-            rec.subscribers.clear()
+                await self.archive_due()
+            except Exception:
+                log.exception("Finished runs could not be archived automatically")
 
     async def escalation_preflight(self, run_id: str) -> dict[str, Any]:
         await self.ready()
