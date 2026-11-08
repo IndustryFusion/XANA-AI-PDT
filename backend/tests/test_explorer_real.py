@@ -208,7 +208,7 @@ def test_import_created_updated_failed(api, entity):
         assert rows[3]["result"] == "failed"
         stored = api.get(path(entity)).json()
         assert stored[f"{IRI}added"]["value"] == 1
-        assert stored[f"{IRI}state"]["value"] == "ON"
+        assert f"{IRI}state" not in stored  # replaced: what isn't in the file is gone
     finally:
         api.delete(f"/api/ngsi/entities/{new}")
         api.delete(f"/api/ngsi/entities/{body[2]['id']}")
@@ -607,3 +607,93 @@ def test_token_is_needed_without_an_anonymous_role():
     if not url:
         pytest.skip("TEST_PGREST_NO_ANON_URL not set")
     assert httpx.get(f"{url}/attributes", params={"limit": 1}).status_code == 401
+
+
+# Paging, attributes to return, has-attribute and replacing import ------------------------------
+
+
+@pytest.fixture
+def batch(api):
+    """23 entities of a fresh type, every third with attribute `mark`, removed afterwards."""
+    kind = f"{IRI}paged_{uuid.uuid4().hex[:8]}"
+    body = []
+    for n in range(23):
+        entity = {"id": unique("p"), "type": kind, f"{IRI}n": {"type": "Property", "value": n}}
+        if n % 3 == 0:
+            entity[f"{IRI}mark"] = {"type": "Property", "value": "x"}
+        body.append(entity)
+    assert {r["result"] for r in api.post("/api/ngsi/import", json=body).json()} == {"created"}
+    yield kind, body
+    api.post("/api/ngsi/delete-by-types", json={"types": [kind]})
+
+
+def direct(params):
+    """The broker's own answer to the same NGSI-LD query."""
+    response = httpx.get(f"{BROKER}/ngsi-ld/v1/entities", params=params, headers={"Accept": "application/json"})
+    response.raise_for_status()
+    return response.json()
+
+
+@needs_broker
+def test_real_paging_to_the_end(api, batch):
+    kind, body = batch
+    seen, offset = [], 0
+    while True:
+        answer = api.get("/api/ngsi/entities", params={"type": kind, "limit": 5, "offset": offset})
+        page = [e["id"] for e in answer.json()]
+        assert answer.status_code == 200 and answer.headers.get("X-Total-Count") == ("23" if page else None)
+        assert page == [e["id"] for e in direct({"type": kind, "limit": 5, "offset": offset, "orderBy": "id"})]
+        if not page:
+            break
+        seen += page
+        offset += 5
+    assert sorted(seen) == sorted(e["id"] for e in body) and len(seen) == len(set(seen)) == 23
+
+
+@needs_broker
+def test_real_selected_attributes_match_the_broker(api, batch):
+    kind, _ = batch
+    params = {"type": kind, "attrs": f"{IRI}mark", "limit": 100}
+    ours = api.get("/api/ngsi/entities", params=params).json()
+    assert ours == direct(params | {"orderBy": "id"})  # the same query, in the order the backend asks for
+    assert len(ours) == 8 and all(f"{IRI}n" not in e for e in ours)
+
+
+@needs_broker
+def test_real_has_attribute_matches_the_broker_and_is_whole(api, batch):
+    kind, _ = batch
+    answer = api.get("/api/ngsi/entities", params={"type": kind, "has_attr": f"{IRI}mark", "limit": 100})
+    ours = answer.json()
+    theirs = direct({"type": kind, "attrs": f"{IRI}mark", "limit": 100, "orderBy": "id"})
+    assert [e["id"] for e in ours] == [e["id"] for e in theirs] and len(ours) == 8
+    assert all(f"{IRI}n" in e and f"{IRI}mark" in e for e in ours)
+    assert answer.headers["X-Total-Count"] == "8"
+
+
+@needs_broker
+def test_real_reimport_without_an_attribute_removes_it(api, entity):
+    again = {k: v for k, v in entity.items() if k != f"{IRI}state"}
+    assert api.post("/api/ngsi/import", json=[again]).json()[0]["result"] == "updated"
+    stored = api.get(path(entity)).json()
+    assert f"{IRI}state" not in stored and stored[f"{IRI}temp"]["value"] == 42
+
+
+@needs_broker
+def test_real_has_attribute_with_the_largest_page(api):
+    """A thousand IDs in one address are too long for the broker (HTTP 414); they are read in chunks."""
+    kind = f"{IRI}many_{uuid.uuid4().hex[:8]}"
+    body = [
+        {"id": f"urn:test:many:{uuid.uuid4().hex}", "type": kind, f"{IRI}mark": {"type": "Property", "value": n}}
+        for n in range(1000)
+    ]
+    try:
+        for start in range(0, len(body), 200):
+            assert {r["result"] for r in api.post("/api/ngsi/import", json=body[start : start + 200]).json()} == {
+                "created"
+            }
+        answer = api.get("/api/ngsi/entities", params={"type": kind, "has_attr": f"{IRI}mark", "limit": 1000})
+        assert answer.status_code == 200, answer.text[:300]
+        theirs = direct({"type": kind, "attrs": f"{IRI}mark", "limit": 1000, "orderBy": "id"})
+        assert [e["id"] for e in answer.json()] == [e["id"] for e in theirs] and len(theirs) == 1000
+    finally:
+        api.post("/api/ngsi/delete-by-types", json={"types": [kind]})

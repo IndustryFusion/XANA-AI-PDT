@@ -29,6 +29,7 @@ import asyncio
 import re
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import quote
@@ -47,6 +48,10 @@ TIMEOUT_S = 15
 MAX_LIMIT = 1000
 BATCH = 100
 MAX_SCANNED = 5000
+# Without an order, the broker's pages can repeat some entities and leave out others (measured on
+# Scorpio: 12 of 57 when paging by 7). It orders by ID when asked; a broker that doesn't know the
+# parameter ignores it.
+STABLE_ORDER = {"orderBy": "id"}
 CONCURRENT_COUNTS = 8
 RESERVED = {"id", "type", "@context", "scope", "createdAt", "modifiedAt", "deletedAt"}
 VALUE_MEMBERS = ("value", "object", "objectList", "json", "languageMap", "valueList", "vocab")
@@ -63,9 +68,13 @@ CONTEXT_REFUSED = (
 
 
 class Limited(list):
-    """A list that stopped early. `limited` says how far it got, for the caller and the operator."""
+    """A list that stopped early. `limited` says how far it got, for the caller and the operator.
+
+    `total` is the number of matches in all, when it is known.
+    """
 
     limited: dict[str, int] | None = None
+    total: int | None = None
 
 
 def _checked_identifier(identifier: str) -> str:
@@ -98,6 +107,28 @@ def _checked_limit(limit: int) -> int:
     if not 1 <= limit <= MAX_LIMIT:
         raise invalid(f"The limit must be a whole number from 1 to {MAX_LIMIT}.")
     return limit
+
+
+def _checked_offset(offset: int) -> int:
+    if offset < 0:
+        raise invalid("The offset must be a whole number from 0.")
+    return offset
+
+
+def _names(text: str | None) -> list[str]:
+    """Attribute names from a comma-separated list, each checked as an identifier."""
+    names = [name.strip() for name in (text or "").split(",") if name.strip()]
+    for name in names:
+        _checked_identifier(name)
+    return list(dict.fromkeys(names))
+
+
+def _projected(entity: dict[str, Any], names: list[str]) -> dict[str, Any] | None:
+    """The entity with only the named attributes, as the broker's `attrs` gives it: None without any of them."""
+    kept = {key: value for key, value in entity.items() if key in names}
+    if not kept:
+        return None
+    return {key: value for key, value in entity.items() if key in ("id", "type", "@context")} | kept
 
 
 def _problem(item: Any) -> str:
@@ -279,8 +310,18 @@ class ContextBroker:
         id_pattern: str | None = None,
         q: str | None = None,
         limit: int = 100,
+        offset: int = 0,
+        attrs: str | None = None,
+        has_attr: str | None = None,
     ) -> list[dict[str, Any]]:
+        """Matching entities, from `offset` on. `attrs` keeps only those attributes, as the broker does;
+        `has_attr` keeps entities that have that attribute, each whole unless `attrs` is given."""
         _checked_limit(limit)
+        _checked_offset(offset)
+        selected = _names(attrs)
+        having = _names(has_attr)
+        if len(having) > 1:
+            raise invalid("Name one attribute for the has-attribute filter.")
         tree = parse(q)
         if id_pattern:
             compile_pattern(id_pattern, "The ID pattern")
@@ -295,43 +336,101 @@ class ContextBroker:
             params["idPattern"] = id_pattern
         if not entity_type and not entity_id:
             params["type"] = "*"  # the broker refuses an ID pattern or expression alone
+        page = _Page(limit, offset, selected, having[0] if having else None)
         if not broker_can_evaluate(tree):
-            return await self._filtered(params, tree, limit)
+            return await self._filtered(params, tree, page)
         if tree is not None:
             params["q"] = q
         try:
-            found = await self._json("GET", "/entities", params={**params, "limit": limit})
+            return await self._paged(params, page)
         except Refused as refused:
             if tree is None or refused.kind not in ("invalid", "unavailable"):
                 raise
             # The syntax was checked here, so this is the broker failing on it. If the broker is
             # really down, reading the entities fails too, and that failure is the answer.
             params.pop("q")
-            return await self._filtered(params, tree, limit)
-        return found if isinstance(found, list) else []
+            return await self._filtered(params, tree, page)
 
-    async def _filtered(self, params: dict[str, Any], tree: Any, limit: int) -> Limited:
-        """Evaluates the expression here, over the first `MAX_SCANNED` entities, and says if there were more."""
-        matched = Limited()
+    async def _paged(self, params: dict[str, Any], page: _Page) -> Limited:
+        """The broker evaluates the query, pages it and counts it."""
+        attrs = page.having or (",".join(page.selected) if page.selected else None)
+        asked = {**params, "limit": page.limit, "offset": page.offset, "count": "true", **STABLE_ORDER}
+        if attrs:
+            asked["attrs"] = attrs
+        response = await self.send("GET", "/entities", params=asked)
+        try:
+            found = response.json()
+        except ValueError:
+            raise bad_gateway(f"{SERVICE} sent an answer that isn't JSON.") from None
+        found = [entity for entity in found if isinstance(entity, dict)] if isinstance(found, list) else []
+        if page.having:
+            found = await self._whole(found, page.selected)
+        answer = Limited(found)
+        total = _count_of(response)
+        # Past the last match the broker counts 0, which isn't the total.
+        answer.total = None if total == 0 and page.offset and not found else total
+        return answer
+
+    async def _whole(self, found: list[dict[str, Any]], selected: list[str]) -> list[dict[str, Any]]:
+        """The entities found by their attribute, read again by ID: whole, or with the selected attributes."""
+        ids = [entity["id"] for entity in found if isinstance(entity.get("id"), str)]
+        if not ids:
+            return []
+        by_id: dict[Any, dict[str, Any]] = {}
+        # In chunks, as all of a page's IDs in one address can be too long for the broker (HTTP 414).
+        for start in range(0, len(ids), BATCH):
+            chunk = ids[start : start + BATCH]
+            asked: dict[str, Any] = {"id": ",".join(chunk), "type": "*", "limit": len(chunk)}
+            if selected:
+                asked["attrs"] = ",".join(selected)
+            read = await self._json("GET", "/entities", params=asked)
+            by_id.update((e.get("id"), e) for e in (read if isinstance(read, list) else []) if isinstance(e, dict))
+        return [by_id[entity_id] for entity_id in ids if entity_id in by_id]
+
+    async def _filtered(self, params: dict[str, Any], tree: Any, page: _Page) -> Limited:
+        """Evaluates the expression here, over the first `MAX_SCANNED` entities, and says if there were more.
+
+        Matching is on whole entities; the offset skips matches, and selected attributes are kept afterwards.
+        The total is known when every entity was read.
+        """
+        wanted = page.offset + page.limit
+        matched: list[dict[str, Any]] = []
         total = None
-        for offset in range(0, MAX_SCANNED, MAX_LIMIT):
+        complete = False
+        for start in range(0, MAX_SCANNED, MAX_LIMIT):
             response = await self.send(
-                "GET", "/entities", params={**params, "limit": MAX_LIMIT, "offset": offset, "count": "true"}
+                "GET",
+                "/entities",
+                params={**params, "limit": MAX_LIMIT, "offset": start, "count": "true", **STABLE_ORDER},
             )
             try:
-                page = response.json()
+                read = response.json()
             except ValueError:
                 raise bad_gateway(f"{SERVICE} sent an answer that isn't JSON.") from None
-            page = page if isinstance(page, list) else []
+            read = read if isinstance(read, list) else []
             total = _count_of(response)
-            matched.extend(entity for entity in page if matches(entity, tree))
-            if len(matched) >= limit or len(page) < MAX_LIMIT:
-                matched[limit:] = []
-                return matched
-        if total is None or total > MAX_SCANNED:
-            matched.limited = {"scanned": MAX_SCANNED, **({"total": total} if total is not None else {})}
-        matched[limit:] = []
-        return matched
+            for entity in read:
+                if not isinstance(entity, dict) or not matches(entity, tree):
+                    continue
+                if page.having and page.having not in entity:
+                    continue
+                if page.selected and _projected(entity, page.selected) is None:
+                    continue
+                matched.append(entity)
+            if len(read) < MAX_LIMIT:
+                complete = True
+                break
+            if len(matched) > wanted:
+                break
+        answer = Limited(
+            entity if not page.selected else _projected(entity, page.selected)
+            for entity in matched[page.offset : wanted]
+        )
+        if complete:
+            answer.total = len(matched)
+        elif len(matched) <= wanted and (total is None or total > MAX_SCANNED):
+            answer.limited = {"scanned": MAX_SCANNED, **({"total": total} if total is not None else {})}
+        return answer
 
     async def entity(self, entity_id: str) -> dict[str, Any]:
         found = await self._json("GET", f"/entities/{_segment(entity_id)}")
@@ -436,7 +535,7 @@ class ContextBroker:
         return known
 
     async def import_entities(self, entities: list[Any]) -> list[dict[str, Any]]:
-        """Creates or merges entities. The result has one line per entry, in order."""
+        """Creates or replaces entities. The result has one line per entry, in order."""
         results: list[dict[str, Any]] = [{"id": None, "result": "failed", "reason": None} for _ in entities]
         ready: list[int] = []
         for index, entity in enumerate(entities):
@@ -478,8 +577,7 @@ class ContextBroker:
         try:
             response = await self.send(
                 "POST",
-                "/entityOperations/upsert",
-                params={"options": "update"},
+                "/entityOperations/upsert",  # without options: an existing entity is replaced
                 body=[entities[i] for i in indexes],
                 content_type=content_type,
             )
@@ -560,6 +658,14 @@ def _changes_entities(path: str) -> bool:
         or path == "/entityOperations/upsert"
         or (path.startswith("/entities/") and "/" not in path.removeprefix("/entities/"))
     )
+
+
+@dataclass(frozen=True)
+class _Page:
+    limit: int
+    offset: int
+    selected: list[str]
+    having: str | None
 
 
 def _count_of(response: httpx.Response) -> int | None:

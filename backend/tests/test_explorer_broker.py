@@ -553,7 +553,19 @@ def test_import_tells_created_from_updated(client, broker):
     answer = client.post("/api/ngsi/import", json=body)
     assert answer.status_code == 200
     assert [r["result"] for r in answer.json()] == ["updated", "created"]
-    assert attrs("temp") in broker.entities[MACHINE]
+    # Replaced: it holds exactly what was imported, and the attributes not in the file are gone.
+    assert broker.entities[MACHINE] == body[0]
+    assert attrs("temp") not in broker.entities[MACHINE]
+    upserts = [r for r in broker.requests if r.url.path.endswith("/entityOperations/upsert")]
+    assert upserts and all("options" not in r.url.params for r in upserts)
+
+
+def test_reimporting_without_an_attribute_removes_it(client, broker):
+    first = {"id": "urn:n:2", "type": "T", "a": {"type": "Property", "value": 1}, "b": {"type": "Property", "value": 2}}
+    assert client.post("/api/ngsi/import", json=[first]).json()[0]["result"] == "created"
+    again = {"id": "urn:n:2", "type": "T", "a": {"type": "Property", "value": 3}}
+    assert client.post("/api/ngsi/import", json=[again]).json()[0]["result"] == "updated"
+    assert broker.entities["urn:n:2"] == again
 
 
 def test_import_partial_failure_is_207_with_reasons_in_input_order(client):
@@ -762,3 +774,116 @@ def test_deep_or_broken_documents_are_refused_without_recursion():
             check_document(bad)
         assert caught.value.kind == "invalid"
     check_document({"a": [{"b": "fine"}]})
+
+
+# Paging, attributes to return, and the has-attribute filter ------------------------------------
+
+
+def many(broker: Broker, count: int = 7) -> list[str]:
+    """`count` entities of type T, half of them with attribute `a`, all with `b`."""
+    ids = []
+    for n in range(count):
+        entity = {"id": f"urn:p:{n}", "type": "T", "b": {"type": "Property", "value": n}}
+        if n % 2 == 0:
+            entity["a"] = {"type": "Property", "value": n}
+        broker.entities[entity["id"]] = entity
+        ids.append(entity["id"])
+    return ids
+
+
+def test_paging_to_the_end_gives_every_match_once_with_the_total(client, broker):
+    ids = many(broker)
+    seen, offset = [], 0
+    while True:
+        answer = client.get("/api/ngsi/entities", params={"type": "T", "limit": 3, "offset": offset})
+        page = [e["id"] for e in answer.json()]
+        # Past the end the broker counts 0, so no total is given rather than a wrong one.
+        assert answer.status_code == 200 and answer.headers.get("X-Total-Count") == ("7" if page else None)
+        if not page:
+            break
+        seen += page
+        offset += 3
+    assert seen == ids and offset == 9
+    sent = [r for r in broker.requests if r.url.params.get("type") == "T"]
+    assert [r.url.params["offset"] for r in sent] == ["0", "3", "6", "9"] and sent[0].url.params["count"] == "true"
+    assert all(r.url.params["orderBy"] == "id" for r in sent)  # or the broker's pages overlap
+
+
+@pytest.mark.parametrize("offset", ["-1", "x", "1.5"])
+def test_an_invalid_offset_is_refused_before_the_broker(client, broker, offset):
+    answer = client.get("/api/ngsi/entities", params={"type": "T", "offset": offset})
+    assert answer.status_code in (400, 422) and answer.json()["error"]["kind"] == "invalid"
+    assert not broker.requests
+
+
+def test_offset_with_an_expression_the_backend_evaluates(client, broker):
+    many(broker)
+    # `~=` on an attribute is evaluated here (see the query tests), over whole entities.
+    params = {"type": "T", "q": 'b~=".*"', "limit": 2}
+    first = client.get("/api/ngsi/entities", params=params | {"offset": 0})
+    second = client.get("/api/ngsi/entities", params=params | {"offset": 2})
+    assert [e["id"] for e in first.json()] == ["urn:p:0", "urn:p:1"]
+    assert [e["id"] for e in second.json()] == ["urn:p:2", "urn:p:3"]
+    assert second.headers.get("X-Total-Count") == "7"  # every entity was read
+
+
+def test_selected_attributes_are_what_the_broker_returns(client, broker):
+    many(broker)
+    answer = client.get("/api/ngsi/entities", params={"type": "T", "attrs": "a"})
+    direct = broker._query({"type": "T", "attrs": "a", "limit": "100"}).json()
+    assert answer.json() == direct
+    assert [e["id"] for e in direct] == ["urn:p:0", "urn:p:2", "urn:p:4", "urn:p:6"] and all(
+        "b" not in e for e in direct
+    )
+
+
+def test_selected_attributes_after_the_backends_own_evaluation_match_on_whole_entities(client, broker):
+    many(broker)
+    # The condition is on `b`, and only `a` is returned: matching must see `b`.
+    answer = client.get("/api/ngsi/entities", params={"type": "T", "q": 'b~="^[0-3]$"', "attrs": "a"})
+    assert [e["id"] for e in answer.json()] == ["urn:p:0", "urn:p:2"]
+    assert all(set(e) == {"id", "type", "a"} for e in answer.json())
+
+
+def test_has_attribute_returns_whole_entities(client, broker):
+    many(broker)
+    answer = client.get("/api/ngsi/entities", params={"type": "T", "has_attr": "a"})
+    found = answer.json()
+    expected = [e["id"] for e in broker._query({"type": "T", "attrs": "a", "limit": "100"}).json()]
+    assert [e["id"] for e in found] == expected
+    assert all("b" in e and "a" in e for e in found)
+    assert answer.headers["X-Total-Count"] == "4"
+
+
+def test_has_attribute_with_selected_attributes(client, broker):
+    many(broker)
+    found = client.get("/api/ngsi/entities", params={"type": "T", "has_attr": "a", "attrs": "b"}).json()
+    assert [e["id"] for e in found] == ["urn:p:0", "urn:p:2", "urn:p:4", "urn:p:6"]
+    assert all(set(e) == {"id", "type", "b"} for e in found)
+
+
+def test_has_attribute_nothing_has_it(client, broker):
+    many(broker)
+    answer = client.get("/api/ngsi/entities", params={"type": "T", "has_attr": "nothing"})
+    assert answer.status_code == 200 and answer.json() == []
+
+
+def test_has_attribute_names_one(client, broker):
+    answer = client.get("/api/ngsi/entities", params={"type": "T", "has_attr": "a,b"})
+    assert answer.json()["error"]["kind"] == "invalid" and not broker.requests
+
+
+def test_has_attribute_with_the_backends_own_evaluation(client, broker):
+    many(broker)
+    found = client.get("/api/ngsi/entities", params={"type": "T", "q": 'b~=".*"', "has_attr": "a"}).json()
+    assert [e["id"] for e in found] == ["urn:p:0", "urn:p:2", "urn:p:4", "urn:p:6"]
+    assert all("b" in e for e in found)
+
+
+def test_has_attribute_reads_a_large_page_in_chunks_in_order(client, broker):
+    for n in range(250):
+        broker.entities[f"urn:q:{n:03d}"] = {"id": f"urn:q:{n:03d}", "type": "Q", "a": {"type": "Property", "value": n}}
+    found = client.get("/api/ngsi/entities", params={"type": "Q", "has_attr": "a", "limit": 1000}).json()
+    assert [e["id"] for e in found] == [f"urn:q:{n:03d}" for n in range(250)]
+    reads = [r for r in broker.requests if r.url.params.get("type") == "*" and "id" in r.url.params]
+    assert [len(r.url.params["id"].split(",")) for r in reads] == [100, 100, 50]
