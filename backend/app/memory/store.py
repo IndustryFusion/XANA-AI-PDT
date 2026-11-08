@@ -218,7 +218,10 @@ def resolution_text(run: RunState) -> str | None:
         case "completed":
             return run.data.get("recommended_action")
         case "stopped":
-            return run.data.get("reason") or "Stopped by the operator."
+            reason = run.data.get("reason") or "Stopped by the operator."
+            outcome = run.data.get("outcome")
+            # The outcome the conversation was closed with is part of the record, whatever the operator wrote.
+            return f"{reason} (outcome: {outcome})" if outcome and f"outcome: {outcome}" not in reason else reason
         case "failed":
             return f"The run failed: {run.data.get('error')}"
         case "mb_closed":

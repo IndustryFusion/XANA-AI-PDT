@@ -19,6 +19,8 @@ import userEvent from '@testing-library/user-event'
 import { writeControls } from '../../src/data/sources/mock/controls'
 import { paths } from '../../src/app/router'
 import { MessageThread } from '../../src/features/incidents/Conversation'
+import { runs } from '../../src/data'
+import { DataError } from '../../src/data/errors'
 import { addRun, findRun, renderApp, renderAppWith, renderWithRouter } from '../helpers'
 
 const controls = { authEnabled: false, speed: 50 }
@@ -116,13 +118,50 @@ describe('structured acts', () => {
     await user.selectOptions(await screen.findByLabelText('Act'), 'close')
     await user.click(screen.getByRole('button', { name: 'Send' }))
     expect(screen.getByRole('alert')).toHaveTextContent('Choose an outcome')
-    expect(within(screen.getByLabelText('Outcome')).getAllByRole('option').map((o) => o.textContent)).toEqual(['Choose…', 'Resolved', 'Not resolved'])
+    expect(within(screen.getByLabelText('Outcome')).getAllByRole('option').map((o) => o.textContent))
+      .toEqual(['Choose…', 'Resolved', 'Not resolved', 'Rejected', 'Timed out', 'Escalated to direct contact'])
     await user.selectOptions(screen.getByLabelText('Outcome'), 'resolved')
     await user.click(screen.getByRole('button', { name: 'Send' }))
     expect(await screen.findByRole('region', { name: 'Stopped' })).toHaveTextContent('Resolved')
     expect(within(await thread()).getByText('Outcome: Resolved')).toBeVisible()
     expect(screen.getAllByText('Closed').length).toBeGreaterThan(0)
     expect(findRun('run-1003').status).toBe('stopped')
+  })
+
+  test.each([['rejected', 'Rejected'], ['timed_out', 'Timed out']])('closing as %s is sent with that outcome', async (outcome, label) => {
+    const user = userEvent.setup()
+    openRun('run-1003')
+    await user.selectOptions(await screen.findByLabelText('Act'), 'close')
+    await user.selectOptions(screen.getByLabelText('Outcome'), outcome)
+    await user.click(screen.getByRole('button', { name: 'Send' }))
+    expect(await screen.findByRole('region', { name: 'Stopped' })).toHaveTextContent(label)
+    expect(findRun('run-1003').data.outcome).toBe(outcome)
+  })
+
+  test('closing as escalated from an open conversation sends the escalation first, then the close', async () => {
+    const user = userEvent.setup()
+    openRun('run-1003')
+    await user.selectOptions(await screen.findByLabelText('Act'), 'close')
+    await user.selectOptions(screen.getByLabelText('Outcome'), 'escalated')
+    await user.click(screen.getByRole('button', { name: 'Send' }))
+    expect(await screen.findByRole('region', { name: 'Stopped' })).toBeVisible()
+    const acts = findRun('run-1003').steps.filter((s) => s.node === 'message' && s.output.sender === 'operator').map((s) => s.output.act)
+    expect(acts.slice(-2)).toEqual(['escalate', 'close'])
+    expect(screen.getByText('This run cannot be reopened.')).toBeVisible()
+  })
+
+  test('a refused escalation leaves the form with the reason, and nothing closes', async () => {
+    const user = userEvent.setup()
+    openRun('run-1003')
+    const refused = new DataError('runs', 'conflict', 'The machine builder did not get the escalation (refused). Nothing else was sent.')
+    const spy = vi.spyOn(runs, 'sendConversationAct').mockRejectedValueOnce(refused)
+    await user.selectOptions(await screen.findByLabelText('Act'), 'close')
+    await user.selectOptions(screen.getByLabelText('Outcome'), 'escalated')
+    await user.click(screen.getByRole('button', { name: 'Send' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('did not get the escalation')
+    expect(screen.getByLabelText('Outcome')).toHaveValue('escalated')
+    expect(findRun('run-1003').status).not.toBe('stopped')
+    spy.mockRestore()
   })
 
   test('direct contact requested by the machine builder: no close or end of direct contact', async () => {
