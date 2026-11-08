@@ -12,4 +12,4 @@
 ## 3. Documents
 
 - [ ] 3.1 Document the environment, its layering and its placeholders in `helm/README.md`, and in `architecture.md` where environments are named; verify by reading them
-- [ ] 3.2 The values for the cluster: open for the maintainer; record the answer here when given
+- [ ] 3.2 Say in `helm/README.md` that operators fill in every placeholder of `localAndIonos.yaml` for their cluster, listing each; verify by reading it against the file

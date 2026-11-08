@@ -23,9 +23,9 @@ Only keys that a cluster of this kind is expected to set differently from produc
 
 The rest is inherited. A key not listed here can be added to the file later in the same way.
 
-### Placeholders, open for the maintainer
+### Placeholders, decided by the maintainer
 
-**Open:** the real values for the local-and-IONOS cluster are not known here. Each value in the file is a placeholder under the reserved `.invalid` domain (for example `replace-me.invalid` for a host, `https://keycloak.replace-me.invalid/auth` for an address, `replace-me` for a tag or Secret name), with a comment naming what goes there. `.invalid` can't resolve, so a deployment with a placeholder left in fails visibly instead of reaching another host. The README lists every placeholder an operator must replace. The maintainer is asked to supply the values, or to confirm that operators fill them in per cluster.
+**Decided:** the placeholders stay, and operators fill them in per cluster. The real values for the local-and-IONOS cluster are not known here. Each value in the file is a placeholder under the reserved `.invalid` domain (for example `replace-me.invalid` for a host, `https://keycloak.replace-me.invalid/auth` for an address, `replace-me` for a tag or Secret name), with a comment naming what goes there. `.invalid` can't resolve, so a deployment with a placeholder left in fails visibly instead of reaching another host. The README lists every placeholder an operator must replace. The maintainer decided that the file keeps the placeholders and each operator fills them in for their cluster; no real values go into the repository.
 
 Alternatives considered:
 

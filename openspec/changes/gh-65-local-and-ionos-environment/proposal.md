@@ -33,6 +33,6 @@ None.
 
 ## Out of Scope
 
-- The real values for that cluster: open for the maintainer (see `design.md`).
+- The real values for that cluster: operators fill in the placeholders per cluster, as the maintainer decided (see `design.md`).
 - Installing on a real cluster.
 - RAG settings (#18).
