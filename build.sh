@@ -52,9 +52,14 @@ fail() {
 }
 
 # Reads build.conf as data: KEY=VALUE lines for the known keys, comments and blank lines.
-# Sets file_REGISTRY and file_IMAGE_TAG; anything else stops the script, naming the line.
+# Sets file_REGISTRY and file_IMAGE_TAG, and the line of each in line_REGISTRY and line_IMAGE_TAG;
+# anything else stops the script, naming the line.
 file_REGISTRY=""
 file_IMAGE_TAG=""
+# shellcheck disable=SC2034 # read by name in source_of
+line_REGISTRY=""
+# shellcheck disable=SC2034
+line_IMAGE_TAG=""
 read_config() {
   [[ -f "$CONFIG" ]] || return 0
   local number=0 line key value
@@ -75,6 +80,7 @@ read_config() {
       value="${BASH_REMATCH[1]}"
     fi
     printf -v "file_$key" '%s' "$value"
+    printf -v "line_$key" '%s' "$number"
   done <"$CONFIG"
 }
 
@@ -97,12 +103,35 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
+# Where a setting came from, for a message about its value.
+source_of() {
+  local key="$1" line_var="line_$1" file_var="file_$1"
+  if [[ -n "${!key:-}" ]]; then
+    echo "from the shell ($key)"
+  elif [[ -n "${!file_var}" ]]; then
+    echo "from $CONFIG line ${!line_var}"
+  else
+    echo "the default"
+  fi
+}
+
+# A registry as the first part of an image reference: host[:port] and optional path parts, as Docker reads
+# them. No spaces, no empty path parts; path parts are lower case.
+readonly HOST_PART='[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?'
+readonly PATH_PART='[a-z0-9]+(([._]|__|-+)[a-z0-9]+)*'
+readonly REGISTRY_FORM="^${HOST_PART}(\.${HOST_PART})*(:[0-9]{1,5})?(/${PATH_PART})*$"
+
 read_config
 registry="${REGISTRY:-${file_REGISTRY:-$DEFAULT_REGISTRY}}"
 registry="${registry%/}"
 tag="${IMAGE_TAG:-${file_IMAGE_TAG:-$DEFAULT_TAG}}"
 [[ -n "$registry" ]] || fail "REGISTRY is empty"
-[[ "$tag" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]] || fail "IMAGE_TAG '$tag' is not a valid image tag"
+if [[ ! "$registry" =~ $REGISTRY_FORM ]]; then
+  fail "REGISTRY '$registry' $(source_of REGISTRY) is not a registry: use host[:port] with optional path parts, no spaces"
+fi
+if [[ ! "$tag" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
+  fail "IMAGE_TAG '$tag' $(source_of IMAGE_TAG) is not a valid image tag"
+fi
 
 case "$target" in
   all) names=(backend frontend) ;;
@@ -116,13 +145,17 @@ for name in "${names[@]}"; do
 done
 $push || echo "Build only: nothing is pushed."
 
+# Every image is built before any is pushed, so a failed build leaves the registry as it was.
 for name in "${names[@]}"; do
   image="$registry/xana-ai-pdt-$name:$tag"
   echo "==> Building $image"
-  docker build -t "$image" "$HERE/$name" || fail "building $image failed"
-  if $push; then
+  docker build -t "$image" "$HERE/$name" || fail "building $image failed; nothing was pushed"
+done
+if $push; then
+  for name in "${names[@]}"; do
+    image="$registry/xana-ai-pdt-$name:$tag"
     echo "==> Pushing $image"
     docker push "$image" || fail "pushing $image failed (is the registry reachable, and are you logged in?)"
-  fi
-done
+  done
+fi
 echo "Done."

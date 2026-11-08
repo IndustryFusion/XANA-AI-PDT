@@ -64,9 +64,9 @@ check() {
 calls_are() { diff <(printf '%s\n' "$@") <(sed "s|$work/||" "$CALLS") >/dev/null; }
 
 setup; run ./build.sh
-check "defaults build and push both images" eval '[[ $status == 0 ]] && calls_are \
-  "build -t k3d-iff.localhost:12345/xana-ai-pdt-backend:latest backend" "push k3d-iff.localhost:12345/xana-ai-pdt-backend:latest" \
-  "build -t k3d-iff.localhost:12345/xana-ai-pdt-frontend:latest frontend" "push k3d-iff.localhost:12345/xana-ai-pdt-frontend:latest"'
+check "defaults build both images, then push both" eval '[[ $status == 0 ]] && calls_are \
+  "build -t k3d-iff.localhost:12345/xana-ai-pdt-backend:latest backend" "build -t k3d-iff.localhost:12345/xana-ai-pdt-frontend:latest frontend" \
+  "push k3d-iff.localhost:12345/xana-ai-pdt-backend:latest" "push k3d-iff.localhost:12345/xana-ai-pdt-frontend:latest"'
 
 setup; run ./build.sh
 check "registry, tag and names are printed before building" eval 'head -4 "$work/out" | diff - <(printf "%s\n" \
@@ -75,8 +75,8 @@ check "registry, tag and names are printed before building" eval 'head -4 "$work
 
 setup; run env REGISTRY=reg.test:5000/team/ IMAGE_TAG=1.2.3 ./build.sh
 check "registry and tag from the shell, trailing slash dropped" eval '[[ $status == 0 ]] && calls_are \
-  "build -t reg.test:5000/team/xana-ai-pdt-backend:1.2.3 backend" "push reg.test:5000/team/xana-ai-pdt-backend:1.2.3" \
-  "build -t reg.test:5000/team/xana-ai-pdt-frontend:1.2.3 frontend" "push reg.test:5000/team/xana-ai-pdt-frontend:1.2.3"'
+  "build -t reg.test:5000/team/xana-ai-pdt-backend:1.2.3 backend" "build -t reg.test:5000/team/xana-ai-pdt-frontend:1.2.3 frontend" \
+  "push reg.test:5000/team/xana-ai-pdt-backend:1.2.3" "push reg.test:5000/team/xana-ai-pdt-frontend:1.2.3"'
 
 setup; printf '# mine\n\nREGISTRY=file.test:5000\nIMAGE_TAG="from-file"\n' >"$work/build.conf"; run ./build.sh --no-push backend
 check "values from build.conf" eval '[[ $status == 0 ]] && calls_are "build -t file.test:5000/xana-ai-pdt-backend:from-file backend"'
@@ -104,10 +104,24 @@ setup; run ./build.sh --push-everything
 check "an unknown option exits with 2 and the usage, and nothing runs" eval '[[ $status == 2 ]] && grep -q "unknown option" "$work/out" && grep -q "^Usage" "$work/out" && [[ ! -s "$CALLS" ]]'
 
 setup; run env STUB_FAIL="^build .*/backend$" ./build.sh
-check "a failed build stops with non-zero, naming it, before anything else" eval '[[ $status != 0 ]] && grep -q "building k3d-iff.localhost:12345/xana-ai-pdt-backend:latest failed" "$work/out" && [[ $(wc -l <"$CALLS") == 1 ]]'
+check "a failed build stops with non-zero, naming it, before anything else" eval '[[ $status != 0 ]] && grep -q "building k3d-iff.localhost:12345/xana-ai-pdt-backend:latest failed" "$work/out" && (( $(wc -l <"$CALLS") == 1 ))'
+
+setup; run env STUB_FAIL="^build .*/frontend$" ./build.sh
+check "a failed build of the second image pushes neither" eval '[[ $status != 0 ]] && grep -q "nothing was pushed" "$work/out" && ! grep -q "^push" "$CALLS"'
 
 setup; run env STUB_FAIL="^push .*xana-ai-pdt-backend" ./build.sh
-check "a failed push stops with non-zero, naming it" eval '[[ $status != 0 ]] && grep -q "pushing k3d-iff.localhost:12345/xana-ai-pdt-backend:latest failed" "$work/out" && ! grep -q frontend "$CALLS"'
+check "a failed push stops with non-zero, naming it, and pushes nothing more" eval '[[ $status != 0 ]] && grep -q "pushing k3d-iff.localhost:12345/xana-ai-pdt-backend:latest failed" "$work/out" && ! grep -q "^push .*frontend" "$CALLS"'
+
+setup; printf 'REGISTRY=crlf.test:5000\r\nIMAGE_TAG=from-windows\r\n' >"$work/build.conf"; run ./build.sh --no-push backend
+check "a build.conf with Windows line ends is read" eval '[[ $status == 0 ]] && calls_are "build -t crlf.test:5000/xana-ai-pdt-backend:from-windows backend"'
+
+for bad in "reg:5000 # mine" "reg:5000 " "reg//" "reg:5000/a//b" "reg:5000/Team"; do
+  setup; run env REGISTRY="$bad" ./build.sh
+  check "REGISTRY '$bad' from the shell is refused before building, naming it" eval '[[ $status != 0 ]] && grep -qF "REGISTRY '"'"'${bad%/}'"'"' from the shell (REGISTRY) is not a registry" "$work/out" && [[ ! -s "$CALLS" ]]'
+done
+
+setup; printf '# mine\nREGISTRY=reg.test:5000 # mine\n' >"$work/build.conf"; run ./build.sh
+check "a bad REGISTRY in build.conf names its line" eval '[[ $status != 0 ]] && grep -q "from .*build.conf line 2 is not a registry" "$work/out" && [[ ! -s "$CALLS" ]]'
 
 setup; run env IMAGE_TAG="bad tag" ./build.sh
 check "an invalid tag stops before building" eval '[[ $status != 0 ]] && grep -q "not a valid image tag" "$work/out" && [[ ! -s "$CALLS" ]]'

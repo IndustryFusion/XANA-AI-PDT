@@ -132,8 +132,8 @@ REGISTRY=<registry>/<path> IMAGE_TAG=1.2.3 ./build.sh
 
 It pushes `<registry>/<path>/xana-ai-pdt-backend:1.2.3` and `<registry>/<path>/xana-ai-pdt-frontend:1.2.3`, the names the chart renders from `imageRegistry: <registry>/<path>` and `imageTag: "1.2.3"` in your environment file.
 
-- `REGISTRY` defaults to `k3d-iff.localhost:12345` and `IMAGE_TAG` to `latest`. To keep yours, copy `build.conf.example` to `build.conf` (git-ignored); shell variables win over it. It is read as `KEY=VALUE` lines for those two keys only, not run.
-- `./build.sh backend` or `./build.sh frontend` builds one image; `--no-push` builds without pushing; `--help` shows the usage. It prints the registry, tag and names first, and stops at the first failure, saying what failed.
+- `REGISTRY` defaults to `k3d-iff.localhost:12345` and `IMAGE_TAG` to `latest`. `REGISTRY` is a registry and optional path, `host[:port][/path…]`, with no spaces and lower-case path parts; a value that isn't stops the script before building, naming where it came from. To keep yours, copy `build.conf.example` to `build.conf` (git-ignored); shell variables win over it. It is read as `KEY=VALUE` lines for those two keys only, not run.
+- `./build.sh backend` or `./build.sh frontend` builds one image; `--no-push` builds without pushing; `--help` shows the usage. It prints the registry, tag and names first, builds every selected image before pushing any, and stops at the first failure, saying what failed.
 - A registry served over plain HTTP under another name than `localhost`, such as k3d's, has to be listed in Docker's `insecure-registries` first.
 
 CI builds both images with `./build.sh --no-push` on every related Pull Request. Publishing to `ghcr.io/industryfusion` happens only from a version tag.
