@@ -34,6 +34,8 @@ on:
       - "backend/agent/xana_agent/**"
       - "backend/db-init/**"
       - "helm/**"
+      - "build.sh"
+      - "build.conf.example"
       - ".github/workflows/deployment.yml"
   push:
     branches: [main]
@@ -53,6 +55,8 @@ on:
       - "backend/agent/xana_agent/**"
       - "backend/db-init/**"
       - "helm/**"
+      - "build.sh"
+      - "build.conf.example"
       - ".github/workflows/deployment.yml"
     tags: ["v*"]
 
@@ -77,6 +81,10 @@ jobs:
         run: |
           pip install pyyaml
           python helm/test/check_render.py helm/charts/xana-pdt
+      - name: Check the build script
+        run: |
+          shellcheck build.sh helm/test/build_test.sh
+          helm/test/build_test.sh
 
   # The documented install on a local cluster, with stand-ins for the platform's services.
   install:
@@ -165,10 +173,8 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v4
-      - name: Build
-        run: |
-          docker build -t "$IMAGE_PREFIX-backend:ci" backend
-          docker build -t "$IMAGE_PREFIX-frontend:ci" frontend
+      - name: Build, with the build script in build-only mode
+        run: REGISTRY="${IMAGE_PREFIX%/xana-ai-pdt}" IMAGE_TAG=ci ./build.sh --no-push
       - name: Check the images start as non-root
         run: |
           docker run --rm "$IMAGE_PREFIX-backend:ci" sh -c 'test "$(id -u)" != 0'

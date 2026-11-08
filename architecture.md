@@ -526,7 +526,7 @@ XANA AI PDT uses a two-layer deployment model:
 
 ```
 ┌──────────────────────────────────────────────────────┐
-│  Build layer (docker compose build / push)           │
+│  Build layer (build.sh, or CI from a version tag)    │
 │                                                      │
 │  Dockerfile (backend/)  ──►  ghcr.io/…/backend:tag  │
 │  Dockerfile (frontend/) ──►  ghcr.io/…/frontend:tag │
