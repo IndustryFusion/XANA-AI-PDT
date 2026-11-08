@@ -33,6 +33,17 @@ from pathlib import Path
 import yaml
 
 MARKER = "ProductionLayerMarker"
+# Rendered settings that look like addresses but aren't one the backend reaches on this cluster.
+NOT_ADDRESSES = {
+    "BACKEND_HOST",  # the backend's own listening address, 0.0.0.0
+    "FUSEKI_GRAPH_BASE",  # an IRI that names the ontology's graphs; never requested
+    "XANA_BACKEND_URL",  # the frontend's way to this release's own backend Service
+}
+ADDRESS = re.compile(r"://|^[A-Za-z0-9.-]+:[0-9]{2,5}(/|$)|@[A-Za-z0-9.-]+:[0-9]{2,5}/")
+
+
+def placeholder(value: str) -> bool:
+    return bool(re.search(r"\.invalid(?:[:/]|$)", value)) or "replace-me" in value
 
 
 def render(helm_dir: Path) -> list[dict]:
@@ -56,7 +67,29 @@ def problems(docs: list[dict], own: dict) -> list[str]:
         found.append(f"ngsiUrl of localAndIonos.yaml doesn't win over default's: {config.get('NGSI_URL')}")
     if config.get("MACHINE_WATCH_TYPE") != MARKER:
         found.append(f"a value set only in production.yaml isn't used: {config.get('MACHINE_WATCH_TYPE')}")
+    found += inherited_addresses(docs)
     return found
+
+
+def inherited_addresses(docs: list[dict]) -> list[str]:
+    """Addresses in what localAndIonos renders that are still default's or production's, not placeholders."""
+    settings: list[tuple[str, str]] = []
+    for d in docs:
+        if d["kind"] == "ConfigMap":
+            settings += [(k, str(v)) for k, v in (d.get("data") or {}).items()]
+        if d["kind"] == "Deployment":
+            for c in d["spec"]["template"]["spec"]["containers"]:
+                settings += [(e["name"], str(e["value"])) for e in c.get("env", []) if "value" in e]
+        if d["kind"] == "Ingress":
+            settings += [("ingress host", str(r.get("host", ""))) for r in d["spec"].get("rules", [])]
+    return [
+        f"{key} is an address inherited from another environment, not a placeholder: {value}"
+        for key, value in settings
+        if key not in NOT_ADDRESSES
+        and (ADDRESS.search(value) or key.endswith(("_URL", "_HOST")) or key == "ingress host")
+        and value
+        and not placeholder(value)
+    ]
 
 
 def prepared_copy(helm_dir: Path, reverse: bool) -> Path:
@@ -101,7 +134,7 @@ def main() -> None:
     # Placeholders only: every value is marked, and none looks like a secret.
     for key, value in own.items():
         text = str(value)
-        if not (re.search(r"\.invalid(?:[:/]|$)", text) or "replace-me" in text):
+        if not placeholder(text):
             print(f"FAIL: {key} is not a marked placeholder: {text}")
             sys.exit(1)
         if re.search(r"(?i)secret|password|token|key$", key) and key != "ingressTlsSecret":  # a Secret's name

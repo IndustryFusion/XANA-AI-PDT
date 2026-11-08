@@ -35,6 +35,7 @@ pgrestUrl: http://pgrest.replace-me.invalid:3000       # the history service
 alertaUrl: http://alerta.replace-me.invalid:8080/api   # Alerta, ending in /api
 fusekiUrl: http://fuseki.replace-me.invalid:3030       # the ontology store
 mqttBrokerUrl: mqtt://emqx.replace-me.invalid:1883     # the message broker
+mqttMgmtUrl: http://emqx-dashboard.replace-me.invalid:18083  # the message broker's management API
 databaseHost: acid-cluster.replace-me.invalid          # the PostgreSQL host with tsdb and memory
 
 # The dataspace. With gatewayUrl set, the backend also needs SETTINGS_ENCRYPTION_KEY (XANA_SETTINGS_ENCRYPTION_KEY).
