@@ -7,7 +7,7 @@
 
 ## 2. Checks
 
-- [ ] 2.1 Render `localAndIonos` in CI's loop, run the secret check on it, and check the layering; verify on the Pull Request, and that the layering check fails with the order reversed
+- [x] 2.1 Render `localAndIonos` in CI's loop, run the secret check on it, and check the layering; verify on the Pull Request, and that the layering check fails with the order reversed
 
 ## 3. Documents
 
