@@ -1,0 +1,43 @@
+#
+# Copyright (c) 2026 IndustryFusion Foundation
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# The localAndIonos environment: production (default.yaml, then production.yaml), with what differs on a
+# local-and-IONOS cluster. Every value below is a placeholder: replace each for your cluster before
+# deploying. Placeholders are under the reserved .invalid domain or read replace-me, so one left in
+# fails instead of reaching another host. No secret goes here: secrets come from XANA_* shell
+# variables or existingSecret (see README.md). Keys not set here are production's.
+
+# Images: where build.sh pushed them (REGISTRY and IMAGE_TAG).
+imageRegistry: registry.replace-me.invalid/xana       # your registry and path
+imageTag: replace-me                                  # the tag you pushed
+
+# Ingress. XANA_INGRESS_HOST in the shell still wins over ingressHost.
+ingressClass: replace-me                              # the cluster's Ingress class, for example nginx
+ingressHost: xana.replace-me.invalid                  # the host name XANA is served under
+ingressTlsSecret: replace-me                          # the TLS Secret for that host, in the namespace
+
+# The platform's services, as the backend reaches them from its namespace.
+keycloakUrl: https://keycloak.replace-me.invalid/auth  # the platform's Keycloak, with /auth if it has it
+ngsiUrl: http://scorpio.replace-me.invalid:9090        # the context broker
+pgrestUrl: http://pgrest.replace-me.invalid:3000       # the history service
+alertaUrl: http://alerta.replace-me.invalid:8080/api   # Alerta, ending in /api
+fusekiUrl: http://fuseki.replace-me.invalid:3030       # the ontology store
+mqttBrokerUrl: mqtt://emqx.replace-me.invalid:1883     # the message broker
+databaseHost: acid-cluster.replace-me.invalid          # the PostgreSQL host with tsdb and memory
+
+# The dataspace. With gatewayUrl set, the backend also needs SETTINGS_ENCRYPTION_KEY (XANA_SETTINGS_ENCRYPTION_KEY).
+gatewayUrl: https://gateway.replace-me.invalid             # the dataspace gateway
+gatewayKeycloakUrl: https://keycloak-dataspace.replace-me.invalid/auth  # the dataspace's Keycloak
+ifricUrl: https://ifric.replace-me.invalid:4007            # the IFRIC registry, with its port

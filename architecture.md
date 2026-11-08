@@ -568,7 +568,8 @@ helm/
 ├── environment/
 │   ├── default.yaml                # platform service addresses, ingress
 │   ├── production.yaml             # pinned image tag, TLS secret
-│   └── local.yaml                  # a local cluster with stand-in services
+│   ├── local.yaml                  # a local cluster with stand-in services
+│   └── localAndIonos.yaml          # production on a local-and-IONOS cluster; placeholders to fill in
 ├── test/                           # stand-in services and a smoke test, used by CI
 └── charts/
     └── xana-pdt/                   # Helm chart (backend + frontend + ingress)

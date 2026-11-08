@@ -30,6 +30,19 @@ kubectl -n iff exec deploy/xana-pdt-backend -- \
 
 `production` adds a pinned image tag and a TLS Secret: `helmfile -e production sync`.
 
+`localAndIonos` is production with the settings of a local-and-IONOS cluster: `default.yaml`, then `production.yaml`, then `localAndIonos.yaml`, a later file winning. Its file holds only placeholders, under the reserved `.invalid` domain or reading `replace-me`; fill in every one for your cluster before `helmfile -e localAndIonos sync`, as a placeholder left in fails rather than reaching another host:
+
+| Key | What to put there |
+|---|---|
+| `imageRegistry`, `imageTag` | Where `build.sh` pushed the images (see [Images](#images)) |
+| `ingressClass`, `ingressHost`, `ingressTlsSecret` | The cluster's Ingress class, XANA's host name (or `XANA_INGRESS_HOST`), and the TLS Secret for it |
+| `keycloakUrl` | The platform's Keycloak, with `/auth` if it has it |
+| `ngsiUrl`, `pgrestUrl`, `alertaUrl`, `fusekiUrl`, `mqttBrokerUrl` | The context broker, history service, Alerta (ending in `/api`), ontology store and message broker, as the backend reaches them |
+| `databaseHost` | The PostgreSQL host with `tsdb` and `memory` |
+| `gatewayUrl`, `gatewayKeycloakUrl`, `ifricUrl` | The dataspace gateway, its Keycloak, and the IFRIC registry; with `gatewayUrl`, also `XANA_SETTINGS_ENCRYPTION_KEY` |
+
+No secret goes into the file: secrets come from `XANA_*` shell variables or an existing Secret, as for the other environments (see [Secrets](#secrets)). In CI, `helm/test/check_environments.py` checks the layering, and that the committed file holds only marked placeholders and no key named like a secret; your filled-in copy is yours to keep out of the repository.
+
 To remove the release: `helmfile -e default destroy`. Data in the database is kept.
 
 ## Configuration
