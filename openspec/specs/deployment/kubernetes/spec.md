@@ -108,3 +108,25 @@ The chart SHALL pass the machine events' settings, with the secrets kept apart f
 #### Scenario: Address
 - **WHEN** `callbackBaseUrl` is set
 - **THEN** the backend receives it as `CALLBACK_BASE_URL`, and with it unset no subscription is made
+
+### Requirement: Automatic archive in the chart
+The chart SHALL pass `AUTO_ARCHIVE_AFTER_S` to the backend as configuration.
+
+#### Scenario: Rendered
+- **WHEN** the chart is rendered with a value for the delay
+- **THEN** the backend's configuration holds `AUTO_ARCHIVE_AFTER_S` with that value, and without one the backend's default applies
+
+### Requirement: Tracing address in the chart
+The chart SHALL pass the Langfuse address to the backend as configuration, and the Langfuse keys as secrets.
+
+#### Scenario: Rendered with an address and keys
+- **WHEN** the chart is rendered with a Langfuse address and keys
+- **THEN** the backend's configuration holds `LANGFUSE_HOST` with the address, and the keys are only in the Secret
+
+#### Scenario: Rendered without an address
+- **WHEN** no address is given
+- **THEN** no `LANGFUSE_HOST` is rendered
+
+#### Scenario: Traces through the chart
+- **WHEN** the backend runs with the configuration and Secret the chart renders with an address and keys
+- **THEN** traces reach that address (test with a stand-in server)
