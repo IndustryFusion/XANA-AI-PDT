@@ -104,6 +104,12 @@ A check renders the default environment with test credentials and fails if any `
 3. `./bootstrap.sh`.
 4. `./helmfile -e <environment> apply`.
 
+### Found while implementing
+
+- **A database URL from `secretLookups` counts as given.** The old switch for "no credentials, URLs from lookups" was `databaseCredentialsSecret: ""`, which is now the default. So a URL named in `secretLookups` isn't built, and with both there, no credentials are needed. A lookup for `DB_USER` or `DB_PASSWORD` still stops the render.
+- **The chart's Secrets are written as `data`, not `stringData`.** With `stringData`, a key left out on a later `apply` stayed in the Secret, as Kubernetes stores it under `data`; on the local cluster an unset secret was still there after a `sync`. With `data`, it is removed, as the README says.
+- **The local test cluster unsets `KEYCLOAK_SERVICE_CLIENT_SECRET` after sourcing the helper.** The helper's test Secret holds one, and the stand-ins have no Keycloak, so the backend would refuse to start with a client secret but no client.
+
 ## Risks
 
 - **Stale password:** after a password change, XANA fails to connect until someone re-sources and re-applies. The helper's "differs" message and the health report make it visible.
