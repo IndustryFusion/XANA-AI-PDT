@@ -140,6 +140,7 @@ if command -v helm >/dev/null; then
   setup; run env REGISTRY=reg.test:5000/team IMAGE_TAG=1.2.3 ./build.sh --no-push
   chart="$(cd "$(dirname "$SCRIPT")" && pwd)/helm/charts/xana-pdt"
   rendered="$(helm template x "$chart" --set imageRegistry=reg.test:5000/team --set imageTag=1.2.3 \
+    --set backend.databaseCredentials.username=check --set backend.databaseCredentials.password=check \
     | sed -n 's/^ *image: //p' | sort -u)"
   check "the chart renders the images the script builds" eval 'diff <(echo "$rendered") \
     <(sed -n "s/^build -t \([^ ]*\) .*/\1/p" "$CALLS" | sort -u) >/dev/null'

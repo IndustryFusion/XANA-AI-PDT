@@ -26,36 +26,41 @@ backend:
     requests: { cpu: 250m, memory: 512Mi }
     limits: { memory: 2Gi }
   # The backend's settings, as environment variables. See backend/.env.example.
-  # The addresses are the digital twin platform's services in namespace `iff`.
+  # The addresses are the digital twin platform's services in namespace `iff`, reached from the release's own.
   config:
     LLM_PROVIDER: ollama
     LLM_MODEL: llama3.1
     LOG_LEVEL: INFO
     KEYCLOAK_REALM: iff
     KEYCLOAK_CLIENT_ID: scorpio
-    NGSI_URL: http://scorpio-all-in-one-runner:9090
-    PGREST_URL: http://pgrest:3000
+    NGSI_URL: http://scorpio-all-in-one-runner.iff:9090
+    PGREST_URL: http://pgrest.iff:3000
     GATEWAY_KEYCLOAK_REALM: dataspace
     DATA_SHARING_POLICY: minimal
     INBOX_POLL_INTERVAL_S: "15"
-    ALERTA_URL: http://alerta:8080/api
+    ALERTA_URL: http://alerta.iff:8080/api
     ALERTS_REFRESH_INTERVAL_S: "30"
-    FUSEKI_URL: http://fuseki:3030
+    FUSEKI_URL: http://fuseki.iff:3030
     FUSEKI_DATASET: iff
-    MQTT_BROKER_URL: mqtt://emqx-listeners:1883
-    MQTT_MGMT_URL: http://emqx-dashboard:18083
+    MQTT_BROKER_URL: mqtt://emqx-listeners.iff:1883
+    MQTT_MGMT_URL: http://emqx-dashboard.iff:18083
     POSTGRES_SSLMODE: require
   # The backend's secrets, by variable name, in a Secret the chart creates. Never commit these.
   secret: {}
-  # Without TIMESCALE_DB_URL and POSTGRES_MEMORY_URL in `secret`, both are built when the Pod starts from this
-  # Secret's username and password. Set `secret` here to "" to give neither.
+  # Without TIMESCALE_DB_URL and POSTGRES_MEMORY_URL in `secret`, both are built when the Pod starts from the
+  # database credentials: `databaseCredentials` if both are set, which the chart stores percent-encoded in a
+  # Secret of its own, else the Secret `postgresCredential.secret`. With neither, the render stops.
+  databaseCredentials:
+    username: ""
+    password: ""
   postgresCredential:
-    host: acid-cluster
+    host: acid-cluster.iff
     port: 5432
     timeseriesDatabase: tsdb
     memoryDatabase: memory
-    # The database operator's Secret, with keys username and password, in the release's namespace.
-    secret: ngb.acid-cluster.credentials
+    # A Secret with keys username and password in the release's namespace, for example the database
+    # operator's Secret copied there. Its values are used as they are, so they must not need URL encoding.
+    secret: ""
     # A Secret holding the database's CA certificate as ca.crt, for POSTGRES_SSLMODE verify-ca or verify-full.
     # It is mounted, and POSTGRES_SSLROOTCERT points at it.
     caSecret: ""

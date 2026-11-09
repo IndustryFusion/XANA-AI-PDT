@@ -18,7 +18,9 @@
 # Every key is described in README.md. Secrets stay empty here: set them as shell variables of the
 # backend's own names (for example ANTHROPIC_API_KEY), which win over these keys, or source
 # envs/iff-cluster.sh to export them from the cluster.
-namespace: iff
+# XANA's own namespace, and the one the digital twin platform runs in.
+namespace: xana-pdt
+platformNamespace: iff
 imageRegistry: ghcr.io/industryfusion
 imageTag: ""
 imagePullPolicy: IfNotPresent
@@ -47,21 +49,23 @@ factoryId: ""
 keycloakServiceClientId: ""
 
 # The digital twin.
-ngsiUrl: http://scorpio-all-in-one-runner:9090
+# The platform's addresses below, left empty, are its Services in platformNamespace, for example
+# http://scorpio-all-in-one-runner.iff:9090 (see README.md). A value set here is used as given.
+ngsiUrl: ""
 ngsiTenant: ""
 # JSON-LD context for short names. Without it, names are the platform's full IRIs.
 ngsiContextUrl: ""
 # Further contexts an import may name, comma-separated.
 ngsiAllowedContexts: ""
-pgrestUrl: http://pgrest:3000
-# Machine events: the backend as Scorpio reaches it, for example http://xana-pdt-backend:8000. Empty means no
+pgrestUrl: ""
+# Machine events: the backend as Scorpio reaches it, for example http://xana-pdt-backend.xana-pdt:8000. Empty means no
 # subscription. On data with full IRIs, name the type and attributes as the platform does.
 callbackBaseUrl: ""
 machineWatchType: Machine
 machineWatchAttributes: status,errorCode,alarmLevel,faultCode
 
 # Alerts. Must end in /api.
-alertaUrl: http://alerta:8080/api
+alertaUrl: ""
 alertsRefreshIntervalS: 30
 
 # The dataspace. Empty means none.
@@ -75,13 +79,13 @@ inboxPollIntervalS: 15
 ifricUrl: ""
 
 # Machine ontology and shapes. The graph base is http://<Fuseki's external host>/<realm> on the platform.
-fusekiUrl: http://fuseki:3030
+fusekiUrl: ""
 fusekiDataset: iff
 fusekiGraphBase: http://fuseki.local/iff
 
 # Live updates in the Data Explorer. Operators need Factory-Admin or Factory-Reader on client scorpio.
-mqttBrokerUrl: mqtt://emqx-listeners:1883
-mqttMgmtUrl: http://emqx-dashboard:18083
+mqttBrokerUrl: ""
+mqttMgmtUrl: ""
 # The MQTT broker as Scorpio reaches it, if different.
 mqttBrokerNotifyUrl: ""
 # Browser origins allowed on the backend's WebSockets, comma-separated. Empty allows the backend's own.
@@ -91,13 +95,16 @@ wsAllowedOrigins: ""
 # Nothing is traced without the two Langfuse keys.
 langfuseHost: ""
 
-# The databases. Without timescaleDbUrl and postgresMemoryUrl, both URLs are built when the Pod starts, from the
-# database operator's Secret, with keys username and password.
-databaseHost: acid-cluster
+# The databases. Without timescaleDbUrl and postgresMemoryUrl, both URLs are built when the Pod starts, from
+# databaseUsername and databasePassword below (envs/iff-cluster.sh exports them from the platform), else from
+# databaseCredentialsSecret. Empty databaseHost is acid-cluster in platformNamespace.
+databaseHost: ""
 databasePort: 5432
 databaseTimeseriesName: tsdb
 databaseMemoryName: memory
-databaseCredentialsSecret: ngb.acid-cluster.credentials
+# A Secret in XANA's namespace with keys username and password, for example the database operator's Secret
+# copied there. Used only without databaseUsername and databasePassword.
+databaseCredentialsSecret: ""
 # A Secret holding the database's CA certificate as ca.crt, for postgresSslMode verify-ca or verify-full.
 databaseCaSecret: ""
 postgresSslMode: require
@@ -121,6 +128,8 @@ settingsEncryptionKey: ""         # (SETTINGS_ENCRYPTION_KEY)
 alertaApiKey: ""                  # (ALERTA_API_KEY)
 timescaleDbUrl: ""                # (TIMESCALE_DB_URL)
 postgresMemoryUrl: ""             # (POSTGRES_MEMORY_URL)
+databaseUsername: ""              # (DATABASE_USERNAME)
+databasePassword: ""              # (DATABASE_PASSWORD)
 
 # Variables read when the Pod starts from keys of Secrets in the release's namespace, for example
 #   - { variable: ALERTA_API_KEY, secret: alerta, key: alerta-admin-key }

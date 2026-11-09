@@ -35,6 +35,7 @@ spec:
       annotations:
         checksum/config: {{ include (print $.Template.BasePath "/backend-configmap.yaml") . | sha256sum }}
         checksum/secret: {{ include (print $.Template.BasePath "/backend-secret.yaml") . | sha256sum }}
+        checksum/database: {{ include (print $.Template.BasePath "/database-secret.yaml") . | sha256sum }}
     spec:
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets: {{- toYaml . | nindent 8 }}
@@ -63,26 +64,28 @@ spec:
                 name: {{ include "xana-pdt.backend" . }}
             {{- end }}
           {{- $lookups := (include "xana-pdt.secretLookups" . | fromJson).lookups }}
-          {{- $build := include "xana-pdt.buildsDatabaseUrls" . }}
+          {{- $build := include "xana-pdt.databaseCredentialsSource" . }}
+          {{- $credentials := include "xana-pdt.databaseCredentialsSecret" . }}
           {{- if or $build $lookups }}
           env:
             {{- if $build }}
-            # The database URLs, built from the database operator's Secret when the Pod starts.
+            # The database URLs, built when the Pod starts from the database credentials in this namespace.
             - name: DB_USER
               valueFrom:
                 secretKeyRef:
-                  name: {{ $d.secret }}
+                  name: {{ $credentials }}
                   key: username
             - name: DB_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ $d.secret }}
+                  name: {{ $credentials }}
                   key: password
-            {{- if not (hasKey $given "TIMESCALE_DB_URL") }}
+            {{- $urls := include "xana-pdt.givenDatabaseUrls" . | fromJson }}
+            {{- if not (hasKey $urls "TIMESCALE_DB_URL") }}
             - name: TIMESCALE_DB_URL
               value: postgresql://$(DB_USER):$(DB_PASSWORD)@{{ $d.host }}:{{ $d.port }}/{{ $d.timeseriesDatabase }}
             {{- end }}
-            {{- if not (hasKey $given "POSTGRES_MEMORY_URL") }}
+            {{- if not (hasKey $urls "POSTGRES_MEMORY_URL") }}
             - name: POSTGRES_MEMORY_URL
               value: postgresql://$(DB_USER):$(DB_PASSWORD)@{{ $d.host }}:{{ $d.port }}/{{ $d.memoryDatabase }}
             {{- end }}

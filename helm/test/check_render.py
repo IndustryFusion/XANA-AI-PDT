@@ -21,10 +21,14 @@ nginx configuration.
 Needs Helm and PyYAML.
 """
 
+import base64
+import json
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import urllib.parse
 from pathlib import Path
 
 import yaml
@@ -33,13 +37,39 @@ SECRET_VALUE = "render-check-value"
 CA_PATH = "/etc/xana/database-ca/ca.crt"
 
 
-def render(chart: str, *settings: str) -> dict[str, dict]:
+# Database credentials, as envs/iff-cluster.sh exports them, unless a check says otherwise. The password needs
+# percent-encoding in a URL.
+CREDENTIALS = ("backend.databaseCredentials.username=xana", "backend.databaseCredentials.password=p@ss:w/rd %+x")
+ENCODED_PASSWORD = "p%40ss%3Aw%2Frd%20%25%2Bx"
+
+
+def flags_for(settings, credentials: bool) -> list[str]:
     flags = []
-    for setting in settings:
-        flags += ("--set-json", setting[5:]) if setting.startswith("json:") else ("--set", setting)
+    for setting in (*CREDENTIALS, *settings) if credentials else settings:
+        if setting.startswith("json:"):
+            flags += ("--set-json", setting[5:])
+        elif setting.startswith("backend.databaseCredentials."):
+            # As JSON, so a comma, backslash or = in the value is taken as it is.
+            key, value = setting.split("=", 1)
+            flags += ("--set-json", f"{key}={json.dumps(value)}")
+        else:
+            flags += ("--set", setting)
+    return flags
+
+
+def render(chart: str, *settings: str, credentials: bool = True) -> dict[str, dict]:
+    flags = flags_for(settings, credentials)
     output = subprocess.run(["helm", "template", "x", chart, *flags], check=True, capture_output=True, text=True).stdout
-    documents = [d for d in yaml.safe_load_all(output) if d]
+    documents = [decoded(d) for d in yaml.safe_load_all(output) if d]
     return {f"{d['kind']}/{d['metadata']['name']}": d for d in documents}
+
+
+def decoded(document: dict) -> dict:
+    """A Secret's values, decoded from data; the chart writes data, so a key it drops is removed on apply."""
+    if document.get("kind") == "Secret":
+        assert "stringData" not in document, f"{document['metadata']['name']} uses stringData"
+        document["stringData"] = {k: base64.b64decode(v).decode() for k, v in (document.get("data") or {}).items()}
+    return document
 
 
 def backend_container(rendered: dict[str, dict]) -> dict:
@@ -54,19 +84,91 @@ def secret_refs(container: dict) -> list[str]:
     return [e["secretRef"]["name"] for e in container.get("envFrom", []) if "secretRef" in e]
 
 
+def credential_secrets(container: dict) -> list[str]:
+    return [
+        e["valueFrom"]["secretKeyRef"]["name"] for e in container["env"] if e["name"] in ("DB_USER", "DB_PASSWORD")
+    ]
+
+
 def check_operator_secret(chart: str) -> None:
+    """From the shell: the credentials in the chart's own Secret, percent-encoded."""
     rendered = render(chart)
     container = backend_container(rendered)
     assert {"DB_USER", "DB_PASSWORD", "TIMESCALE_DB_URL", "POSTGRES_MEMORY_URL"} <= env_names(container)
-    credentials = [
-        e["valueFrom"]["secretKeyRef"]["name"] for e in container["env"] if e["name"] in ("DB_USER", "DB_PASSWORD")
-    ]
-    assert credentials == ["ngb.acid-cluster.credentials"] * 2
+    assert credential_secrets(container) == ["x-database"] * 2
+    assert rendered["Secret/x-database"]["stringData"] == {"username": "xana", "password": ENCODED_PASSWORD}
+    assert urllib.parse.unquote(ENCODED_PASSWORD) == "p@ss:w/rd %+x"
     urls = {e["name"]: e["value"] for e in container["env"] if e["name"].endswith("_URL")}
-    assert urls["TIMESCALE_DB_URL"].endswith("@acid-cluster:5432/tsdb")
-    assert urls["POSTGRES_MEMORY_URL"].endswith("@acid-cluster:5432/memory")
+    assert urls["TIMESCALE_DB_URL"] == "postgresql://$(DB_USER):$(DB_PASSWORD)@acid-cluster.iff:5432/tsdb"
+    assert urls["POSTGRES_MEMORY_URL"] == "postgresql://$(DB_USER):$(DB_PASSWORD)@acid-cluster.iff:5432/memory"
     assert not secret_refs(container)
     assert "Secret/x-backend" not in rendered
+
+
+def check_copied_secret(chart: str) -> None:
+    rendered = render(chart, "backend.postgresCredential.secret=copied", credentials=False)
+    assert credential_secrets(backend_container(rendered)) == ["copied"] * 2
+    assert "Secret/x-database" not in rendered
+    # Credentials given win over a copied Secret.
+    rendered = render(chart, "backend.postgresCredential.secret=copied")
+    assert credential_secrets(backend_container(rendered)) == ["x-database"] * 2
+
+
+def check_no_credentials(chart: str) -> None:
+    error = render_error(chart, credentials=False)
+    for named in ("no database credentials in namespace default", "envs/iff-cluster.sh", "DATABASE_USERNAME",
+                  "DATABASE_PASSWORD", "databaseCredentialsSecret", "TIMESCALE_DB_URL and POSTGRES_MEMORY_URL"):
+        assert named in error, error
+    error = render_error(chart, "backend.databaseCredentials.username=xana", credentials=False)
+    assert "DATABASE_USERNAME is set but DATABASE_PASSWORD isn't" in error, error
+    error = render_error(chart, "backend.databaseCredentials.password=x", credentials=False)
+    assert "DATABASE_PASSWORD is set but DATABASE_USERNAME isn't" in error, error
+    # Both URLs given: no credentials needed.
+    render(chart, f"backend.secret.TIMESCALE_DB_URL={SECRET_VALUE}", f"backend.secret.POSTGRES_MEMORY_URL={SECRET_VALUE}",
+           credentials=False)
+
+
+def check_special_characters(chart: str) -> None:
+    for password in ("a b", "a+b", "%41", "x@y:z/w?#[]!$&'()*,;=", "ümlaut", "$(DB_USER)"):
+        stored = render(chart, "backend.databaseCredentials.username=xana",
+                        f"backend.databaseCredentials.password={password}", credentials=False
+                        )["Secret/x-database"]["stringData"]["password"]
+        assert urllib.parse.unquote(stored) == password, (password, stored)
+        assert re.fullmatch(r"[A-Za-z0-9._~%-]*", stored), stored
+
+
+def check_only_own_secrets(chart: str) -> None:
+    """Every Secret the Pods name is one the chart renders, unless configured."""
+    def named(rendered: dict) -> set[str]:
+        names = set()
+        for kind_name, d in rendered.items():
+            if not kind_name.startswith("Deployment/"):
+                continue
+            spec = d["spec"]["template"]["spec"]
+            names |= {v["secret"]["secretName"] for v in spec.get("volumes", []) if "secret" in v}
+            for c in spec["containers"]:
+                names |= set(secret_refs(c))
+                names |= {e["valueFrom"]["secretKeyRef"]["name"] for e in c.get("env", [])
+                          if "secretKeyRef" in e.get("valueFrom", {})}
+        return names
+
+    for settings, configured in (
+        ((), set()),
+        ((f"backend.secret.ANTHROPIC_API_KEY={SECRET_VALUE}",), set()),
+        (("backend.postgresCredential.caSecret=db-ca", f"json:backend.secretLookups=[{lookup('ALERTA_API_KEY')}]"),
+         {"db-ca", "s"}),
+    ):
+        rendered = render(chart, *settings)
+        own = {n.split("/", 1)[1] for n in rendered if n.startswith("Secret/")}
+        assert named(rendered) - own == configured, (settings, named(rendered), own)
+
+
+def check_credentials_restart(chart: str) -> None:
+    def checksum(password: str) -> str:
+        rendered = render(chart, "backend.databaseCredentials.username=xana",
+                          f"backend.databaseCredentials.password={password}", credentials=False)
+        return rendered["Deployment/x-backend"]["spec"]["template"]["metadata"]["annotations"]["checksum/database"]
+    assert checksum("one") != checksum("two")
 
 
 def check_secrets_with_operator_secret(chart: str) -> None:
@@ -104,10 +206,8 @@ def check_secret_lookups(chart: str) -> None:
     assert rendered["Secret/x-backend"]["stringData"]["OPENAI_API_KEY"] == SECRET_VALUE
 
 
-def render_error(chart: str, *settings: str) -> str:
-    flags = []
-    for setting in settings:
-        flags += ("--set-json", setting[5:]) if setting.startswith("json:") else ("--set", setting)
+def render_error(chart: str, *settings: str, credentials: bool = True) -> str:
+    flags = flags_for(settings, credentials)
     result = subprocess.run(["helm", "template", "x", chart, *flags], capture_output=True, text=True)
     assert result.returncode != 0, f"rendered with {settings}"
     return result.stderr
@@ -120,15 +220,17 @@ def lookup(variable: str) -> str:
 def check_secret_lookups_refused(chart: str) -> None:
     error = render_error(chart, f"json:backend.secretLookups=[{lookup('ALERTA_API_KEY')},{lookup('ALERTA_API_KEY')}]")
     assert "secretLookups lists ALERTA_API_KEY more than once" in error, error
-    for variable in ("DB_USER", "DB_PASSWORD", "TIMESCALE_DB_URL", "POSTGRES_MEMORY_URL"):
+    for variable in ("DB_USER", "DB_PASSWORD"):
         error = render_error(chart, f"json:backend.secretLookups=[{lookup(variable)}]")
-        assert f"secretLookups can't set {variable}: the chart builds it" in error, error
-    # Given as a secret, the URL isn't built, so a lookup for it is skipped rather than refused.
-    render(chart, f"json:backend.secretLookups=[{lookup('TIMESCALE_DB_URL')}]",
-           f"backend.secret.TIMESCALE_DB_URL={SECRET_VALUE}")
-    # Without the operator's Secret, nothing is built and a lookup may set the URLs.
-    rendered = render(chart, "backend.postgresCredential.secret=",
-                      f"json:backend.secretLookups=[{lookup('TIMESCALE_DB_URL')},{lookup('POSTGRES_MEMORY_URL')}]")
+        assert f"secretLookups can't set {variable}: the chart sets it" in error, error
+    # A URL from a lookup isn't built.
+    rendered = render(chart, f"json:backend.secretLookups=[{lookup('TIMESCALE_DB_URL')}]")
+    env = backend_container(rendered)["env"]
+    assert [e["name"] for e in env].count("TIMESCALE_DB_URL") == 1
+    assert {"DB_USER", "POSTGRES_MEMORY_URL"} <= env_names(backend_container(rendered))
+    # Both URLs from lookups: nothing is built, and no credentials are needed.
+    rendered = render(chart, f"json:backend.secretLookups=[{lookup('TIMESCALE_DB_URL')},{lookup('POSTGRES_MEMORY_URL')}]",
+                      credentials=False)
     assert env_names(backend_container(rendered)) == {"TIMESCALE_DB_URL", "POSTGRES_MEMORY_URL"}
 
 
@@ -144,7 +246,7 @@ def render_notes(chart: str, *flags: str) -> str:
             'data:\n  notes: {{ include "notes-check" . | quote }}\n'
         )
         output = subprocess.run(
-            ["helm", "template", "x", str(copy), "--show-only", "templates/notes-check.yaml", *flags],
+            ["helm", "template", "x", str(copy), "--show-only", "templates/notes-check.yaml", *flags_for((), True), *flags],
             check=True, capture_output=True, text=True,
         ).stdout
     return yaml.safe_load(output)["data"]["notes"]
@@ -158,6 +260,10 @@ def check_notes_list_used_lookups(chart: str) -> None:
     )
     assert "ALERTA_API_KEY comes from key k of Secret s" in notes, notes
     assert "OPENAI_API_KEY" not in notes, notes
+    assert "kept in\nSecret x-database" in notes, notes
+    notes = render_notes(chart, "--set", "backend.databaseCredentials.username=", "--set",
+                         "backend.databaseCredentials.password=", "--set", "backend.postgresCredential.secret=copied")
+    assert "come from Secret copied" in notes, notes
 
 
 def check_no_secret_in_a_config_map(chart: str) -> None:
@@ -257,6 +363,11 @@ def check_restricted_pods(chart: str) -> None:
 
 CHECKS = (
     check_operator_secret,
+    check_copied_secret,
+    check_no_credentials,
+    check_special_characters,
+    check_only_own_secrets,
+    check_credentials_restart,
     check_secrets_with_operator_secret,
     check_one_url_given,
     check_urls_given,

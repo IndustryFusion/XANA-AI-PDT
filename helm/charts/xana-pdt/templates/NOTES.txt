@@ -7,9 +7,15 @@ UI: http{{ if .Values.ingress.tlsSecret }}s{{ end }}://{{ .Values.ingress.host }
 Check the connections:
   kubectl -n {{ .Release.Namespace }} exec deploy/{{ include "xana-pdt.backend" . }} -- \
     python -c "import httpx; print(httpx.get('http://localhost:8000/api/diagnostics?fresh=true').text)"
-{{- if include "xana-pdt.buildsDatabaseUrls" . }}
+{{- $source := include "xana-pdt.databaseCredentialsSource" . }}
+{{- if eq $source "chart" }}
+
+The database credentials were given at install time (DATABASE_USERNAME and DATABASE_PASSWORD) and are kept in
+Secret {{ include "xana-pdt.databaseSecret" . }}. After a password change on the platform, give them again and apply.
+{{- else if eq $source "copied" }}
 
 The database credentials come from Secret {{ .Values.backend.postgresCredential.secret }}, which must be in this namespace.
+After a password change, copy it again and restart the backend.
 {{- end }}
 {{- range (include "xana-pdt.secretLookups" . | fromJson).lookups }}
 {{ .variable }} comes from key {{ .key }} of Secret {{ .secret }}, which must be in this namespace.
