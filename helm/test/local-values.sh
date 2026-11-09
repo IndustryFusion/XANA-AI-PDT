@@ -16,9 +16,12 @@
 #
 # Prints the values file of the local test cluster: the default environment with the locally built images, the
 # scripted model, the stand-in database without TLS, nginx on xana.localhost, and one variable read from a Secret
-# (helm/test/stand-ins.yaml) through secretLookups. It is generated, not committed:
+# in xana-pdt (helm/test/xana-pdt-test-secrets.yaml) through secretLookups. XANA goes in xana-pdt and the
+# stand-ins are in iff, the defaults. It is generated, not committed:
 #
 #   helm/test/local-values.sh > "$RUNNER_TEMP/local-values.yaml"
+#   source envs/iff-cluster.sh
+#   unset KEYCLOAK_SERVICE_CLIENT_SECRET   # the stand-ins have no Keycloak for the service client
 #   ./helmfile -e default --state-values-file "$RUNNER_TEMP/local-values.yaml" sync
 set -euo pipefail
 

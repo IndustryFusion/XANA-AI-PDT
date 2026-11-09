@@ -8,7 +8,7 @@ Installs the operator UI and backend next to the [digital twin platform](https:/
 - Images: `xana-ai-pdt-backend` and `xana-ai-pdt-frontend`. A `v*` tag publishes them to `ghcr.io/industryfusion`. To build your own, see [Images](#images).
 - A language model the cluster can reach. See [Language model](#language-model).
 
-The platform's PostgreSQL chart already declares the `memory` and `tsdb` databases, and its operator generates the `ngb.acid-cluster.credentials` Secret.
+The platform's PostgreSQL chart already declares the `memory` and `tsdb` databases, and its operator generates the `ngb.acid-cluster.credentials` Secret in the platform's namespace.
 
 ## Layout
 
@@ -42,17 +42,42 @@ It downloads Helmfile 1.1.9 for your system into `helm/helmfile`, checks its SHA
 Then, with the secrets in the shell (see [Secrets](#secrets)):
 
 ```bash
-source envs/iff-cluster.sh        # optional: the secrets from the cluster's Secrets
+source envs/iff-cluster.sh        # the database credentials and secrets from the platform's Secrets
 ./helmfile -e default apply
 ```
 
-The release goes in namespace `iff`, next to the platform, because a Pod can only read Secrets in its own namespace. To use another, change `namespace` in your environment file, and make the Secrets it names available there.
+## Namespaces
+
+XANA goes in its own namespace, `xana-pdt` (`namespace`), and reaches the platform in `iff` (`platformNamespace`):
+
+- The platform's default addresses name `platformNamespace`, for example `http://scorpio-all-in-one-runner.iff:9090` (see [Platform addresses](#platform-addresses)).
+- A Pod reads Secrets only in its own namespace, and an Ingress finds its TLS Secret only there, so nothing XANA names is in `iff`. The database credentials reach XANA through `envs/iff-cluster.sh` (see [Database credentials](#database-credentials)). Every other Secret the chart names has to be in `xana-pdt`: those in `secretLookups`, `databaseCaSecret`, `ingressTlsSecret` (`xana-tls` in `production`), and the chart's `imagePullSecrets`.
+- To install next to the platform instead, set `namespace: iff`. Then `databaseCredentialsSecret: ngb.acid-cluster.credentials` works without copying.
+
+**Moving an earlier install from `iff`.** `apply` doesn't move a release: it would install a second one in `xana-pdt` next to the old one. Two releases would have Ingresses for the same host and path, so the new one is refused by ingress-nginx's admission check, or traffic keeps going to the old one. Two backends would also share the database, the automatic archive, the dataspace inbox and the Scorpio subscriptions, and handle every event twice. So, in this order:
+
+1. Copy into `xana-pdt` the Secrets XANA names there (see the list above): the TLS Secret, `ingressTlsSecret`, first of all, or the Ingress serves the controller's default certificate, and any `imagePullSecrets`, `secretLookups` and `databaseCaSecret` Secrets.
+2. In your own environment files, clear or qualify the addresses copied from the old defaults: short names such as `ngsiUrl: http://scorpio-all-in-one-runner:9090` or `databaseHost: acid-cluster` resolve only inside `iff`. Leave them empty for the defaults in `platformNamespace`, or write `<service>.iff`. Set `callbackBaseUrl` to `http://xana-pdt-backend.xana-pdt:8000`: from `iff`, the short `xana-pdt-backend` names the old release.
+3. Remove the old release: `helm -n iff uninstall xana-pdt`. The runs and incidents are in the platform's database and are kept. Its Scorpio subscription stays until the new backend replaces it.
+4. Then `source envs/iff-cluster.sh` and `./helmfile -e <environment> apply`, installing in `xana-pdt`.
+
+**Network policies.** A NetworkPolicy in `iff` that admits only its own namespace has to admit `xana-pdt` too: from XANA to the platform's services; for machine events, from Scorpio to XANA's backend; and for alerts, from Alerta's plugin to the backend's `/events/alert`. One in `xana-pdt` has to admit both ways likewise.
+
+To copy a Secret from `iff` into `xana-pdt`, for `secretLookups` or `databaseCaSecret`:
+
+```bash
+kubectl -n iff get secret <name> -o json \
+  | jq 'del(.metadata.namespace, .metadata.uid, .metadata.resourceVersion, .metadata.creationTimestamp, .metadata.ownerReferences, .metadata.managedFields)' \
+  | kubectl -n xana-pdt apply -f -
+```
+
+A copy doesn't follow later changes in `iff`: copy it again, then `kubectl -n xana-pdt rollout restart deploy/xana-pdt-backend`.
 
 Check it:
 
 ```bash
-kubectl -n iff get pods
-kubectl -n iff exec deploy/xana-pdt-backend -- \
+kubectl -n xana-pdt get pods
+kubectl -n xana-pdt exec deploy/xana-pdt-backend -- \
   python -c "import httpx; print(httpx.get('http://localhost:8000/api/diagnostics?fresh=true').text)"
 ```
 
@@ -71,7 +96,7 @@ To remove the release: `./helmfile -e default destroy`. Data in the database is 
 - `imageRegistry` under `.invalid`, or `imageTag: replace-me`: the Pods can't pull their images and stay in `ImagePullBackOff`, unless your registry happens to hold a tag of that name.
 - An address under `.invalid` (`keycloakUrl`, the platform services, `databaseHost`, the dataspace): the backend starts, and the System screen and `/api/diagnostics` show that connection as failing. Sign-in fails with `keycloakUrl` left in, and runs can't be stored with `databaseHost` left in.
 - `ingressHost` under `.invalid`: the Ingress is created for a host no client asks for, so XANA isn't reachable through it, and nothing reports an error.
-- `ingressClassName: replace-me`: no Ingress controller picks the Ingress up, so XANA isn't reachable from outside, and nothing reports an error. Check `kubectl -n iff get ingress` for an address.
+- `ingressClassName: replace-me`: no Ingress controller picks the Ingress up, so XANA isn't reachable from outside, and nothing reports an error. Check `kubectl -n xana-pdt get ingress` for an address.
 - `ingressTlsSecret: replace-me`: the controller doesn't find that Secret; most then serve their default certificate, so browsers warn.
 
 Your filled-in copy is yours to keep out of the repository. In CI, `test/check_environments.py` checks the layering, that the committed file holds only marked placeholders and no key named like a secret, and that no address `localAndIonos` renders is still inherited.
@@ -84,7 +109,8 @@ Every key is in `environment/default.yaml` with its default. An environment file
 
 | Key | Default | What it is |
 |---|---|---|
-| `namespace` | `iff` | The release's namespace |
+| `namespace` | `xana-pdt` | The release's namespace |
+| `platformNamespace` | `iff` | The platform's namespace, in the default addresses |
 | `imageRegistry` | `ghcr.io/industryfusion` | Registry and path of `xana-ai-pdt-backend` and `xana-ai-pdt-frontend` |
 | `imageTag` | empty: `v` and the chart's app version | The images' tag |
 | `imagePullPolicy` | `IfNotPresent` | |
@@ -108,15 +134,15 @@ Every key is in `environment/default.yaml` with its default. An environment file
 | `keycloakClientId` | `KEYCLOAK_CLIENT_ID` | `scorpio` |
 | `factoryId` | `FACTORY_ID` | |
 | `keycloakServiceClientId` | `KEYCLOAK_SERVICE_CLIENT_ID` | |
-| `ngsiUrl` | `NGSI_URL` | `http://scorpio-all-in-one-runner:9090` |
+| `ngsiUrl` | `NGSI_URL` | `http://scorpio-all-in-one-runner.iff:9090` * |
 | `ngsiTenant` | `NGSI_TENANT` | |
 | `ngsiContextUrl` | `NGSI_CONTEXT_URL` | |
 | `ngsiAllowedContexts` | `NGSI_ALLOWED_CONTEXTS` | |
-| `pgrestUrl` | `PGREST_URL` | `http://pgrest:3000` |
+| `pgrestUrl` | `PGREST_URL` | `http://pgrest.iff:3000` * |
 | `callbackBaseUrl` | `CALLBACK_BASE_URL` | |
 | `machineWatchType` | `MACHINE_WATCH_TYPE` | `Machine` |
 | `machineWatchAttributes` | `MACHINE_WATCH_ATTRIBUTES` | `status,errorCode,alarmLevel,faultCode` |
-| `alertaUrl` | `ALERTA_URL` | `http://alerta:8080/api` |
+| `alertaUrl` | `ALERTA_URL` | `http://alerta.iff:8080/api` * |
 | `alertsRefreshIntervalS` | `ALERTS_REFRESH_INTERVAL_S` | `30` |
 | `gatewayUrl` | `GATEWAY_URL` | |
 | `gatewayKeycloakUrl` | `GATEWAY_KEYCLOAK_URL` | |
@@ -125,11 +151,11 @@ Every key is in `environment/default.yaml` with its default. An environment file
 | `dataSharingPolicy` | `DATA_SHARING_POLICY` | `minimal` |
 | `inboxPollIntervalS` | `INBOX_POLL_INTERVAL_S` | `15` |
 | `ifricUrl` | `IFRIC_URL` | |
-| `fusekiUrl` | `FUSEKI_URL` | `http://fuseki:3030` |
+| `fusekiUrl` | `FUSEKI_URL` | `http://fuseki.iff:3030` * |
 | `fusekiDataset` | `FUSEKI_DATASET` | `iff` |
 | `fusekiGraphBase` | `FUSEKI_GRAPH_BASE` | `http://fuseki.local/iff` |
-| `mqttBrokerUrl` | `MQTT_BROKER_URL` | `mqtt://emqx-listeners:1883` |
-| `mqttMgmtUrl` | `MQTT_MGMT_URL` | `http://emqx-dashboard:18083` |
+| `mqttBrokerUrl` | `MQTT_BROKER_URL` | `mqtt://emqx-listeners.iff:1883` * |
+| `mqttMgmtUrl` | `MQTT_MGMT_URL` | `http://emqx-dashboard.iff:18083` * |
 | `mqttBrokerNotifyUrl` | `MQTT_BROKER_NOTIFY_URL` | |
 | `wsAllowedOrigins` | `WS_ALLOWED_ORIGINS` | |
 | `langfuseHost` | `LANGFUSE_HOST` | |
@@ -140,16 +166,33 @@ Every key is in `environment/default.yaml` with its default. An environment file
 | `healthCacheS` | `HEALTH_CACHE_S` | `10` |
 | `logLevel` | `LOG_LEVEL` | `INFO` |
 
+### Platform addresses
+
+The defaults marked * in the table above, and `databaseHost`, are empty in `default.yaml`: an empty one is the platform's Service in `platformNamespace`, `<service>.<platformNamespace>`, which resolves from any namespace. With `platformNamespace: platform`, `ngsiUrl` becomes `http://scorpio-all-in-one-runner.platform:9090`, and so on. An address you set is used as given.
+
+`platformNamespace` takes effect through Helmfile only, in `values.yaml.gotmpl`. The chart's own [`values.yaml`](charts/xana-pdt/values.yaml), for an install with plain `helm`, has the addresses with `.iff` written out; with another platform namespace, set them there.
+
 ### Database
 
 | Key | Default | What it is |
 |---|---|---|
-| `databaseHost`, `databasePort` | `acid-cluster`, `5432` | The PostgreSQL server |
+| `databaseHost`, `databasePort` | `acid-cluster.iff`, `5432` | The PostgreSQL server; an empty host is `acid-cluster` in `platformNamespace` |
 | `databaseTimeseriesName`, `databaseMemoryName` | `tsdb`, `memory` | The two databases |
-| `databaseCredentialsSecret` | `ngb.acid-cluster.credentials` | The database operator's Secret, with keys `username` and `password` |
+| `databaseCredentialsSecret` | | A Secret in `xana-pdt` with keys `username` and `password`, for example the operator's Secret copied there; used only without `DATABASE_USERNAME` and `DATABASE_PASSWORD` |
 | `databaseCaSecret` | | A Secret holding the CA certificate as `ca.crt` |
 
-Unless `TIMESCALE_DB_URL` and `POSTGRES_MEMORY_URL` are given as secrets, the Pod builds them when it starts from `databaseCredentialsSecret`, host, port and database names; only a missing one is built. The password must not need URL encoding, which holds for generated passwords.
+Unless `TIMESCALE_DB_URL` and `POSTGRES_MEMORY_URL` are given, as secrets or by `secretLookups`, the Pod builds them when it starts from the database credentials, host, port and database names; only a missing one is built.
+
+#### Database credentials
+
+The credentials come from the first of these:
+
+1. **`DATABASE_USERNAME` and `DATABASE_PASSWORD`**, which `envs/iff-cluster.sh` exports from the operator's Secret in `iff` (or the keys `databaseUsername` and `databasePassword`, empty in committed files; the shell wins). The chart keeps them in its own Secret, `xana-pdt-database`, percent-encoded, so a password with `@`, `:`, `/`, `%`, `+`, spaces or any other character reaches the database unchanged.
+2. **`databaseCredentialsSecret`**, a Secret in `xana-pdt` you copied there (see [Namespaces](#namespaces)). Its values are used as they are, so they must not need URL encoding, which holds for the operator's generated passwords.
+
+With neither, the render stops and names these options. It also stops when only one of the two variables is set.
+
+**After a password change on the platform**, XANA's copy is stale: the System screen and `/api/diagnostics` show the databases failing. In a new shell, or after `unset DATABASE_USERNAME DATABASE_PASSWORD`, source `envs/iff-cluster.sh` again, then `./helmfile -e <environment> apply`. The chart's Secret changes, and the backend restarts with it. In a shell that still holds the old values, the helper keeps them and says they differ from the cluster's. With a copied Secret, copy it again and restart the backend.
 
 Connections use TLS (`postgresSslMode: require`), which encrypts but doesn't check the server. To check it, set `postgresSslMode` to `verify-ca` or `verify-full`, and `databaseCaSecret`. The chart mounts it and sets `POSTGRES_SSLROOTCERT`.
 
@@ -178,7 +221,7 @@ The IFRIC registry uses `ifricUrl`, including its port, and `factoryId`.
 
 Alerts use `alertaUrl`, which must end in `/api`, and `ALERTA_API_KEY`.
 
-Machine events use `callbackBaseUrl`, the backend as Scorpio reaches it, and `EVENT_WEBHOOK_SECRET`. With nobody signed in, they need a Keycloak client with a service account and read access to Scorpio: `keycloakServiceClientId` and `KEYCLOAK_SERVICE_CLIENT_SECRET`. The platform has no such client, so one has to be created. On data with full IRIs, set `machineWatchType` and `machineWatchAttributes` to the platform's names, with `status` in full. Alerts need the plugin loaded in Alerta, which the platform's chart doesn't do. See [Machine events](../backend/README.md#machine-events).
+Machine events use `callbackBaseUrl`, the backend as Scorpio reaches it from `iff`, for example `http://xana-pdt-backend.xana-pdt:8000`, and `EVENT_WEBHOOK_SECRET`. With nobody signed in, they need a Keycloak client with a service account and read access to Scorpio: `keycloakServiceClientId` and `KEYCLOAK_SERVICE_CLIENT_SECRET`. The platform has no such client, so one has to be created. On data with full IRIs, set `machineWatchType` and `machineWatchAttributes` to the platform's names, with `status` in full. Alerts need the plugin loaded in Alerta, which the platform's chart doesn't do. See [Machine events](../backend/README.md#machine-events).
 
 Finished runs move to incident history after `autoArchiveAfterS` seconds without a change; `0` turns it off.
 
@@ -229,17 +272,21 @@ A shell variable wins over the key when it is set and not empty; an empty one is
 ANTHROPIC_API_KEY="$KEY" ./helmfile -e default apply
 ```
 
-**Set them on every `apply`.** Helmfile doesn't keep earlier values, so a run without them removes them from the Secret. To avoid that, read them from the cluster:
+**Set them on every `apply`.** Helmfile doesn't keep earlier values, so a run without them removes them from the Secret. To avoid that, read them from the cluster.
 
-- **`envs/iff-cluster.sh`**, sourced from bash, reads them with `kubectl` from Secrets in namespace `iff` and exports them: `ALERTA_API_KEY` from Secret `alerta` (key `alerta-admin-key`), `KEYCLOAK_SERVICE_CLIENT_SECRET` from `keycloak-client-secret-xana` (key `CLIENT_SECRET`), and the others from `xana-pdt-credentials`, by variable name.
+> **A release upgraded in place from an earlier version can keep a dropped secret once.** The chart now writes its Secrets as `data`; earlier versions wrote `stringData`, and Helm's merge keeps a live key the old manifest had only under `stringData`. So on the first upgrade of a release that stays in its namespace, a secret you leave out stays in the Secret. Delete the Secret once (`kubectl -n <namespace> delete secret xana-pdt-backend`), then `apply`. A fresh install in `xana-pdt` isn't affected.
+
+To read them from the cluster:
+
+- **`envs/iff-cluster.sh`**, sourced from bash, reads them with `kubectl` from Secrets in namespace `iff` and exports them: `ALERTA_API_KEY` from Secret `alerta` (key `alerta-admin-key`), `KEYCLOAK_SERVICE_CLIENT_SECRET` from `keycloak-client-secret-xana` (key `CLIENT_SECRET`), `DATABASE_USERNAME` and `DATABASE_PASSWORD` from the operator's Secret `ngb.acid-cluster.credentials` (keys `username` and `password`), and the others from `xana-pdt-credentials`, by variable name.
   - It prints the kube context it reads from, so you can check it is the cluster you mean, and only variable names, never a value. It writes no file.
-  - A variable already set and not empty is kept, and exported if it wasn't, so `helmfile` sees it.
+  - A variable already set and not empty is kept, and exported if it wasn't, so `helmfile` sees it. If it differs from the cluster's value, it says so, without printing either.
   - A missing Secret or key is reported by name and skipped.
   - Without `kubectl`, or when it can't read the namespace's Secrets, it exports nothing and the `source` fails with status 1. Under `set -e` that ends the shell; `source envs/iff-cluster.sh || true` goes on regardless.
   - It needs bash. In zsh or another shell it stops with a message and exports nothing; run `bash`, then source it there.
-  - `IFF_NAMESPACE`, `IFF_ALERTA_SECRET`, `IFF_KEYCLOAK_CLIENT_SECRET` and `IFF_XANA_SECRET` change the namespace and Secret names.
+  - `IFF_NAMESPACE`, `IFF_ALERTA_SECRET`, `IFF_KEYCLOAK_CLIENT_SECRET`, `IFF_XANA_SECRET` and `IFF_DATABASE_SECRET` change the namespace and Secret names.
 
-  `xana-pdt-credentials` is XANA's own Secret, which you create once, with a key per variable it should hold, for example:
+  `xana-pdt-credentials` is XANA's own Secret, kept in `iff` with the others the helper reads, which you create once, with a key per variable it should hold, for example:
 
   ```bash
   kubectl -n iff create secret generic xana-pdt-credentials \
@@ -260,7 +307,7 @@ ANTHROPIC_API_KEY="$KEY" ./helmfile -e default apply
 
 The variables an earlier version read, `XANA_<NAME>` for these secrets and `XANA_EXISTING_SECRET`, `XANA_INGRESS_HOST`, `XANA_KEYCLOAK_URL`, `XANA_LANGFUSE_HOST` and `XANA_AUTO_ARCHIVE_AFTER_S`, are no longer read. If one is still set, the render stops and names what replaces it, without showing its value. Rename the secrets to `<NAME>`, and move the others into your environment file (`existingSecret` becomes `secretLookups` entries). An environment file that still sets `ingressClass`, `existingSecret` or `extraConfig` stops the render the same way: use `ingressClassName`, `secretLookups`, or each setting's own key.
 
-> **Warning: `TIMESCALE_DB_URL` and `POSTGRES_MEMORY_URL` in your shell are used.** They are the backend's own variable names, so a developer shell that has them set, for example for `docker compose`, hands them to `helmfile` too. They then go into the Secret and replace the URLs the chart builds from `databaseCredentialsSecret`, pointing the cluster's backend at your local database. Unset them before `apply`: `unset TIMESCALE_DB_URL POSTGRES_MEMORY_URL`.
+> **Warning: `TIMESCALE_DB_URL` and `POSTGRES_MEMORY_URL` in your shell are used.** They are the backend's own variable names, so a developer shell that has them set, for example for `docker compose`, hands them to `helmfile` too. They then go into the Secret and replace the URLs the chart builds from the database credentials, pointing the cluster's backend at your local database. Unset them before `apply`: `unset TIMESCALE_DB_URL POSTGRES_MEMORY_URL`.
 
 Never commit a secret. In CI, `test/check_values.py` checks that the committed environment files hold no secret value and no address outside the defaults and placeholders.
 
@@ -299,11 +346,15 @@ kubectl create namespace iff
 kubectl -n iff create configmap xana-db-init --from-file=backend/db-init
 kubectl -n iff apply -f helm/test/stand-ins.yaml
 kubectl -n iff apply -f helm/test/sample-data.yaml
+kubectl create namespace xana-pdt
+kubectl -n xana-pdt apply -f helm/test/xana-pdt-test-secrets.yaml
 helm/test/local-values.sh > /tmp/xana-local-values.yaml
-(cd helm && ./bootstrap.sh && ./helmfile -e default --state-values-file /tmp/xana-local-values.yaml sync)
+(cd helm && ./bootstrap.sh && source envs/iff-cluster.sh && unset KEYCLOAK_SERVICE_CLIENT_SECRET \
+  && ./helmfile -e default --state-values-file /tmp/xana-local-values.yaml sync)
+helm/test/check_cluster_secrets.sh xana-pdt
 python helm/test/smoke.py http://127.0.0.1 run --host xana.localhost
 ```
 
-`local-values.sh` prints the values: the locally built images, the scripted model, the stand-in database without TLS, nginx on `xana.localhost`, and `EVENT_WEBHOOK_SECRET` through `secretLookups`. `helm/test/iff_cluster_test.sh` checks `envs/iff-cluster.sh` against the stand-in Secrets.
+`local-values.sh` prints the values: the locally built images, the scripted model, the stand-in database without TLS, nginx on `xana.localhost`, and `EVENT_WEBHOOK_SECRET` through `secretLookups`. The stand-ins are in `iff`, XANA in `xana-pdt`, as on a real cluster. The stand-in database password needs percent-encoding, to exercise the chart's. `helm/test/iff_cluster_test.sh` checks `envs/iff-cluster.sh` against the stand-in Secrets, and `check_cluster_secrets.sh` that the backend names only Secrets of its own namespace, builds its URLs for `acid-cluster.iff` and reaches both databases.
 
 The stand-in database trusts every connection, and the stand-in Secrets hold test values. Use this on a local cluster only.

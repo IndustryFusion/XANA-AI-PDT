@@ -23,6 +23,8 @@ set -uo pipefail
 
 HELM="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONFIG="${KUBECONFIG:-$HOME/.kube/config}"
+# The stand-in operator Secret's password (helm/test/stand-ins.yaml), which needs percent-encoding in a URL.
+DATABASE_PASSWORD_STAND_IN='p@ss:w/rd %+x'
 passed=0
 failed=0
 ok() { passed=$((passed + 1)); }
@@ -41,7 +43,8 @@ in_clean_shell() {
 # Sources the helper, then prints its status and each variable as name=value, as a child process sees it.
 SOURCED='source "$HELPER"
 echo "status:$?"
-for v in ALERTA_API_KEY KEYCLOAK_SERVICE_CLIENT_SECRET OPENAI_API_KEY GATEWAY_CLIENT_SECRET; do
+for v in ALERTA_API_KEY KEYCLOAK_SERVICE_CLIENT_SECRET OPENAI_API_KEY GATEWAY_CLIENT_SECRET DATABASE_USERNAME \
+  DATABASE_PASSWORD; do
   echo "value:$v=$(printenv "$v")"
 done
 echo end'
@@ -56,16 +59,42 @@ if has "value:KEYCLOAK_SERVICE_CLIENT_SECRET=local-test-client-secret"; then ok;
 if has "value:OPENAI_API_KEY=local-test-openai-key"; then ok; else fail "exports a key of the backend's Secret"; fi
 if has "GATEWAY_CLIENT_SECRET: key GATEWAY_CLIENT_SECRET not in Secret xana-pdt-credentials" &&
   has "value:GATEWAY_CLIENT_SECRET="$'\n'; then ok; else fail "reports a missing key by name and exports nothing for it"; fi
+if has "value:DATABASE_USERNAME=xana"$'\n' && has "value:DATABASE_PASSWORD=$DATABASE_PASSWORD_STAND_IN"$'\n'; then ok
+else fail "exports the database credentials from the operator's Secret"; fi
 if has "status:0"; then ok; else fail "a missing key isn't a failure"; fi
 if has "kube context "; then ok; else fail "names the kube context it reads from"; fi
-if [[ "$(grep -v '^value:' <<<"$out")" != *local-test-* ]]; then ok; else fail "prints no secret value"; fi
+printed="$(grep -v '^value:' <<<"$out")"
+if [[ "$printed" != *local-test-* && "$printed" != *"$DATABASE_PASSWORD_STAND_IN"* ]]; then ok
+else fail "prints no secret value"; fi
 # kubectl keeps its own cache under the home directory; no file anywhere holds a secret.
-if [[ -z "$(ls -A "$dir")" ]] && ! grep -rq local-test- "$home"; then ok; else fail "writes no file"; fi
+if [[ -z "$(ls -A "$dir")" ]] && ! grep -rqF -e local-test- -e "$DATABASE_PASSWORD_STAND_IN" "$home"; then ok
+else fail "writes no file"; fi
 clean
 
 fresh
 out="$(in_clean_shell "$SOURCED" ALERTA_API_KEY=mine)"
-if has "value:ALERTA_API_KEY=mine" && has "ALERTA_API_KEY: already set, kept"; then ok; else fail "keeps a variable already set"; fi
+if has "value:ALERTA_API_KEY=mine" && has "ALERTA_API_KEY: already set, kept; differs from Secret alerta"; then ok
+else fail "keeps a variable already set, saying it differs from the cluster's"; fi
+clean
+
+fresh
+out="$(in_clean_shell "$SOURCED" DATABASE_PASSWORD=old-password DATABASE_USERNAME=xana)"
+if has "value:DATABASE_PASSWORD=old-password" &&
+  has "DATABASE_PASSWORD: already set, kept; differs from Secret ngb.acid-cluster.credentials" &&
+  has "DATABASE_USERNAME: already set, kept"$'\n' && [[ "$(grep -v '^value:' <<<"$out")" != *old-password* ]]; then ok
+else fail "a kept database password that differs is reported, without either value"; fi
+clean
+
+fresh
+out="$(in_clean_shell "$SOURCED" ALERTA_API_KEY=mine IFF_ALERTA_SECRET=no-such-secret)"
+if has "value:ALERTA_API_KEY=mine" && has "ALERTA_API_KEY: already set, kept; Secret no-such-secret not found in the cluster"
+then ok; else fail "a kept variable whose Secret is missing says so"; fi
+clean
+
+fresh
+out="$(in_clean_shell "$SOURCED" IFF_DATABASE_SECRET=no-such-secret)"
+if has "DATABASE_PASSWORD: Secret no-such-secret not found" && has "value:DATABASE_PASSWORD="$'\n'; then ok
+else fail "IFF_DATABASE_SECRET names the database Secret"; fi
 clean
 
 fresh

@@ -22,7 +22,9 @@ metadata:
   name: ngb.acid-cluster.credentials
 stringData:
   username: xana
-  password: unused
+  # Characters that need percent-encoding in a URL, so the chart's encoding is exercised. The database
+  # trusts every connection, so only the URL's form is checked, not the password.
+  password: "p@ss:w/rd %+x"
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -94,7 +96,7 @@ spec:
   ports:
     - port: 9090
 ---
-# Stand-ins for the cluster Secrets that envs/iff-cluster.sh reads, and one for secretLookups. Test values only.
+# Stand-ins for the cluster Secrets that envs/iff-cluster.sh reads. Test values only.
 apiVersion: v1
 kind: Secret
 metadata:
@@ -116,10 +118,3 @@ metadata:
   name: xana-pdt-credentials
 stringData:
   OPENAI_API_KEY: local-test-openai-key
----
-apiVersion: v1
-kind: Secret
-metadata:
-  name: xana-test-lookup
-stringData:
-  webhook: local-test-webhook-secret

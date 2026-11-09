@@ -535,7 +535,7 @@ XANA AI PDT uses a two-layer deployment model:
                         │ image pull
                         ▼
 ┌──────────────────────────────────────────────────────┐
-│  Kubernetes cluster — namespace: iff                 │
+│  Kubernetes cluster — namespace: xana-pdt            │
 │                                                      │
 │  Ingress (nginx)                                     │
 │       │                                              │
@@ -552,12 +552,12 @@ XANA AI PDT uses a two-layer deployment model:
 │                                                      │
 └──────────────────────────────────────────────────────┘
                         │
-         external IFF cluster services (DNS)
+         IFF platform services, namespace iff (DNS: <service>.iff)
          Scorpio │ TimescaleDB │ PostgreSQL │ Alerta
          Keycloak │ Dataspace Gateway │ IFRIC Registry
 ```
 
-The frontend's nginx configuration is a ConfigMap, mounted over the image's template, and takes the backend's address from `XANA_BACKEND_URL` at container start. A release goes in the platform's namespace by default, so it can read the database operator's generated Secret. The backend's settings are in its ConfigMap; its secrets come from shell variables of the backend's own names, which `helm/envs/iff-cluster.sh` can export from the cluster, or from Secrets read when the Pod starts (`secretLookups`, and the database operator's Secret for the database URLs). See [`helm/README.md`](helm/README.md).
+The frontend's nginx configuration is a ConfigMap, mounted over the image's template, and takes the backend's address from `XANA_BACKEND_URL` at container start. A release goes in its own namespace, `xana-pdt`, and reaches the platform's services in `platformNamespace` (`iff`) by `<service>.<namespace>`. Its Pods name only Secrets in `xana-pdt`. The backend's settings are in its ConfigMap; its secrets come from shell variables of the backend's own names, which `helm/envs/iff-cluster.sh` can export from the platform's Secrets, or from Secrets in `xana-pdt` read when the Pod starts (`secretLookups`). The database credentials, exported the same way, are kept percent-encoded in the chart's own Secret, from which the Pod builds the database URLs. See [`helm/README.md`](helm/README.md).
 
 Deployment is managed with Helmfile 1.1.9, in the layout of the IndustryFusion platform (DigitalTwin, Dataspace):
 

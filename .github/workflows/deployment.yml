@@ -75,7 +75,8 @@ jobs:
         with:
           version: v3.17.3 # Helmfile 1.1 does not support Helm 4
       - name: Lint
-        run: helm lint helm/charts/xana-pdt
+        # With test credentials: without database credentials the chart stops, as it should.
+        run: helm lint helm/charts/xana-pdt --set backend.databaseCredentials.username=lint,backend.databaseCredentials.password=lint
       - name: Check what the chart renders
         run: |
           pip install pyyaml
@@ -99,6 +100,9 @@ jobs:
         run: ./bootstrap.sh
       - name: Check every environment renders
         working-directory: helm
+        env:
+          DATABASE_USERNAME: render-check
+          DATABASE_PASSWORD: render-check
         run: |
           for environment in default production localAndIonos; do
             ./helmfile -e "$environment" template > /dev/null
@@ -107,15 +111,17 @@ jobs:
         working-directory: helm
         env:
           ANTHROPIC_API_KEY: helmfile-test-value
+          DATABASE_USERNAME: render-check
+          DATABASE_PASSWORD: render-check
         run: |
           pip install pyyaml
           for environment in default localAndIonos; do
             ./helmfile -e "$environment" template > rendered.yaml
             python - <<'EOF'
-          import yaml
+          import base64, yaml
           docs = [d for d in yaml.safe_load_all(open("rendered.yaml")) if d]
-          [secret] = [d for d in docs if d["kind"] == "Secret"]
-          assert secret["stringData"]["ANTHROPIC_API_KEY"] == "helmfile-test-value"
+          [secret] = [d for d in docs if d["kind"] == "Secret" and d["metadata"]["name"] == "xana-pdt-backend"]
+          assert base64.b64decode(secret["data"]["ANTHROPIC_API_KEY"]).decode() == "helmfile-test-value"
           assert not [d for d in docs if d["kind"] == "ConfigMap" and "helmfile-test-value" in str(d)]
           EOF
           done
@@ -140,47 +146,50 @@ jobs:
           kubectl -n ingress-nginx wait --for=condition=ready pod -l app.kubernetes.io/component=controller --timeout=300s
           # Ready isn't enough: its admission webhook can take longer, and then an install fails.
           until kubectl create ingress webhook-check --rule='check.invalid/*=check:80' --dry-run=server -o name; do sleep 5; done
-      - name: Install the stand-in services
+      - name: Install the stand-in services in iff, and XANA's test Secret in xana-pdt
         run: |
           kubectl create namespace iff
           kubectl -n iff create configmap xana-db-init --from-file=backend/db-init
           kubectl -n iff apply -f helm/test/stand-ins.yaml
           kubectl -n iff apply -f helm/test/sample-data.yaml
+          kubectl create namespace xana-pdt
+          kubectl -n xana-pdt apply -f helm/test/xana-pdt-test-secrets.yaml
       - name: The cluster-secrets helper
         env:
           IFF_NAMESPACE: iff
         run: helm/test/iff_cluster_test.sh
-      - name: Install the release, on the default environment with the local test values
+      - name: Install the release in xana-pdt, on the default environment with the local test values
         working-directory: helm
         run: |
           test/local-values.sh > "$RUNNER_TEMP/local-values.yaml"
+          source envs/iff-cluster.sh
+          # The stand-ins have no Keycloak, so the service client the helper's test Secret names can't be used.
+          unset KEYCLOAK_SERVICE_CLIENT_SECRET
           ./helmfile -e default --state-values-file "$RUNNER_TEMP/local-values.yaml" sync
       - name: All Pods reach ready
         run: |
           kubectl -n iff wait --for=condition=available deploy --all --timeout=600s
           kubectl -n iff wait --for=condition=complete job/xana-sample-data --timeout=600s
-      - name: Secrets from the cluster reach the backend
+          kubectl -n xana-pdt wait --for=condition=available deploy --all --timeout=600s
+      - name: Secrets reach the backend from its own namespace
         run: |
-          # secretLookups: EVENT_WEBHOOK_SECRET from a Secret of the test values.
-          test "$(kubectl -n iff exec deploy/xana-pdt-backend -- printenv EVENT_WEBHOOK_SECRET)" = local-test-webhook-secret
-          # The database URLs are built in the Pod from the operator's Secret.
-          kubectl -n iff exec deploy/xana-pdt-backend -- sh -c 'case "$TIMESCALE_DB_URL" in postgresql://*@acid-cluster:5432/tsdb*) ;; *) exit 1;; esac'
-          kubectl -n iff exec deploy/xana-pdt-backend -- sh -c 'case "$POSTGRES_MEMORY_URL" in postgresql://*@acid-cluster:5432/memory*) ;; *) exit 1;; esac'
+          helm/test/check_cluster_secrets.sh xana-pdt
       - name: A run and its live stream through the Ingress
         run: |
           pip install httpx websockets
           python helm/test/smoke.py http://127.0.0.1 run --host xana.localhost
       - name: A restart keeps the run
         run: |
-          kubectl -n iff rollout restart deploy/xana-pdt-backend
-          kubectl -n iff rollout status deploy/xana-pdt-backend --timeout=300s
+          kubectl -n xana-pdt rollout restart deploy/xana-pdt-backend
+          kubectl -n xana-pdt rollout status deploy/xana-pdt-backend --timeout=300s
           python helm/test/smoke.py http://127.0.0.1 after-restart --host xana.localhost
       - name: Cluster state
         if: failure()
         run: |
           kubectl get pods -A
           kubectl -n iff describe pods
-          kubectl -n iff logs deploy/xana-pdt-backend --tail 200
+          kubectl -n xana-pdt describe pods
+          kubectl -n xana-pdt logs deploy/xana-pdt-backend --tail 200
 
   images:
     needs: [chart, install]

@@ -23,6 +23,7 @@ so that production's own part of the layering shows. Then it checks that the che
 with the order reversed.
 """
 
+import os
 import re
 import shutil
 import subprocess
@@ -50,7 +51,9 @@ def placeholder(value: str) -> bool:
 def render(helm_dir: Path) -> list[dict]:
     binary = str(helm_dir / "helmfile") if (helm_dir / "helmfile").exists() else "helmfile"
     out = subprocess.run(
-        [binary, "-e", "localAndIonos", "template"], cwd=helm_dir, check=True, capture_output=True, text=True
+        [binary, "-e", "localAndIonos", "template"], cwd=helm_dir, check=True, capture_output=True, text=True,
+        # Test credentials, as envs/iff-cluster.sh would export them; without them the render stops.
+        env=os.environ | {"DATABASE_USERNAME": "check", "DATABASE_PASSWORD": "check"},
     ).stdout
     return [d for d in yaml.safe_load_all(out) if d]
 

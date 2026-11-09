@@ -21,10 +21,13 @@
 #
 # A variable already set and non-empty in the shell is kept, and exported so helmfile sees it. Nothing is
 # written to disk, and only variable names and the kube context are printed.
-# The database URLs aren't exported: the chart builds them in the Pod from the database operator's Secret.
+# The database operator's credentials are exported as DATABASE_USERNAME and DATABASE_PASSWORD; the chart keeps
+# them in a Secret in XANA's namespace and builds the database URLs from it in the Pod. After a password change
+# on the platform, source this again in a new shell (or after unsetting them), then apply again.
 #
 # Overrides, all optional: IFF_NAMESPACE (default iff), and the Secrets' names IFF_ALERTA_SECRET (default alerta),
-# IFF_KEYCLOAK_CLIENT_SECRET (default keycloak-client-secret-xana) and IFF_XANA_SECRET (default xana-pdt-credentials).
+# IFF_KEYCLOAK_CLIENT_SECRET (default keycloak-client-secret-xana), IFF_XANA_SECRET (default xana-pdt-credentials)
+# and IFF_DATABASE_SECRET (default ngb.acid-cluster.credentials).
 #
 # It changes no shell option. A missing Secret or key is reported and skipped, and doesn't count as a failure.
 # Sourcing fails (status 1), exporting nothing, when kubectl is missing or the namespace's Secrets can't be read,
@@ -38,24 +41,30 @@ if [ -z "${BASH_VERSION:-}" ]; then
   return 1 2>/dev/null || exit 1
 fi
 
-# Reads one key of one Secret, decoded, into a variable unless that is already set. Prints what it did.
+# Reads one key of one Secret, decoded, into a variable unless that is already set. Prints what it did, and
+# whether a value it keeps differs from the Secret's; it compares in memory and never prints either value.
 _iff_secret_into() {
-  local variable="$1" secret="$2" key="$3" encoded value
+  local variable="$1" secret="$2" key="$3" encoded value problem=""
+  if ! encoded="$(kubectl -n "$_iff_namespace" get secret "$secret" -o "jsonpath={.data.$key}" 2>/dev/null)"; then
+    problem="Secret $secret not found"
+  elif [[ -z "$encoded" ]]; then
+    problem="key $key not in Secret $secret"
+  elif ! value="$(printf '%s' "$encoded" | base64 -d 2>/dev/null)"; then
+    problem="key $key of Secret $secret could not be decoded"
+  fi
   if [[ -n "${!variable:-}" ]]; then
     export "${variable?}"
-    echo "  $variable: already set, kept"
+    if [[ -n "$problem" ]]; then
+      echo "  $variable: already set, kept; $problem in the cluster"
+    elif [[ "${!variable}" != "$value" ]]; then
+      echo "  $variable: already set, kept; differs from Secret $secret"
+    else
+      echo "  $variable: already set, kept"
+    fi
     return 0
   fi
-  if ! encoded="$(kubectl -n "$_iff_namespace" get secret "$secret" -o "jsonpath={.data.$key}" 2>/dev/null)"; then
-    echo "  $variable: Secret $secret not found"
-    return 0
-  fi
-  if [[ -z "$encoded" ]]; then
-    echo "  $variable: key $key not in Secret $secret"
-    return 0
-  fi
-  if ! value="$(printf '%s' "$encoded" | base64 -d 2>/dev/null)"; then
-    echo "  $variable: key $key of Secret $secret could not be decoded"
+  if [[ -n "$problem" ]]; then
+    echo "  $variable: $problem"
     return 0
   fi
   export "$variable=$value"
@@ -67,6 +76,7 @@ _iff_export_secrets() {
   local alerta="${IFF_ALERTA_SECRET:-alerta}"
   local client="${IFF_KEYCLOAK_CLIENT_SECRET:-keycloak-client-secret-xana}"
   local own="${IFF_XANA_SECRET:-xana-pdt-credentials}"
+  local database="${IFF_DATABASE_SECRET:-ngb.acid-cluster.credentials}"
   if ! command -v kubectl >/dev/null; then
     echo "iff-cluster.sh: kubectl is not installed; nothing was exported." >&2
     return 1
@@ -78,6 +88,8 @@ _iff_export_secrets() {
   echo "Secrets of namespace $_iff_namespace, kube context $(kubectl config current-context 2>/dev/null || echo none):"
   _iff_secret_into ALERTA_API_KEY "$alerta" alerta-admin-key
   _iff_secret_into KEYCLOAK_SERVICE_CLIENT_SECRET "$client" CLIENT_SECRET
+  _iff_secret_into DATABASE_USERNAME "$database" username
+  _iff_secret_into DATABASE_PASSWORD "$database" password
   local variable
   for variable in GATEWAY_CLIENT_SECRET SETTINGS_ENCRYPTION_KEY EVENT_WEBHOOK_SECRET ANTHROPIC_API_KEY \
     OPENAI_API_KEY LANGFUSE_PUBLIC_KEY LANGFUSE_SECRET_KEY; do

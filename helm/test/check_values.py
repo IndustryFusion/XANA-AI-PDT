@@ -22,11 +22,13 @@ The tables below are the design's: every key, and the variable it sets.
 """
 
 import ast
+import base64
 import os
 import re
 import subprocess
 import sys
 import tempfile
+import urllib.parse
 from pathlib import Path
 
 import yaml
@@ -61,12 +63,25 @@ SECRETS = {
     "gatewayClientSecret": "GATEWAY_CLIENT_SECRET", "settingsEncryptionKey": "SETTINGS_ENCRYPTION_KEY",
     "alertaApiKey": "ALERTA_API_KEY", "timescaleDbUrl": "TIMESCALE_DB_URL", "postgresMemoryUrl": "POSTGRES_MEMORY_URL",
 }
+# The database credentials: environment key, shell variable. Secrets too, but not backend variables: the chart
+# keeps them in a Secret of its own, and the Pod builds the database URLs from them.
+CREDENTIALS = {"databaseUsername": "DATABASE_USERNAME", "databasePassword": "DATABASE_PASSWORD"}
+TEST_CREDENTIALS = {"DATABASE_USERNAME": "check", "DATABASE_PASSWORD": "check"}
+# The platform's addresses: an empty key is the platform's Service in platformNamespace.
+PLATFORM = {
+    "ngsiUrl": ("NGSI_URL", "http://scorpio-all-in-one-runner.{}:9090"),
+    "pgrestUrl": ("PGREST_URL", "http://pgrest.{}:3000"),
+    "alertaUrl": ("ALERTA_URL", "http://alerta.{}:8080/api"),
+    "fusekiUrl": ("FUSEKI_URL", "http://fuseki.{}:3030"),
+    "mqttBrokerUrl": ("MQTT_BROKER_URL", "mqtt://emqx-listeners.{}:1883"),
+    "mqttMgmtUrl": ("MQTT_MGMT_URL", "http://emqx-dashboard.{}:18083"),
+}
 DATABASE = {
     "databaseHost", "databasePort", "databaseTimeseriesName", "databaseMemoryName", "databaseCredentialsSecret",
     "databaseCaSecret",
 }
 CHART = {
-    "namespace", "imageRegistry", "imageTag", "imagePullPolicy", "secretLookups",
+    "namespace", "platformNamespace", "imageRegistry", "imageTag", "imagePullPolicy", "secretLookups",
     "ingressEnabled", "ingressHost", "ingressClassName", "ingressTlsSecret",
 }
 OLD_VARIABLES = {
@@ -94,7 +109,8 @@ def fail(message: str) -> None:
     print("FAIL:", message)
 
 
-def helmfile(helm_dir: Path, environment: str, values: dict | None = None, env: dict | None = None):
+def helmfile(helm_dir: Path, environment: str, values: dict | None = None, env: dict | None = None,
+             credentials: bool = True):
     binary = str(helm_dir / "helmfile") if (helm_dir / "helmfile").exists() else "helmfile"
     command = [binary, "-e", environment]
     file = None
@@ -103,7 +119,12 @@ def helmfile(helm_dir: Path, environment: str, values: dict | None = None, env: 
         yaml.safe_dump(values, file)
         file.close()
         command += ["--state-values-file", file.name]
-    clean = {k: v for k, v in os.environ.items() if k not in SECRETS.values() and not k.startswith("XANA_")}
+    clean = {
+        k: v for k, v in os.environ.items()
+        if k not in SECRETS.values() and k not in CREDENTIALS.values() and not k.startswith("XANA_")
+    }
+    if credentials:
+        clean |= TEST_CREDENTIALS
     try:
         return subprocess.run(
             [*command, "template"], cwd=helm_dir, capture_output=True, text=True, env=clean | (env or {})
@@ -113,15 +134,23 @@ def helmfile(helm_dir: Path, environment: str, values: dict | None = None, env: 
             os.unlink(file.name)
 
 
+def decoded(document: dict) -> dict:
+    """A Secret's values, decoded from data; the chart writes data, so a key it drops is removed on apply."""
+    if document.get("kind") == "Secret":
+        assert "stringData" not in document, f"{document['metadata']['name']} uses stringData"
+        document["stringData"] = {k: base64.b64decode(v).decode() for k, v in (document.get("data") or {}).items()}
+    return document
+
+
 def documents(result) -> dict[str, dict]:
     if result.returncode:
         raise AssertionError(result.stderr[-2000:])
-    found = [d for d in yaml.safe_load_all(result.stdout) if d]
+    found = [decoded(d) for d in yaml.safe_load_all(result.stdout) if d]
     return {f"{d['kind']}/{d['metadata']['name']}": d for d in found}
 
 
 def check_keys_known(helm_dir: Path) -> None:
-    known = set(SETTINGS) | set(SECRETS) | DATABASE | CHART
+    known = set(SETTINGS) | set(SECRETS) | set(CREDENTIALS) | DATABASE | CHART
     for environment in ENVIRONMENTS:
         for key in yaml.safe_load((helm_dir / f"environment/{environment}.yaml").read_text()) or {}:
             if key not in known:
@@ -215,6 +244,105 @@ def check_settings_cover_the_backend(helm_dir: Path) -> None:
     print(f"{len(variables)} backend settings, each with a key or a listed reason: checked")
 
 
+def backend_config(helm_dir: Path, **kwargs) -> dict:
+    return documents(helmfile(helm_dir, "default", **kwargs))["ConfigMap/xana-pdt-backend"]["data"]
+
+
+def database_urls(helm_dir: Path, **kwargs) -> dict:
+    container = documents(helmfile(helm_dir, "default", **kwargs))["Deployment/xana-pdt-backend"]
+    env = container["spec"]["template"]["spec"]["containers"][0].get("env", [])
+    return {e["name"]: e.get("value") for e in env if e["name"].endswith("_DB_URL") or e["name"].endswith("MEMORY_URL")}
+
+
+def check_platform_addresses(helm_dir: Path) -> None:
+    default = yaml.safe_load((helm_dir / "environment/default.yaml").read_text())
+    if default.get("namespace") != "xana-pdt" or default.get("platformNamespace") != "iff":
+        fail("default.yaml: namespace isn't xana-pdt, or platformNamespace isn't iff")
+    for namespace, values in (("iff", None), ("platform", {"platformNamespace": "platform"})):
+        config = backend_config(helm_dir, values=values)
+        for key, (variable, form) in PLATFORM.items():
+            if config.get(variable) != form.format(namespace):
+                fail(f"{key} with platformNamespace {namespace} is {config.get(variable)!r}, not {form.format(namespace)}")
+        for variable, url in database_urls(helm_dir, values=values).items():
+            if f"@acid-cluster.{namespace}:5432/" not in (url or ""):
+                fail(f"{variable} with platformNamespace {namespace} is {url!r}")
+    given = {"platformNamespace": "platform", "ngsiUrl": "http://given:1", "databaseHost": "db.given"}
+    config = backend_config(helm_dir, values=given)
+    if config.get("NGSI_URL") != "http://given:1":
+        fail("a given ngsiUrl isn't used as given")
+    if not all("@db.given:5432/" in (url or "") for url in database_urls(helm_dir, values=given).values()):
+        fail("a given databaseHost isn't used as given")
+    print("platform addresses from platformNamespace, given ones as given: checked")
+
+
+def leaked_credentials(rendered: dict, username: str, password: str) -> list[str]:
+    """Documents other than the chart's database Secret that hold a credential, raw or percent-encoded."""
+    values = {username, password, urllib.parse.quote(username, safe=""), urllib.parse.quote(password, safe="")}
+    found = []
+    for name, document in rendered.items():
+        if name == "Secret/xana-pdt-database" or not name.startswith(("Secret/", "ConfigMap/")):
+            continue
+        text = str(document.get("stringData") or document.get("data") or {})
+        found += [f"{name} holds a database credential" for value in values if value in text]
+    return found
+
+
+def check_database_credentials(helm_dir: Path) -> None:
+    username, password = "shell-user-7d1", "shell p@ss-7d1"
+    # With another backend secret too, so the backend's own Secret is rendered and can be checked.
+    rendered = documents(helmfile(helm_dir, "default", credentials=False, env={
+        "DATABASE_USERNAME": username, "DATABASE_PASSWORD": password, "ANTHROPIC_API_KEY": "other-secret"}))
+    if rendered["Secret/xana-pdt-database"]["stringData"] != {"username": username, "password": "shell%20p%40ss-7d1"}:
+        fail("DATABASE_USERNAME and DATABASE_PASSWORD don't reach the chart's database Secret, percent-encoded")
+    if "Secret/xana-pdt-backend" not in rendered:
+        fail("the backend's own Secret isn't rendered, so the credentials check below proves nothing")
+    for problem in leaked_credentials(rendered, username, password):
+        fail(problem)
+    # The check itself has to be able to fail.
+    probe = {"Secret/xana-pdt-backend": {"stringData": {"X": "shell%20p%40ss-7d1"}}, "ConfigMap/c": {"data": {"Y": username}}}
+    if len(leaked_credentials(probe, username, password)) != 2:
+        fail("the credentials check doesn't catch a credential in the backend's Secret or a ConfigMap")
+    rendered = documents(helmfile(helm_dir, "default", credentials=False,
+                                  values={"databaseUsername": "file-user", "databasePassword": "file"},
+                                  env={"DATABASE_PASSWORD": "shell"}))
+    if rendered["Secret/xana-pdt-database"]["stringData"] != {"username": "file-user", "password": "shell"}:
+        fail("the shell's database credentials don't win over the file's")
+    result = helmfile(helm_dir, "default", credentials=False)
+    if result.returncode == 0 or "no database credentials in namespace xana-pdt" not in result.stderr:
+        fail("the default environment without database credentials doesn't stop the render")
+    result = helmfile(helm_dir, "default", values={"platformNamespace": ""})
+    if result.returncode == 0 or "platformNamespace is empty" not in result.stderr:
+        fail("an empty platformNamespace doesn't stop the render")
+    print("database credentials from the shell or the file, the shell winning, in no other Secret or ConfigMap,"
+          " or the render stops: checked")
+
+
+def referenced_secrets(rendered: dict) -> set[str]:
+    names = set()
+    for name, d in rendered.items():
+        if name.startswith("Ingress/"):
+            names |= {t["secretName"] for t in d["spec"].get("tls", []) if t.get("secretName")}
+        if name.startswith("Deployment/"):
+            spec = d["spec"]["template"]["spec"]
+            names |= {s["name"] for s in spec.get("imagePullSecrets", [])}
+            names |= {v["secret"]["secretName"] for v in spec.get("volumes", []) if "secret" in v}
+            for c in spec["containers"]:
+                names |= {e["secretRef"]["name"] for e in c.get("envFrom", []) if "secretRef" in e}
+                names |= {e["valueFrom"]["secretKeyRef"]["name"] for e in c.get("env", [])
+                          if "secretKeyRef" in e.get("valueFrom", {})}
+    return names
+
+
+def check_secrets_in_the_namespace(helm_dir: Path) -> None:
+    """Each environment names only Secrets the chart renders, and the ones it configures, which must be in xana-pdt."""
+    for environment, configured in (("default", set()), ("production", {"xana-tls"}), ("localAndIonos", {"replace-me"})):
+        rendered = documents(helmfile(helm_dir, environment))
+        own = {n.split("/", 1)[1] for n in rendered if n.startswith("Secret/")}
+        if referenced_secrets(rendered) - own != configured:
+            fail(f"{environment} names Secrets {sorted(referenced_secrets(rendered) - own)}, not {sorted(configured)}")
+    print("each environment names only its own Secrets and the configured ones: checked")
+
+
 RETIRED_KEYS = {"ingressClass": "ingressClassName", "existingSecret": "secretLookups", "extraConfig": "its own key"}
 
 
@@ -230,9 +358,10 @@ def committed_file_problems(name: str, values: dict) -> list[str]:
     found = []
     for key, value in (values or {}).items():
         text = "" if value is None else str(value)
-        if key in SECRETS:
+        if key in SECRETS or key in CREDENTIALS:
             if text:
-                found.append(f"{name}: {key} holds a secret; keep it empty and set {SECRETS[key]} in the shell")
+                variable = SECRETS.get(key) or CREDENTIALS[key]
+                found.append(f"{name}: {key} holds a secret; keep it empty and set {variable} in the shell")
             continue
         # These name Secrets in the cluster, or reference their keys; they hold no secret themselves.
         names_secrets = ("ingressTlsSecret", "databaseCredentialsSecret", "databaseCaSecret", "secretLookups")
@@ -256,6 +385,7 @@ def check_committed_files(helm_dir: Path) -> None:
     # The check itself has to be able to fail.
     probes = {
         "a secret value": {"anthropicApiKey": "sk-real"},
+        "a database password": {"databasePassword": "real"},
         "a secret-like key": {"someToken": "x"},
         "a real host": {"ngsiUrl": "http://scorpio.example.org:9090"},
         "a real registry": {"imageRegistry": "registry.ionos.example-corp.com/xana"},
@@ -284,6 +414,9 @@ def main() -> None:
         check_secrets_file_and_shell,
         check_old_variables_stop,
         check_retired_keys_stop,
+        check_platform_addresses,
+        check_database_credentials,
+        check_secrets_in_the_namespace,
         check_settings_cover_the_backend,
         check_committed_files,
     ):
