@@ -22,3 +22,9 @@
 ## 5. Documents
 
 - [x] 5.1 `helm/README.md`: the namespace, `platformNamespace`, the database credentials and a password change, copying a Secret, the network policy note, the `callbackBaseUrl` example, moving an install from `iff`, the commands with `-n xana-pdt`, and the key table; `architecture.md`'s deployment section
+
+## 6. Review fixes
+
+- [x] 6.1 README: the migration order (copy Secrets, fix short addresses and `callbackBaseUrl`, uninstall in `iff`, then apply), the TLS and pull Secrets in `xana-pdt`, the Alerta plugin in the network policy note, `platformNamespace` through Helmfile only, and the one-time `stringData` upgrade; the design's wording
+- [x] 6.2 Checks: the Ingress TLS and pull Secrets in `check_only_own_secrets`, every environment in `check_values.py`; the credentials check with the backend's Secret rendered, raw and encoded values; an empty `platformNamespace` stops the render; verify each fails when undone
+- [x] 6.3 `envs/iff-cluster.sh` says when a kept variable's Secret or key is missing; verify with `iff_cluster_test.sh` on a kind cluster

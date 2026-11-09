@@ -14,7 +14,7 @@ This change moves XANA to `xana-pdt`, as #72 sets out. It modifies the requireme
 - A new key, `platformNamespace` (default `iff`), names the namespace the platform runs in. It is used for the default addresses below, and by nothing else in the chart.
 - An operator who wants XANA next to the platform sets `namespace: iff`. Then `databaseCredentialsSecret: ngb.acid-cluster.credentials` works as before (see below).
 
-An existing release in `iff` isn't moved: `apply` installs a new one in `xana-pdt`. The README says to remove the old one with `helm -n iff uninstall xana-pdt`; the data is in the platform's database and is kept.
+An existing release in `iff` isn't moved: `apply` would install a second one in `xana-pdt`, and the two would clash on the Ingress host and handle every event twice. The README gives the order: copy the Secrets XANA names (the TLS Secret, pull Secrets, lookups, CA), clear or qualify short addresses in the operator's own files and set `callbackBaseUrl` to `http://xana-pdt-backend.xana-pdt:8000`, remove the old release with `helm -n iff uninstall xana-pdt`, then apply. The data is in the platform's database and is kept.
 
 ### Default platform addresses
 
@@ -58,7 +58,7 @@ Alternative: `PGPASSWORD`-style variables read by the backend. That needs a back
 
 - Still reads from `IFF_NAMESPACE` (default `iff`).
 - Also exports `DATABASE_USERNAME` and `DATABASE_PASSWORD` from the operator's Secret, `IFF_DATABASE_SECRET` (default `ngb.acid-cluster.credentials`), keys `username` and `password`, by the same rules as the other variables: a set, non-empty variable is kept, a missing Secret or key is reported by name, and no value is printed or written.
-- New for every variable: when it keeps a set value that differs from the cluster's, it says so ("already set, kept; differs from Secret …"), comparing in memory without printing either value. That makes a stale password visible.
+- New for every variable: when it keeps a set value that differs from the cluster's, it says so ("already set, kept; differs from Secret …"), comparing in memory without printing either value. That makes a stale password visible. When it keeps a set value whose Secret or key is missing in the cluster, it says that too ("already set, kept; Secret … not found in the cluster").
 
 `xana-pdt-credentials` is still read from `IFF_NAMESPACE`, as the issue says. **For the maintainer:** it is XANA's own Secret, so it could move to `xana-pdt` later; this change leaves it.
 
@@ -83,12 +83,14 @@ kubectl -n iff get secret <name> -o json \
 
 and that a copy doesn't follow later changes.
 
-A check renders the default environment with test credentials and fails if any `secretKeyRef`, `envFrom` Secret or volume names a Secret the chart doesn't render itself. With `secretLookups` and `databaseCaSecret` set, only those are added.
+A check renders each environment with test credentials and fails if any `secretKeyRef`, `envFrom` Secret, Secret volume, image pull Secret or Ingress TLS Secret names a Secret the chart doesn't render itself, other than those configured: `ingressTlsSecret` (`xana-tls` in `production`), `imagePullSecrets`, `secretLookups` and `databaseCaSecret`. All of these resolve in `xana-pdt`.
+
+`platformNamespace` is required: an empty one stops the render. It takes effect through Helmfile; the chart's own `values.yaml` has the `.iff` addresses written out, for a plain `helm` install.
 
 ### Machine events and network policies
 
 - The `callbackBaseUrl` example becomes `http://xana-pdt-backend.xana-pdt:8000`, the backend as Scorpio in `iff` reaches it.
-- The README notes that a NetworkPolicy in `iff` that admits only its own namespace has to admit `xana-pdt` too: from XANA to the platform's services, and, for machine events, from Scorpio to the backend.
+- The README notes that a NetworkPolicy in `iff` that admits only its own namespace has to admit `xana-pdt` too: from XANA to the platform's services, for machine events from Scorpio to the backend, and for alerts from Alerta's plugin to the backend's `/events/alert`.
 
 ### Local test cluster
 
@@ -107,7 +109,7 @@ A check renders the default environment with test credentials and fails if any `
 ### Found while implementing
 
 - **A database URL from `secretLookups` counts as given.** The old switch for "no credentials, URLs from lookups" was `databaseCredentialsSecret: ""`, which is now the default. So a URL named in `secretLookups` isn't built, and with both there, no credentials are needed. A lookup for `DB_USER` or `DB_PASSWORD` still stops the render.
-- **The chart's Secrets are written as `data`, not `stringData`.** With `stringData`, a key left out on a later `apply` stayed in the Secret, as Kubernetes stores it under `data`; on the local cluster an unset secret was still there after a `sync`. With `data`, it is removed, as the README says.
+- **The chart's Secrets are written as `data`, not `stringData`.** With `stringData`, a key left out on a later `apply` stayed in the Secret, as Kubernetes stores it under `data`; on the local cluster an unset secret was still there after a `sync`. With `data`, a release installed with this version drops a key left out, as the README says. A release upgraded in place from an earlier version is the exception, once: Helm's three-way merge keeps a live `data` key that the old manifest had only under `stringData`, so a secret dropped on that first upgrade stays. The README says to delete the Secret once; a fresh install in `xana-pdt` isn't affected.
 - **The local test cluster unsets `KEYCLOAK_SERVICE_CLIENT_SECRET` after sourcing the helper.** The helper's test Secret holds one, and the stand-ins have no Keycloak, so the backend would refuse to start with a client secret but no client.
 
 ## Risks
