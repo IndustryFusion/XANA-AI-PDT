@@ -138,13 +138,17 @@ def check_special_characters(chart: str) -> None:
 
 
 def check_only_own_secrets(chart: str) -> None:
-    """Every Secret the Pods name is one the chart renders, unless configured."""
+    """Every Secret the Pods and the Ingress name is one the chart renders, unless configured: these resolve in
+    the release's namespace, so a configured one has to be there."""
     def named(rendered: dict) -> set[str]:
         names = set()
         for kind_name, d in rendered.items():
+            if kind_name.startswith("Ingress/"):
+                names |= {t["secretName"] for t in d["spec"].get("tls", []) if t.get("secretName")}
             if not kind_name.startswith("Deployment/"):
                 continue
             spec = d["spec"]["template"]["spec"]
+            names |= {s["name"] for s in spec.get("imagePullSecrets", [])}
             names |= {v["secret"]["secretName"] for v in spec.get("volumes", []) if "secret" in v}
             for c in spec["containers"]:
                 names |= set(secret_refs(c))
@@ -157,6 +161,8 @@ def check_only_own_secrets(chart: str) -> None:
         ((f"backend.secret.ANTHROPIC_API_KEY={SECRET_VALUE}",), set()),
         (("backend.postgresCredential.caSecret=db-ca", f"json:backend.secretLookups=[{lookup('ALERTA_API_KEY')}]"),
          {"db-ca", "s"}),
+        # As the production environment sets it, and a pull Secret.
+        (("ingress.tlsSecret=xana-tls", 'json:imagePullSecrets=[{"name":"registry-pull"}]'), {"xana-tls", "registry-pull"}),
     ):
         rendered = render(chart, *settings)
         own = {n.split("/", 1)[1] for n in rendered if n.startswith("Secret/")}

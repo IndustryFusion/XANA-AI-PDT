@@ -51,12 +51,17 @@ source envs/iff-cluster.sh        # the database credentials and secrets from th
 XANA goes in its own namespace, `xana-pdt` (`namespace`), and reaches the platform in `iff` (`platformNamespace`):
 
 - The platform's default addresses name `platformNamespace`, for example `http://scorpio-all-in-one-runner.iff:9090` (see [Platform addresses](#platform-addresses)).
-- A Pod reads Secrets only in its own namespace, so nothing XANA's Pods name is in `iff`. The database credentials reach XANA through `envs/iff-cluster.sh` (see [Database credentials](#database-credentials)). Every other Secret the chart names, in `secretLookups` or `databaseCaSecret`, has to be in `xana-pdt`.
+- A Pod reads Secrets only in its own namespace, and an Ingress finds its TLS Secret only there, so nothing XANA names is in `iff`. The database credentials reach XANA through `envs/iff-cluster.sh` (see [Database credentials](#database-credentials)). Every other Secret the chart names has to be in `xana-pdt`: those in `secretLookups`, `databaseCaSecret`, `ingressTlsSecret` (`xana-tls` in `production`), and the chart's `imagePullSecrets`.
 - To install next to the platform instead, set `namespace: iff`. Then `databaseCredentialsSecret: ngb.acid-cluster.credentials` works without copying.
 
-**An earlier install in `iff` isn't moved.** The next `apply` installs a second release in `xana-pdt`. Remove the old one with `helm -n iff uninstall xana-pdt`; the runs and incidents are in the platform's database and are kept.
+**Moving an earlier install from `iff`.** `apply` doesn't move a release: it would install a second one in `xana-pdt` next to the old one. Two releases would have Ingresses for the same host and path, so the new one is refused by ingress-nginx's admission check, or traffic keeps going to the old one. Two backends would also share the database, the automatic archive, the dataspace inbox and the Scorpio subscriptions, and handle every event twice. So, in this order:
 
-**Network policies.** A NetworkPolicy in `iff` that admits only its own namespace has to admit `xana-pdt` too: from XANA to the platform's services, and, for machine events, from Scorpio to XANA's backend. One in `xana-pdt` has to admit both ways likewise.
+1. Copy into `xana-pdt` the Secrets XANA names there (see the list above): the TLS Secret, `ingressTlsSecret`, first of all, or the Ingress serves the controller's default certificate, and any `imagePullSecrets`, `secretLookups` and `databaseCaSecret` Secrets.
+2. In your own environment files, clear or qualify the addresses copied from the old defaults: short names such as `ngsiUrl: http://scorpio-all-in-one-runner:9090` or `databaseHost: acid-cluster` resolve only inside `iff`. Leave them empty for the defaults in `platformNamespace`, or write `<service>.iff`. Set `callbackBaseUrl` to `http://xana-pdt-backend.xana-pdt:8000`: from `iff`, the short `xana-pdt-backend` names the old release.
+3. Remove the old release: `helm -n iff uninstall xana-pdt`. The runs and incidents are in the platform's database and are kept. Its Scorpio subscription stays until the new backend replaces it.
+4. Then `source envs/iff-cluster.sh` and `./helmfile -e <environment> apply`, installing in `xana-pdt`.
+
+**Network policies.** A NetworkPolicy in `iff` that admits only its own namespace has to admit `xana-pdt` too: from XANA to the platform's services; for machine events, from Scorpio to XANA's backend; and for alerts, from Alerta's plugin to the backend's `/events/alert`. One in `xana-pdt` has to admit both ways likewise.
 
 To copy a Secret from `iff` into `xana-pdt`, for `secretLookups` or `databaseCaSecret`:
 
@@ -165,6 +170,8 @@ Every key is in `environment/default.yaml` with its default. An environment file
 
 The defaults marked * in the table above, and `databaseHost`, are empty in `default.yaml`: an empty one is the platform's Service in `platformNamespace`, `<service>.<platformNamespace>`, which resolves from any namespace. With `platformNamespace: platform`, `ngsiUrl` becomes `http://scorpio-all-in-one-runner.platform:9090`, and so on. An address you set is used as given.
 
+`platformNamespace` takes effect through Helmfile only, in `values.yaml.gotmpl`. The chart's own [`values.yaml`](charts/xana-pdt/values.yaml), for an install with plain `helm`, has the addresses with `.iff` written out; with another platform namespace, set them there.
+
 ### Database
 
 | Key | Default | What it is |
@@ -265,7 +272,11 @@ A shell variable wins over the key when it is set and not empty; an empty one is
 ANTHROPIC_API_KEY="$KEY" ./helmfile -e default apply
 ```
 
-**Set them on every `apply`.** Helmfile doesn't keep earlier values, so a run without them removes them from the Secret. To avoid that, read them from the cluster:
+**Set them on every `apply`.** Helmfile doesn't keep earlier values, so a run without them removes them from the Secret. To avoid that, read them from the cluster.
+
+> **A release upgraded in place from an earlier version can keep a dropped secret once.** The chart now writes its Secrets as `data`; earlier versions wrote `stringData`, and Helm's merge keeps a live key the old manifest had only under `stringData`. So on the first upgrade of a release that stays in its namespace, a secret you leave out stays in the Secret. Delete the Secret once (`kubectl -n <namespace> delete secret xana-pdt-backend`), then `apply`. A fresh install in `xana-pdt` isn't affected.
+
+To read them from the cluster:
 
 - **`envs/iff-cluster.sh`**, sourced from bash, reads them with `kubectl` from Secrets in namespace `iff` and exports them: `ALERTA_API_KEY` from Secret `alerta` (key `alerta-admin-key`), `KEYCLOAK_SERVICE_CLIENT_SECRET` from `keycloak-client-secret-xana` (key `CLIENT_SECRET`), `DATABASE_USERNAME` and `DATABASE_PASSWORD` from the operator's Secret `ngb.acid-cluster.credentials` (keys `username` and `password`), and the others from `xana-pdt-credentials`, by variable name.
   - It prints the kube context it reads from, so you can check it is the cluster you mean, and only variable names, never a value. It writes no file.

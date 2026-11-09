@@ -28,6 +28,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import urllib.parse
 from pathlib import Path
 
 import yaml
@@ -274,13 +275,33 @@ def check_platform_addresses(helm_dir: Path) -> None:
     print("platform addresses from platformNamespace, given ones as given: checked")
 
 
+def leaked_credentials(rendered: dict, username: str, password: str) -> list[str]:
+    """Documents other than the chart's database Secret that hold a credential, raw or percent-encoded."""
+    values = {username, password, urllib.parse.quote(username, safe=""), urllib.parse.quote(password, safe="")}
+    found = []
+    for name, document in rendered.items():
+        if name == "Secret/xana-pdt-database" or not name.startswith(("Secret/", "ConfigMap/")):
+            continue
+        text = str(document.get("stringData") or document.get("data") or {})
+        found += [f"{name} holds a database credential" for value in values if value in text]
+    return found
+
+
 def check_database_credentials(helm_dir: Path) -> None:
+    username, password = "shell-user-7d1", "shell p@ss-7d1"
+    # With another backend secret too, so the backend's own Secret is rendered and can be checked.
     rendered = documents(helmfile(helm_dir, "default", credentials=False, env={
-        "DATABASE_USERNAME": "shell-user", "DATABASE_PASSWORD": "shell p@ss"}))
-    if rendered["Secret/xana-pdt-database"]["stringData"] != {"username": "shell-user", "password": "shell%20p%40ss"}:
+        "DATABASE_USERNAME": username, "DATABASE_PASSWORD": password, "ANTHROPIC_API_KEY": "other-secret"}))
+    if rendered["Secret/xana-pdt-database"]["stringData"] != {"username": username, "password": "shell%20p%40ss-7d1"}:
         fail("DATABASE_USERNAME and DATABASE_PASSWORD don't reach the chart's database Secret, percent-encoded")
-    if "DATABASE_PASSWORD" in str(rendered.get("Secret/xana-pdt-backend", "")):
-        fail("the database credentials are in the backend's own Secret")
+    if "Secret/xana-pdt-backend" not in rendered:
+        fail("the backend's own Secret isn't rendered, so the credentials check below proves nothing")
+    for problem in leaked_credentials(rendered, username, password):
+        fail(problem)
+    # The check itself has to be able to fail.
+    probe = {"Secret/xana-pdt-backend": {"stringData": {"X": "shell%20p%40ss-7d1"}}, "ConfigMap/c": {"data": {"Y": username}}}
+    if len(leaked_credentials(probe, username, password)) != 2:
+        fail("the credentials check doesn't catch a credential in the backend's Secret or a ConfigMap")
     rendered = documents(helmfile(helm_dir, "default", credentials=False,
                                   values={"databaseUsername": "file-user", "databasePassword": "file"},
                                   env={"DATABASE_PASSWORD": "shell"}))
@@ -289,7 +310,37 @@ def check_database_credentials(helm_dir: Path) -> None:
     result = helmfile(helm_dir, "default", credentials=False)
     if result.returncode == 0 or "no database credentials in namespace xana-pdt" not in result.stderr:
         fail("the default environment without database credentials doesn't stop the render")
-    print("database credentials from the shell or the file, the shell winning, or the render stops: checked")
+    result = helmfile(helm_dir, "default", values={"platformNamespace": ""})
+    if result.returncode == 0 or "platformNamespace is empty" not in result.stderr:
+        fail("an empty platformNamespace doesn't stop the render")
+    print("database credentials from the shell or the file, the shell winning, in no other Secret or ConfigMap,"
+          " or the render stops: checked")
+
+
+def referenced_secrets(rendered: dict) -> set[str]:
+    names = set()
+    for name, d in rendered.items():
+        if name.startswith("Ingress/"):
+            names |= {t["secretName"] for t in d["spec"].get("tls", []) if t.get("secretName")}
+        if name.startswith("Deployment/"):
+            spec = d["spec"]["template"]["spec"]
+            names |= {s["name"] for s in spec.get("imagePullSecrets", [])}
+            names |= {v["secret"]["secretName"] for v in spec.get("volumes", []) if "secret" in v}
+            for c in spec["containers"]:
+                names |= {e["secretRef"]["name"] for e in c.get("envFrom", []) if "secretRef" in e}
+                names |= {e["valueFrom"]["secretKeyRef"]["name"] for e in c.get("env", [])
+                          if "secretKeyRef" in e.get("valueFrom", {})}
+    return names
+
+
+def check_secrets_in_the_namespace(helm_dir: Path) -> None:
+    """Each environment names only Secrets the chart renders, and the ones it configures, which must be in xana-pdt."""
+    for environment, configured in (("default", set()), ("production", {"xana-tls"}), ("localAndIonos", {"replace-me"})):
+        rendered = documents(helmfile(helm_dir, environment))
+        own = {n.split("/", 1)[1] for n in rendered if n.startswith("Secret/")}
+        if referenced_secrets(rendered) - own != configured:
+            fail(f"{environment} names Secrets {sorted(referenced_secrets(rendered) - own)}, not {sorted(configured)}")
+    print("each environment names only its own Secrets and the configured ones: checked")
 
 
 RETIRED_KEYS = {"ingressClass": "ingressClassName", "existingSecret": "secretLookups", "extraConfig": "its own key"}
@@ -365,6 +416,7 @@ def main() -> None:
         check_retired_keys_stop,
         check_platform_addresses,
         check_database_credentials,
+        check_secrets_in_the_namespace,
         check_settings_cover_the_backend,
         check_committed_files,
     ):

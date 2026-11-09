@@ -86,6 +86,12 @@ else fail "a kept database password that differs is reported, without either val
 clean
 
 fresh
+out="$(in_clean_shell "$SOURCED" ALERTA_API_KEY=mine IFF_ALERTA_SECRET=no-such-secret)"
+if has "value:ALERTA_API_KEY=mine" && has "ALERTA_API_KEY: already set, kept; Secret no-such-secret not found in the cluster"
+then ok; else fail "a kept variable whose Secret is missing says so"; fi
+clean
+
+fresh
 out="$(in_clean_shell "$SOURCED" IFF_DATABASE_SECRET=no-such-secret)"
 if has "DATABASE_PASSWORD: Secret no-such-secret not found" && has "value:DATABASE_PASSWORD="$'\n'; then ok
 else fail "IFF_DATABASE_SECRET names the database Secret"; fi

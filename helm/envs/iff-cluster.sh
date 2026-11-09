@@ -54,7 +54,9 @@ _iff_secret_into() {
   fi
   if [[ -n "${!variable:-}" ]]; then
     export "${variable?}"
-    if [[ -z "$problem" && "${!variable}" != "$value" ]]; then
+    if [[ -n "$problem" ]]; then
+      echo "  $variable: already set, kept; $problem in the cluster"
+    elif [[ "${!variable}" != "$value" ]]; then
       echo "  $variable: already set, kept; differs from Secret $secret"
     else
       echo "  $variable: already set, kept"
