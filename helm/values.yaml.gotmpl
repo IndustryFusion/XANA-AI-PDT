@@ -13,121 +13,86 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-# Bridges the environment's settings to the chart's values, and reads what must not be
-# committed from the shell.
-image:
-  registry: {{ .Values.imageRegistry }}
-  tag: {{ .Values.imageTag | quote }}
-  pullPolicy: {{ .Values.imagePullPolicy }}
-config:
-  LLM_PROVIDER: {{ .Values.llmProvider | quote }}
-  LLM_MODEL: {{ .Values.llmModel | quote }}
-  {{- with .Values.llmProviderName }}
-  LLM_PROVIDER_NAME: {{ . | quote }}
-  {{- end }}
-  {{- with .Values.ollamaUrl }}
-  OLLAMA_URL: {{ . | quote }}
-  {{- end }}
-  {{- with .Values.openaiBaseUrl }}
-  OPENAI_BASE_URL: {{ . | quote }}
-  {{- end }}
-  {{- with (env "XANA_KEYCLOAK_URL" | default .Values.keycloakUrl) }}
-  KEYCLOAK_URL: {{ . | quote }}
-  {{- end }}
-  KEYCLOAK_REALM: {{ .Values.keycloakRealm | quote }}
-  KEYCLOAK_CLIENT_ID: {{ .Values.keycloakClientId | quote }}
-  {{- with .Values.factoryId }}
-  FACTORY_ID: {{ . | quote }}
-  {{- end }}
-  NGSI_URL: {{ .Values.ngsiUrl | quote }}
-  {{- with .Values.ngsiContextUrl }}
-  NGSI_CONTEXT_URL: {{ . | quote }}
-  {{- end }}
-  PGREST_URL: {{ .Values.pgrestUrl | quote }}
-  {{- with .Values.callbackBaseUrl }}
-  CALLBACK_BASE_URL: {{ . | quote }}
-  {{- end }}
-  {{- with .Values.keycloakServiceClientId }}
-  KEYCLOAK_SERVICE_CLIENT_ID: {{ . | quote }}
-  {{- end }}
-  MACHINE_WATCH_TYPE: {{ .Values.machineWatchType | quote }}
-  {{- with env "XANA_LANGFUSE_HOST" | default .Values.langfuseHost }}
-  LANGFUSE_HOST: {{ . | quote }}
-  {{- end }}
-  AUTO_ARCHIVE_AFTER_S: {{ env "XANA_AUTO_ARCHIVE_AFTER_S" | default .Values.autoArchiveAfterS | quote }}
-  MACHINE_WATCH_ATTRIBUTES: {{ .Values.machineWatchAttributes | quote }}
-  {{- with .Values.gatewayUrl }}
-  GATEWAY_URL: {{ . | quote }}
-  {{- end }}
-  {{- with .Values.gatewayKeycloakUrl }}
-  GATEWAY_KEYCLOAK_URL: {{ . | quote }}
-  {{- end }}
-  GATEWAY_KEYCLOAK_REALM: {{ .Values.gatewayKeycloakRealm | quote }}
-  {{- with .Values.gatewayClientId }}
-  GATEWAY_CLIENT_ID: {{ . | quote }}
-  {{- end }}
-  DATA_SHARING_POLICY: {{ .Values.dataSharingPolicy | quote }}
-  {{- with .Values.ifricUrl }}
-  IFRIC_URL: {{ . | quote }}
-  {{- end }}
-  ALERTA_URL: {{ .Values.alertaUrl | quote }}
-  ALERTS_REFRESH_INTERVAL_S: {{ .Values.alertsRefreshIntervalS | quote }}
-  FUSEKI_URL: {{ .Values.fusekiUrl | quote }}
-  FUSEKI_DATASET: {{ .Values.fusekiDataset | quote }}
-  {{- with .Values.fusekiGraphBase }}
-  FUSEKI_GRAPH_BASE: {{ . | quote }}
-  {{- end }}
-  MQTT_BROKER_URL: {{ .Values.mqttBrokerUrl | quote }}
-  MQTT_MGMT_URL: {{ .Values.mqttMgmtUrl | quote }}
-  {{- with .Values.mqttBrokerNotifyUrl }}
-  MQTT_BROKER_NOTIFY_URL: {{ . | quote }}
-  {{- end }}
-  POSTGRES_SSLMODE: {{ .Values.postgresSslMode | quote }}
-  {{- range $name, $value := .Values.extraConfig }}
-  {{ $name }}: {{ $value | quote }}
-  {{- end }}
-database:
-  host: {{ .Values.databaseHost }}
-  port: {{ .Values.databasePort }}
-  credentialsSecret: {{ .Values.databaseCredentialsSecret | quote }}
-  caCert:
-    secret: {{ .Values.databaseCaSecret | quote }}
-secrets:
-  existingSecret: {{ env "XANA_EXISTING_SECRET" | default .Values.existingSecret | quote }}
-  values:
-    {{- with env "XANA_ANTHROPIC_API_KEY" }}
-    ANTHROPIC_API_KEY: {{ . | quote }}
+# Turns the environment's values into the chart's. Settings come from the environment files. Each secret comes
+# from the shell variable of the backend's own name if it is set, else from its key in the environment files.
+{{- /* The variables the chart read before; one still set stops the render, so no secret is silently dropped. */}}
+{{- $old := dict
+  "XANA_ANTHROPIC_API_KEY" "ANTHROPIC_API_KEY" "XANA_OPENAI_API_KEY" "OPENAI_API_KEY"
+  "XANA_ALERTA_API_KEY" "ALERTA_API_KEY" "XANA_GATEWAY_CLIENT_SECRET" "GATEWAY_CLIENT_SECRET"
+  "XANA_EVENT_WEBHOOK_SECRET" "EVENT_WEBHOOK_SECRET" "XANA_KEYCLOAK_SERVICE_CLIENT_SECRET" "KEYCLOAK_SERVICE_CLIENT_SECRET"
+  "XANA_SETTINGS_ENCRYPTION_KEY" "SETTINGS_ENCRYPTION_KEY" "XANA_LANGFUSE_PUBLIC_KEY" "LANGFUSE_PUBLIC_KEY"
+  "XANA_LANGFUSE_SECRET_KEY" "LANGFUSE_SECRET_KEY"
+  "XANA_EXISTING_SECRET" "secretLookups in the environment file"
+  "XANA_INGRESS_HOST" "ingressHost in the environment file"
+  "XANA_KEYCLOAK_URL" "keycloakUrl in the environment file"
+  "XANA_LANGFUSE_HOST" "langfuseHost in the environment file"
+  "XANA_AUTO_ARCHIVE_AFTER_S" "autoArchiveAfterS in the environment file" }}
+{{- range $name := keys $old | sortAlpha }}
+{{- if env $name }}
+{{- fail (printf "%s is no longer read: use %s instead (see helm/README.md)." $name (index $old $name)) }}
+{{- end }}
+{{- end }}
+{{- /* Settings: environment key, backend variable. */}}
+{{- $settings := list
+  (list "llmProvider" "LLM_PROVIDER") (list "llmModel" "LLM_MODEL") (list "llmProviderName" "LLM_PROVIDER_NAME")
+  (list "llmNumCtx" "LLM_NUM_CTX") (list "llmTimeoutS" "LLM_TIMEOUT_S") (list "ollamaUrl" "OLLAMA_URL")
+  (list "openaiBaseUrl" "OPENAI_BASE_URL") (list "langfuseHost" "LANGFUSE_HOST")
+  (list "decisionConfidenceThreshold" "DECISION_CONFIDENCE_THRESHOLD") (list "maxConcurrentRounds" "MAX_CONCURRENT_ROUNDS")
+  (list "autoArchiveAfterS" "AUTO_ARCHIVE_AFTER_S")
+  (list "keycloakUrl" "KEYCLOAK_URL") (list "keycloakRealm" "KEYCLOAK_REALM") (list "keycloakClientId" "KEYCLOAK_CLIENT_ID")
+  (list "factoryId" "FACTORY_ID") (list "keycloakServiceClientId" "KEYCLOAK_SERVICE_CLIENT_ID")
+  (list "callbackBaseUrl" "CALLBACK_BASE_URL") (list "machineWatchType" "MACHINE_WATCH_TYPE")
+  (list "machineWatchAttributes" "MACHINE_WATCH_ATTRIBUTES")
+  (list "gatewayUrl" "GATEWAY_URL") (list "gatewayKeycloakUrl" "GATEWAY_KEYCLOAK_URL")
+  (list "gatewayKeycloakRealm" "GATEWAY_KEYCLOAK_REALM") (list "gatewayClientId" "GATEWAY_CLIENT_ID")
+  (list "dataSharingPolicy" "DATA_SHARING_POLICY") (list "ifricUrl" "IFRIC_URL") (list "inboxPollIntervalS" "INBOX_POLL_INTERVAL_S")
+  (list "ngsiUrl" "NGSI_URL") (list "ngsiTenant" "NGSI_TENANT") (list "ngsiContextUrl" "NGSI_CONTEXT_URL")
+  (list "ngsiAllowedContexts" "NGSI_ALLOWED_CONTEXTS") (list "pgrestUrl" "PGREST_URL")
+  (list "alertaUrl" "ALERTA_URL") (list "alertsRefreshIntervalS" "ALERTS_REFRESH_INTERVAL_S")
+  (list "fusekiUrl" "FUSEKI_URL") (list "fusekiDataset" "FUSEKI_DATASET") (list "fusekiGraphBase" "FUSEKI_GRAPH_BASE")
+  (list "mqttBrokerUrl" "MQTT_BROKER_URL") (list "mqttMgmtUrl" "MQTT_MGMT_URL") (list "mqttBrokerNotifyUrl" "MQTT_BROKER_NOTIFY_URL")
+  (list "wsAllowedOrigins" "WS_ALLOWED_ORIGINS") (list "timescaleTable" "TIMESCALE_TABLE")
+  (list "timescaleEntityTable" "TIMESCALE_ENTITY_TABLE") (list "postgresSslMode" "POSTGRES_SSLMODE")
+  (list "healthTimeoutS" "HEALTH_TIMEOUT_S") (list "healthCacheS" "HEALTH_CACHE_S") (list "logLevel" "LOG_LEVEL") }}
+{{- /* Secrets: environment key, backend variable, which is also the shell variable. */}}
+{{- $secrets := list
+  (list "anthropicApiKey" "ANTHROPIC_API_KEY") (list "openaiApiKey" "OPENAI_API_KEY")
+  (list "langfusePublicKey" "LANGFUSE_PUBLIC_KEY") (list "langfuseSecretKey" "LANGFUSE_SECRET_KEY")
+  (list "keycloakServiceClientSecret" "KEYCLOAK_SERVICE_CLIENT_SECRET") (list "eventWebhookSecret" "EVENT_WEBHOOK_SECRET")
+  (list "gatewayClientSecret" "GATEWAY_CLIENT_SECRET") (list "settingsEncryptionKey" "SETTINGS_ENCRYPTION_KEY")
+  (list "alertaApiKey" "ALERTA_API_KEY") (list "timescaleDbUrl" "TIMESCALE_DB_URL") (list "postgresMemoryUrl" "POSTGRES_MEMORY_URL") }}
+imageRegistry: {{ .Values.imageRegistry | quote }}
+imageTag: {{ .Values.imageTag | quote }}
+imagePullPolicy: {{ .Values.imagePullPolicy | quote }}
+backend:
+  config:
+    {{- range $pair := $settings }}
+    {{- $value := index $.Values (index $pair 0) | toString }}
+    {{- if and $value (ne $value "<nil>") }}
+    {{ index $pair 1 }}: {{ $value | quote }}
     {{- end }}
-    {{- with env "XANA_OPENAI_API_KEY" }}
-    OPENAI_API_KEY: {{ . | quote }}
     {{- end }}
-    {{- with env "XANA_ALERTA_API_KEY" }}
-    ALERTA_API_KEY: {{ . | quote }}
+  secret:
+    {{- range $pair := $secrets }}
+    {{- $value := env (index $pair 1) | default (index $.Values (index $pair 0) | toString) }}
+    {{- if and $value (ne $value "<nil>") }}
+    {{ index $pair 1 }}: {{ $value | quote }}
     {{- end }}
-    {{- with env "XANA_GATEWAY_CLIENT_SECRET" }}
-    GATEWAY_CLIENT_SECRET: {{ . | quote }}
     {{- end }}
-    {{- with env "XANA_EVENT_WEBHOOK_SECRET" }}
-    EVENT_WEBHOOK_SECRET: {{ . | quote }}
-    {{- end }}
-    {{- with env "XANA_KEYCLOAK_SERVICE_CLIENT_SECRET" }}
-    KEYCLOAK_SERVICE_CLIENT_SECRET: {{ . | quote }}
-    {{- end }}
-    {{- with env "XANA_SETTINGS_ENCRYPTION_KEY" }}
-    SETTINGS_ENCRYPTION_KEY: {{ . | quote }}
-    {{- end }}
-    {{- with env "XANA_LANGFUSE_PUBLIC_KEY" }}
-    LANGFUSE_PUBLIC_KEY: {{ . | quote }}
-    {{- end }}
-    {{- with env "XANA_LANGFUSE_SECRET_KEY" }}
-    LANGFUSE_SECRET_KEY: {{ . | quote }}
-    {{- end }}
+  postgresCredential:
+    host: {{ .Values.databaseHost | quote }}
+    port: {{ .Values.databasePort }}
+    timeseriesDatabase: {{ .Values.databaseTimeseriesName | quote }}
+    memoryDatabase: {{ .Values.databaseMemoryName | quote }}
+    secret: {{ .Values.databaseCredentialsSecret | quote }}
+    caSecret: {{ .Values.databaseCaSecret | quote }}
+  secretLookups: {{ .Values.secretLookups | default list | toJson }}
 ingress:
   enabled: {{ .Values.ingressEnabled }}
-  className: {{ .Values.ingressClass | quote }}
-  host: {{ env "XANA_INGRESS_HOST" | default .Values.ingressHost | quote }}
+  className: {{ .Values.ingressClassName | quote }}
+  host: {{ .Values.ingressHost | quote }}
   tlsSecret: {{ .Values.ingressTlsSecret | quote }}
-  {{- if eq .Values.ingressClass "nginx" }}
+  {{- if eq .Values.ingressClassName "nginx" }}
   annotations:
     nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "300"

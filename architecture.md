@@ -557,24 +557,27 @@ XANA AI PDT uses a two-layer deployment model:
          Keycloak │ Dataspace Gateway │ IFRIC Registry
 ```
 
-The frontend's nginx configuration is part of its image, and takes the backend's address from `XANA_BACKEND_URL` at container start. A release goes in the platform's namespace by default, so it can read the database operator's generated Secret. See [`helm/README.md`](helm/README.md).
+The frontend's nginx configuration is a ConfigMap, mounted over the image's template, and takes the backend's address from `XANA_BACKEND_URL` at container start. A release goes in the platform's namespace by default, so it can read the database operator's generated Secret. The backend's settings are in its ConfigMap; its secrets come from shell variables of the backend's own names, which `helm/envs/iff-cluster.sh` can export from the cluster, or from Secrets read when the Pod starts (`secretLookups`, and the database operator's Secret for the database URLs). See [`helm/README.md`](helm/README.md).
 
-Deployment is managed with Helmfile 1.x:
+Deployment is managed with Helmfile 1.1.9, in the layout of the IndustryFusion platform (DigitalTwin, Dataspace):
 
 ```
 helm/
-├── helmfile.yaml.gotmpl            # release xana-pdt, environments
-├── values.yaml.gotmpl              # bridges environment settings to the chart's values
+├── bootstrap.sh                    # downloads the pinned Helmfile into helm/helmfile, checksum-checked
+├── helmfile.yaml.gotmpl            # release xana-pdt, environments default, production, localAndIonos
+├── values.yaml.gotmpl              # turns environment keys and shell variables into the chart's values
 ├── environment/
-│   ├── default.yaml                # platform service addresses, ingress
+│   ├── default.yaml                # every key, with its default
 │   ├── production.yaml             # pinned image tag, TLS secret
-│   ├── local.yaml                  # a local cluster with stand-in services
 │   └── localAndIonos.yaml          # production on a local-and-IONOS cluster; placeholders to fill in
-├── test/                           # stand-in services and a smoke test, used by CI
+├── envs/
+│   └── iff-cluster.sh              # sourced: exports the backend's secrets from the cluster's Secrets
+├── test/                           # checks, stand-in services, local test values and a smoke test, used by CI
 └── charts/
     └── xana-pdt/                   # Helm chart (backend + frontend + ingress)
 ```
 
+`build.sh` at the repository root builds and pushes the images, with `REGISTRY` and `IMAGE_TAG` from the shell or a git-ignored `.env` (see `.env.example`).
 
 Not part of the current system: if the [`rag-tool`](#knowledge-base-rag-tool) knowledge base returns, it would be a second Helm release in the same namespace.
 

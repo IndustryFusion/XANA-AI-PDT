@@ -93,3 +93,33 @@ spec:
   selector: { app: scorpio }
   ports:
     - port: 9090
+---
+# Stand-ins for the cluster Secrets that envs/iff-cluster.sh reads, and one for secretLookups. Test values only.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: alerta
+stringData:
+  alerta-admin-key: local-test-alerta-key
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: keycloak-client-secret-xana
+stringData:
+  CLIENT_ID: xana
+  CLIENT_SECRET: local-test-client-secret
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: xana-pdt-credentials
+stringData:
+  OPENAI_API_KEY: local-test-openai-key
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: xana-test-lookup
+stringData:
+  webhook: local-test-webhook-secret

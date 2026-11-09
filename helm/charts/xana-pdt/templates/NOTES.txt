@@ -7,11 +7,14 @@ UI: http{{ if .Values.ingress.tlsSecret }}s{{ end }}://{{ .Values.ingress.host }
 Check the connections:
   kubectl -n {{ .Release.Namespace }} exec deploy/{{ include "xana-pdt.backend" . }} -- \
     python -c "import httpx; print(httpx.get('http://localhost:8000/api/diagnostics?fresh=true').text)"
-{{- if and (not .Values.secrets.existingSecret) .Values.database.credentialsSecret }}
+{{- if include "xana-pdt.buildsDatabaseUrls" . }}
 
-The database credentials come from Secret {{ .Values.database.credentialsSecret }}, which must be in this namespace.
+The database credentials come from Secret {{ .Values.backend.postgresCredential.secret }}, which must be in this namespace.
 {{- end }}
-{{- if .Values.config.KEYCLOAK_URL }}
+{{- range .Values.backend.secretLookups }}
+{{ .variable }} comes from key {{ .key }} of Secret {{ .secret }}, which must be in this namespace.
+{{- end }}
+{{- if .Values.backend.config.KEYCLOAK_URL }}
 
 Sign-in is on. The backend's own API is not protected: limit network access to it.
 {{- end }}

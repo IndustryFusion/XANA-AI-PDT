@@ -16,15 +16,15 @@
 # The localAndIonos environment: production (default.yaml, then production.yaml), with what differs on a
 # local-and-IONOS cluster. Every value below is a placeholder: replace each for your cluster before
 # deploying. Placeholders are under the reserved .invalid domain or read replace-me, so one left in
-# fails instead of reaching another host. No secret goes here: secrets come from XANA_* shell
-# variables or existingSecret (see README.md). Keys not set here are production's.
+# fails instead of reaching another host. No secret goes here: secrets come from shell variables of the
+# backend's names, envs/iff-cluster.sh or secretLookups (see README.md). Keys not set here are production's.
 
 # Images: where build.sh pushed them (REGISTRY and IMAGE_TAG).
 imageRegistry: registry.replace-me.invalid/xana       # your registry and path
 imageTag: replace-me                                  # the tag you pushed
 
-# Ingress. XANA_INGRESS_HOST in the shell still wins over ingressHost.
-ingressClass: replace-me                              # the cluster's Ingress class, for example nginx
+# Ingress.
+ingressClassName: replace-me                          # the cluster's Ingress class, for example nginx
 ingressHost: xana.replace-me.invalid                  # the host name XANA is served under
 ingressTlsSecret: replace-me                          # the TLS Secret for that host, in the namespace
 
@@ -38,7 +38,7 @@ mqttBrokerUrl: mqtt://emqx.replace-me.invalid:1883     # the message broker
 mqttMgmtUrl: http://emqx-dashboard.replace-me.invalid:18083  # the message broker's management API
 databaseHost: acid-cluster.replace-me.invalid          # the PostgreSQL host with tsdb and memory
 
-# The dataspace. With gatewayUrl set, the backend also needs SETTINGS_ENCRYPTION_KEY (XANA_SETTINGS_ENCRYPTION_KEY).
+# The dataspace. With gatewayUrl set, the backend also needs SETTINGS_ENCRYPTION_KEY.
 gatewayUrl: https://gateway.replace-me.invalid             # the dataspace gateway
 gatewayKeycloakUrl: https://keycloak-dataspace.replace-me.invalid/auth  # the dataspace's Keycloak
 ifricUrl: https://ifric.replace-me.invalid:4007            # the IFRIC registry, with its port

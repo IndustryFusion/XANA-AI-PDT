@@ -26,7 +26,7 @@ app.kubernetes.io/component: {{ .component }}
 {{- end }}
 
 {{- define "xana-pdt.image" -}}
-{{- printf "%s/%s:%s" .root.Values.image.registry .name (.root.Values.image.tag | default (printf "v%s" .root.Chart.AppVersion)) -}}
+{{- printf "%s/%s:%s" (trimSuffix "/" .root.Values.imageRegistry) .name (.root.Values.imageTag | default (printf "v%s" .root.Chart.AppVersion)) -}}
 {{- end }}
 
 {{- define "xana-pdt.backend" -}}
@@ -40,4 +40,12 @@ app.kubernetes.io/component: {{ .component }}
 {{/* Where the database's CA certificate is mounted, when one is named. */}}
 {{- define "xana-pdt.databaseCaPath" -}}
 /etc/xana/database-ca/ca.crt
+{{- end }}
+
+{{/* Whether the chart builds the database URLs from postgresCredential: not when both are given as secrets. */}}
+{{- define "xana-pdt.buildsDatabaseUrls" -}}
+{{- $s := .Values.backend.secret | default dict -}}
+{{- if and .Values.backend.postgresCredential.secret (not (and (hasKey $s "TIMESCALE_DB_URL") (hasKey $s "POSTGRES_MEMORY_URL"))) -}}
+true
+{{- end -}}
 {{- end }}

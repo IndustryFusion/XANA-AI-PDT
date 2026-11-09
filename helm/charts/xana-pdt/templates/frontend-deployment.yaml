@@ -27,8 +27,10 @@ spec:
       labels:
         {{- include "xana-pdt.labels" . | nindent 8 }}
         {{- include "xana-pdt.selector" (dict "root" . "component" "frontend") | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/frontend-configmap.yaml") . | sha256sum }}
     spec:
-      {{- with .Values.image.pullSecrets }}
+      {{- with .Values.imagePullSecrets }}
       imagePullSecrets: {{- toYaml . | nindent 8 }}
       {{- end }}
       securityContext:
@@ -39,7 +41,7 @@ spec:
       containers:
         - name: frontend
           image: {{ include "xana-pdt.image" (dict "root" . "name" .Values.frontend.image) }}
-          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
@@ -50,6 +52,12 @@ spec:
           env:
             - name: XANA_BACKEND_URL
               value: http://{{ include "xana-pdt.backend" . }}:8000
+          volumeMounts:
+            # Over the image's own template, so the chart's configuration is the one nginx renders.
+            - name: nginx-config
+              mountPath: /etc/nginx/templates/default.conf.template
+              subPath: default.conf.template
+              readOnly: true
           livenessProbe:
             httpGet: { path: /, port: http }
             periodSeconds: 20
@@ -57,3 +65,7 @@ spec:
             httpGet: { path: /, port: http }
             periodSeconds: 10
           resources: {{- toYaml .Values.frontend.resources | nindent 12 }}
+      volumes:
+        - name: nginx-config
+          configMap:
+            name: {{ include "xana-pdt.frontend" . }}

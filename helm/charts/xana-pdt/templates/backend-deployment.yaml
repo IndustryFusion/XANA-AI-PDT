@@ -13,7 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-{{- $d := .Values.database }}
+{{- $d := .Values.backend.postgresCredential }}
+{{- $given := .Values.backend.secret | default dict }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -35,7 +36,7 @@ spec:
         checksum/config: {{ include (print $.Template.BasePath "/backend-configmap.yaml") . | sha256sum }}
         checksum/secret: {{ include (print $.Template.BasePath "/backend-secret.yaml") . | sha256sum }}
     spec:
-      {{- with .Values.image.pullSecrets }}
+      {{- with .Values.imagePullSecrets }}
       imagePullSecrets: {{- toYaml . | nindent 8 }}
       {{- end }}
       securityContext:
@@ -46,7 +47,7 @@ spec:
       containers:
         - name: backend
           image: {{ include "xana-pdt.image" (dict "root" . "name" .Values.backend.image) }}
-          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
@@ -57,31 +58,49 @@ spec:
           envFrom:
             - configMapRef:
                 name: {{ include "xana-pdt.backend" . }}
-            {{- if .Values.secrets.existingSecret }}
-            - secretRef:
-                name: {{ .Values.secrets.existingSecret }}
-            {{- else if .Values.secrets.values }}
+            {{- if .Values.backend.secret }}
             - secretRef:
                 name: {{ include "xana-pdt.backend" . }}
             {{- end }}
-          {{- if and (not .Values.secrets.existingSecret) $d.credentialsSecret }}
+          {{- $lookups := list }}
+          {{- range .Values.backend.secretLookups }}
+          {{- if not (hasKey $given .variable) }}
+          {{- $lookups = append $lookups . }}
+          {{- end }}
+          {{- end }}
+          {{- $build := include "xana-pdt.buildsDatabaseUrls" . }}
+          {{- if or $build $lookups }}
           env:
+            {{- if $build }}
+            # The database URLs, built from the database operator's Secret when the Pod starts.
             - name: DB_USER
               valueFrom:
                 secretKeyRef:
-                  name: {{ $d.credentialsSecret }}
+                  name: {{ $d.secret }}
                   key: username
             - name: DB_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ $d.credentialsSecret }}
+                  name: {{ $d.secret }}
                   key: password
+            {{- if not (hasKey $given "TIMESCALE_DB_URL") }}
             - name: TIMESCALE_DB_URL
-              value: postgresql://$(DB_USER):$(DB_PASSWORD)@{{ $d.host }}:{{ $d.port }}/{{ $d.timeseriesName }}
+              value: postgresql://$(DB_USER):$(DB_PASSWORD)@{{ $d.host }}:{{ $d.port }}/{{ $d.timeseriesDatabase }}
+            {{- end }}
+            {{- if not (hasKey $given "POSTGRES_MEMORY_URL") }}
             - name: POSTGRES_MEMORY_URL
-              value: postgresql://$(DB_USER):$(DB_PASSWORD)@{{ $d.host }}:{{ $d.port }}/{{ $d.memoryName }}
+              value: postgresql://$(DB_USER):$(DB_PASSWORD)@{{ $d.host }}:{{ $d.port }}/{{ $d.memoryDatabase }}
+            {{- end }}
+            {{- end }}
+            {{- range $lookups }}
+            - name: {{ required "each of secretLookups needs a variable" .variable }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "each of secretLookups needs a secret" .secret }}
+                  key: {{ required "each of secretLookups needs a key" .key }}
+            {{- end }}
           {{- end }}
-          {{- with $d.caCert.secret }}
+          {{- with $d.caSecret }}
           volumeMounts:
             - name: database-ca
               mountPath: {{ dir (include "xana-pdt.databaseCaPath" $) }}
@@ -98,12 +117,12 @@ spec:
             httpGet: { path: /healthz, port: http }
             periodSeconds: 10
           resources: {{- toYaml .Values.backend.resources | nindent 12 }}
-      {{- with $d.caCert.secret }}
+      {{- with $d.caSecret }}
       volumes:
         - name: database-ca
           secret:
             secretName: {{ . }}
             items:
-              - key: {{ $d.caCert.key }}
+              - key: ca.crt
                 path: ca.crt
       {{- end }}

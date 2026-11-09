@@ -13,75 +13,122 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-# The digital twin platform's services, in the release's namespace.
+# The default environment: the digital twin platform's services, in the release's namespace.
+# production.yaml and localAndIonos.yaml are layered over it; a later file wins.
+# Every key is described in README.md. Secrets stay empty here: set them as shell variables of the
+# backend's own names (for example ANTHROPIC_API_KEY), which win over these keys, or source
+# envs/iff-cluster.sh to export them from the cluster.
 namespace: iff
 imageRegistry: ghcr.io/industryfusion
 imageTag: ""
 imagePullPolicy: IfNotPresent
 
+# The language model.
 llmProvider: ollama
 llmModel: llama3.1
 llmProviderName: ""
+llmNumCtx: 32768
+llmTimeoutS: 120
 ollamaUrl: ""
 openaiBaseUrl: ""
 
-# Sign-in. Empty turns it off. Use Keycloak's external address, as tokens must match the
-# issuer that services check. Set XANA_KEYCLOAK_URL in the shell, or here.
+# The diagnosis.
+decisionConfidenceThreshold: 0.9
+maxConcurrentRounds: 2
+# Finished runs move to incident history after this many seconds without a change. 0 keeps them until archived.
+autoArchiveAfterS: 3600
+
+# Sign-in. Empty turns it off. Use Keycloak's external address, as tokens must match the issuer that services check.
 keycloakUrl: ""
 keycloakRealm: iff
 keycloakClientId: scorpio
 factoryId: ""
-# A client with a service account, for machine events with nobody signed in. Its secret comes from
-# XANA_KEYCLOAK_SERVICE_CLIENT_SECRET, or the existing secret.
+# A client with a service account, for machine events with nobody signed in.
 keycloakServiceClientId: ""
 
+# The digital twin.
 ngsiUrl: http://scorpio-all-in-one-runner:9090
+ngsiTenant: ""
 # JSON-LD context for short names. Without it, names are the platform's full IRIs.
 ngsiContextUrl: ""
+# Further contexts an import may name, comma-separated.
+ngsiAllowedContexts: ""
 pgrestUrl: http://pgrest:3000
 # Machine events: the backend as Scorpio reaches it, for example http://xana-pdt-backend:8000. Empty means no
-# subscription. The secret comes from XANA_EVENT_WEBHOOK_SECRET, or the existing secret. On data with full IRIs,
-# name the type and attributes as the platform does.
+# subscription. On data with full IRIs, name the type and attributes as the platform does.
 callbackBaseUrl: ""
 machineWatchType: Machine
-# Your own Langfuse server for traces, for example https://langfuse.example.org. Empty uses Langfuse's default.
-# The keys come from XANA_LANGFUSE_PUBLIC_KEY and XANA_LANGFUSE_SECRET_KEY; without them nothing is traced.
-langfuseHost: ""
-# Finished runs move to incident history after this many seconds without a change. 0 keeps them until archived.
-autoArchiveAfterS: 3600
 machineWatchAttributes: status,errorCode,alarmLevel,faultCode
-# Alerts. The key comes from XANA_ALERTA_API_KEY, or the existing secret.
+
+# Alerts. Must end in /api.
 alertaUrl: http://alerta:8080/api
 alertsRefreshIntervalS: 30
-# The dataspace. Empty means none. The client secret and encryption key come from XANA_GATEWAY_CLIENT_SECRET
-# and XANA_SETTINGS_ENCRYPTION_KEY, or the existing secret.
+
+# The dataspace. Empty means none.
 gatewayUrl: ""
 gatewayKeycloakUrl: ""
 gatewayKeycloakRealm: dataspace
 gatewayClientId: ""
 dataSharingPolicy: minimal
+inboxPollIntervalS: 15
 # The IFRIC registry, including its port. Empty means none.
 ifricUrl: ""
+
 # Machine ontology and shapes. The graph base is http://<Fuseki's external host>/<realm> on the platform.
 fusekiUrl: http://fuseki:3030
 fusekiDataset: iff
 fusekiGraphBase: http://fuseki.local/iff
+
 # Live updates in the Data Explorer. Operators need Factory-Admin or Factory-Reader on client scorpio.
 mqttBrokerUrl: mqtt://emqx-listeners:1883
 mqttMgmtUrl: http://emqx-dashboard:18083
 # The MQTT broker as Scorpio reaches it, if different.
 mqttBrokerNotifyUrl: ""
+# Browser origins allowed on the backend's WebSockets, comma-separated. Empty allows the backend's own.
+wsAllowedOrigins: ""
+
+# Traces to your own Langfuse server, for example https://langfuse.example.org. Empty uses Langfuse's default.
+# Nothing is traced without the two Langfuse keys.
+langfuseHost: ""
+
+# The databases. Without timescaleDbUrl and postgresMemoryUrl, both URLs are built when the Pod starts, from the
+# database operator's Secret, with keys username and password.
 databaseHost: acid-cluster
 databasePort: 5432
+databaseTimeseriesName: tsdb
+databaseMemoryName: memory
 databaseCredentialsSecret: ngb.acid-cluster.credentials
+# A Secret holding the database's CA certificate as ca.crt, for postgresSslMode verify-ca or verify-full.
 databaseCaSecret: ""
 postgresSslMode: require
-# Any other backend setting that is not secret, by variable name. See backend/.env.example.
-extraConfig: {}
-existingSecret: ""
+timescaleTable: attributes
+timescaleEntityTable: entities
+
+# Health checks and logs.
+healthTimeoutS: 3
+healthCacheS: 10
+logLevel: INFO
+
+# Secrets. Keep them empty in committed files; a shell variable of the name in brackets wins.
+anthropicApiKey: ""               # (ANTHROPIC_API_KEY)
+openaiApiKey: ""                  # (OPENAI_API_KEY)
+langfusePublicKey: ""             # (LANGFUSE_PUBLIC_KEY)
+langfuseSecretKey: ""             # (LANGFUSE_SECRET_KEY)
+keycloakServiceClientSecret: ""   # (KEYCLOAK_SERVICE_CLIENT_SECRET)
+eventWebhookSecret: ""            # (EVENT_WEBHOOK_SECRET)
+gatewayClientSecret: ""           # (GATEWAY_CLIENT_SECRET)
+settingsEncryptionKey: ""         # (SETTINGS_ENCRYPTION_KEY)
+alertaApiKey: ""                  # (ALERTA_API_KEY)
+timescaleDbUrl: ""                # (TIMESCALE_DB_URL)
+postgresMemoryUrl: ""             # (POSTGRES_MEMORY_URL)
+
+# Variables read when the Pod starts from keys of Secrets in the release's namespace, for example
+#   - { variable: ALERTA_API_KEY, secret: alerta, key: alerta-admin-key }
+# A variable also given as a secret above, or in the shell, is taken from there instead.
+secretLookups: []
 
 # The platform's default ingress controller is Traefik; nginx is also supported.
 ingressEnabled: true
-ingressClass: traefik
+ingressClassName: traefik
 ingressHost: xana.local
 ingressTlsSecret: ""

@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 #
 # Copyright (c) 2026 IndustryFusion Foundation
 #
@@ -13,11 +14,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-# A local cluster with the stand-in services, and images built on this machine.
+# Prints the values file of the local test cluster: the default environment with the locally built images, the
+# scripted model, the stand-in database without TLS, nginx on xana.localhost, and one variable read from a Secret
+# (helm/test/stand-ins.yaml) through secretLookups. It is generated, not committed:
+#
+#   helm/test/local-values.sh > "$RUNNER_TEMP/local-values.yaml"
+#   ./helmfile -e default --state-values-file "$RUNNER_TEMP/local-values.yaml" sync
+set -euo pipefail
+
+cat <<'VALUES'
 imageRegistry: xana-local
 imageTag: dev
 imagePullPolicy: Never
 llmProvider: scripted
 postgresSslMode: prefer
-ingressClass: nginx
+ingressClassName: nginx
 ingressHost: xana.localhost
+secretLookups:
+  - { variable: EVENT_WEBHOOK_SECRET, secret: xana-test-lookup, key: webhook }
+VALUES

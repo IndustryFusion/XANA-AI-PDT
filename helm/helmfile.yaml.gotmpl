@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-# Helmfile 1.x. Run from helm/: helmfile -e default apply
+# Helmfile 1.x. Run from helm/, after ./bootstrap.sh: ./helmfile -e <environment> apply
 
 environments:
   default:
@@ -29,11 +29,6 @@ environments:
       - environment/default.yaml
       - environment/production.yaml
       - environment/localAndIonos.yaml
-  # A local cluster with the stand-in services in test/stand-ins.yaml. See README.md.
-  local:
-    values:
-      - environment/default.yaml
-      - environment/local.yaml
 ---
 releases:
   - name: xana-pdt

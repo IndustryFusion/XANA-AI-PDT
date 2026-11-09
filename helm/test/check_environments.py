@@ -14,7 +14,7 @@
 # limitations under the License.
 #
 """Checks the layering of the localAndIonos environment: default.yaml, then production.yaml, then
-localAndIonos.yaml, a later file winning. Needs helmfile and helm.
+localAndIonos.yaml, a later file winning. Needs helm, and helm/helmfile (./bootstrap.sh) or helmfile on PATH.
 
     python helm/test/check_environments.py helm
 
@@ -38,6 +38,7 @@ NOT_ADDRESSES = {
     "BACKEND_HOST",  # the backend's own listening address, 0.0.0.0
     "FUSEKI_GRAPH_BASE",  # an IRI that names the ontology's graphs; never requested
     "XANA_BACKEND_URL",  # the frontend's way to this release's own backend Service
+    "default.conf.template",  # the frontend's nginx configuration, which names no host of the cluster
 }
 ADDRESS = re.compile(r"://|^[A-Za-z0-9.-]+:[0-9]{2,5}(/|$)|@[A-Za-z0-9.-]+:[0-9]{2,5}/")
 
@@ -47,8 +48,9 @@ def placeholder(value: str) -> bool:
 
 
 def render(helm_dir: Path) -> list[dict]:
+    binary = str(helm_dir / "helmfile") if (helm_dir / "helmfile").exists() else "helmfile"
     out = subprocess.run(
-        ["helmfile", "-e", "localAndIonos", "template"], cwd=helm_dir, check=True, capture_output=True, text=True
+        [binary, "-e", "localAndIonos", "template"], cwd=helm_dir, check=True, capture_output=True, text=True
     ).stdout
     return [d for d in yaml.safe_load_all(out) if d]
 
