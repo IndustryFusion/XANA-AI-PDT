@@ -11,7 +11,7 @@ Check the connections:
 
 The database credentials come from Secret {{ .Values.backend.postgresCredential.secret }}, which must be in this namespace.
 {{- end }}
-{{- range .Values.backend.secretLookups }}
+{{- range (include "xana-pdt.secretLookups" . | fromJson).lookups }}
 {{ .variable }} comes from key {{ .key }} of Secret {{ .secret }}, which must be in this namespace.
 {{- end }}
 {{- if .Values.backend.config.KEYCLOAK_URL }}

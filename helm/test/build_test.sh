@@ -93,6 +93,15 @@ check "another key in the .env file stops before building" eval '[[ $status != 0
 setup; printf 'REGISTRY=file.test\n$(touch %s/ran)\n' "$work" >"$work/.env"; run ./build.sh
 check "a line that isn't KEY=VALUE stops, and nothing in the file runs" eval '[[ $status != 0 ]] && grep -q "line 2 is not KEY=VALUE" "$work/out" && [[ ! -e "$work/ran" && ! -s "$CALLS" ]]'
 
+setup; printf 'export REGISTRY = file.test:5000  \nIMAGE_TAG= "spaced"\n' >"$work/.env"; run ./build.sh --no-push backend
+check "a leading export and spaces around = are accepted" eval '[[ $status == 0 ]] && calls_are "build -t file.test:5000/xana-ai-pdt-backend:spaced backend"'
+
+setup; printf 'export REGISTRY=$(touch %s/ran)\nIMAGE_TAG=`touch %s/ran`\n' "$work" "$work" >"$work/.env"; run ./build.sh
+check "code in an exported value doesn't run" eval '[[ $status != 0 ]] && grep -q "line 1 is not a registry" "$work/out" && [[ ! -e "$work/ran" && ! -s "$CALLS" ]]'
+
+setup; printf 'export PATH=/nowhere\n' >"$work/.env"; run ./build.sh
+check "export of another key stops" eval '[[ $status != 0 ]] && grep -q "line 1 sets PATH" "$work/out" && [[ ! -s "$CALLS" ]]'
+
 setup; run ./build.sh --no-push
 check "build only pushes nothing" eval '[[ $status == 0 ]] && ! grep -q "^push" "$CALLS" && [[ $(grep -c "^build" "$CALLS") == 2 ]]'
 

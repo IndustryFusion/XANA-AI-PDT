@@ -223,7 +223,7 @@ The backend's secrets go into a Secret the chart creates, never a ConfigMap. Eac
 | `alertaApiKey` | `ALERTA_API_KEY` |
 | `timescaleDbUrl`, `postgresMemoryUrl` | `TIMESCALE_DB_URL`, `POSTGRES_MEMORY_URL` |
 
-A shell variable that is set wins over the key:
+A shell variable wins over the key when it is set and not empty; an empty one is ignored, and the key applies:
 
 ```bash
 ANTHROPIC_API_KEY="$KEY" ./helmfile -e default apply
@@ -231,7 +231,24 @@ ANTHROPIC_API_KEY="$KEY" ./helmfile -e default apply
 
 **Set them on every `apply`.** Helmfile doesn't keep earlier values, so a run without them removes them from the Secret. To avoid that, read them from the cluster:
 
-- **`envs/iff-cluster.sh`**, sourced, reads them with `kubectl` from Secrets in namespace `iff` and exports them: `ALERTA_API_KEY` from Secret `alerta` (key `alerta-admin-key`), `KEYCLOAK_SERVICE_CLIENT_SECRET` from `keycloak-client-secret-xana` (key `CLIENT_SECRET`), and the others from `xana-pdt-credentials`, by variable name. A variable already set is kept; a missing Secret or key is reported by name and skipped. It prints names only and writes no file. `IFF_NAMESPACE`, `IFF_ALERTA_SECRET`, `IFF_KEYCLOAK_CLIENT_SECRET` and `IFF_XANA_SECRET` change the namespace and Secret names.
+- **`envs/iff-cluster.sh`**, sourced from bash, reads them with `kubectl` from Secrets in namespace `iff` and exports them: `ALERTA_API_KEY` from Secret `alerta` (key `alerta-admin-key`), `KEYCLOAK_SERVICE_CLIENT_SECRET` from `keycloak-client-secret-xana` (key `CLIENT_SECRET`), and the others from `xana-pdt-credentials`, by variable name.
+  - It prints the kube context it reads from, so you can check it is the cluster you mean, and only variable names, never a value. It writes no file.
+  - A variable already set and not empty is kept, and exported if it wasn't, so `helmfile` sees it.
+  - A missing Secret or key is reported by name and skipped.
+  - Without `kubectl`, or when it can't read the namespace's Secrets, it exports nothing and the `source` fails with status 1. Under `set -e` that ends the shell; `source envs/iff-cluster.sh || true` goes on regardless.
+  - It needs bash. In zsh or another shell it stops with a message and exports nothing; run `bash`, then source it there.
+  - `IFF_NAMESPACE`, `IFF_ALERTA_SECRET`, `IFF_KEYCLOAK_CLIENT_SECRET` and `IFF_XANA_SECRET` change the namespace and Secret names.
+
+  `xana-pdt-credentials` is XANA's own Secret, which you create once, with a key per variable it should hold, for example:
+
+  ```bash
+  kubectl -n iff create secret generic xana-pdt-credentials \
+    --from-literal=SETTINGS_ENCRYPTION_KEY="$(openssl rand -base64 32)" \
+    --from-literal=EVENT_WEBHOOK_SECRET="$(openssl rand -hex 32)" \
+    --from-file=ANTHROPIC_API_KEY=./anthropic-key.txt
+  ```
+
+  Its keys can be any of `GATEWAY_CLIENT_SECRET`, `SETTINGS_ENCRYPTION_KEY`, `EVENT_WEBHOOK_SECRET`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY`; leave out the ones you don't use. Reading a key from a file keeps it out of your shell history.
 - **`secretLookups`** in the environment file makes the Pod read a variable from a Secret's key when it starts, so the value never passes through Helmfile:
 
   ```yaml
@@ -239,9 +256,11 @@ ANTHROPIC_API_KEY="$KEY" ./helmfile -e default apply
     - { variable: ALERTA_API_KEY, secret: alerta, key: alerta-admin-key }
   ```
 
-  A variable also given as a secret, from the file or the shell, is taken from there instead.
+  A variable also given as a secret, from the file or the shell, is taken from there instead. The render stops for a variable listed twice, and for one the chart sets itself: `DB_USER`, `DB_PASSWORD`, and a database URL it builds.
 
-The variables an earlier version read, `XANA_<NAME>` for these secrets and `XANA_EXISTING_SECRET`, `XANA_INGRESS_HOST`, `XANA_KEYCLOAK_URL`, `XANA_LANGFUSE_HOST` and `XANA_AUTO_ARCHIVE_AFTER_S`, are no longer read. If one is still set, the render stops and names what replaces it, without showing its value. Rename the secrets to `<NAME>`, and move the others into your environment file (`existingSecret` becomes `secretLookups` entries).
+The variables an earlier version read, `XANA_<NAME>` for these secrets and `XANA_EXISTING_SECRET`, `XANA_INGRESS_HOST`, `XANA_KEYCLOAK_URL`, `XANA_LANGFUSE_HOST` and `XANA_AUTO_ARCHIVE_AFTER_S`, are no longer read. If one is still set, the render stops and names what replaces it, without showing its value. Rename the secrets to `<NAME>`, and move the others into your environment file (`existingSecret` becomes `secretLookups` entries). An environment file that still sets `ingressClass`, `existingSecret` or `extraConfig` stops the render the same way: use `ingressClassName`, `secretLookups`, or each setting's own key.
+
+> **Warning: `TIMESCALE_DB_URL` and `POSTGRES_MEMORY_URL` in your shell are used.** They are the backend's own variable names, so a developer shell that has them set, for example for `docker compose`, hands them to `helmfile` too. They then go into the Secret and replace the URLs the chart builds from `databaseCredentialsSecret`, pointing the cluster's backend at your local database. Unset them before `apply`: `unset TIMESCALE_DB_URL POSTGRES_MEMORY_URL`.
 
 Never commit a secret. In CI, `test/check_values.py` checks that the committed environment files hold no secret value and no address outside the defaults and placeholders.
 
@@ -260,7 +279,7 @@ REGISTRY=<registry>/<path> IMAGE_TAG=1.2.3 ./build.sh
 
 It pushes `<registry>/<path>/xana-ai-pdt-backend:1.2.3` and `<registry>/<path>/xana-ai-pdt-frontend:1.2.3`, the names the chart renders from `imageRegistry: <registry>/<path>` and `imageTag: "1.2.3"` in your environment file.
 
-- `REGISTRY` defaults to `k3d-iff.localhost:12345` and `IMAGE_TAG` to `latest`. `REGISTRY` is a registry and optional path, `host[:port][/path…]`, with no spaces and lower-case path parts; a value that isn't stops the script before building, naming where it came from. To keep yours, copy `.env.example` at the repository root to `.env` (git-ignored); shell variables win over it. It is read as `KEY=VALUE` lines for those two keys only, never sourced or run.
+- `REGISTRY` defaults to `k3d-iff.localhost:12345` and `IMAGE_TAG` to `latest`. `REGISTRY` is a registry and optional path, `host[:port][/path…]`, with no spaces and lower-case path parts; a value that isn't stops the script before building, naming where it came from. To keep yours, copy `.env.example` at the repository root to `.env` (git-ignored); shell variables win over it. It is read as `KEY=VALUE` lines for those two keys only, never sourced or run; a leading `export ` and spaces around `=` are accepted.
 - `./build.sh backend` or `./build.sh frontend` builds one image; `--no-push` builds without pushing; `--help` shows the usage. It prints the registry, tag and names first, builds every selected image before pushing any, and stops at the first failure, saying what failed.
 - A registry served over plain HTTP under another name than `localhost`, such as k3d's, has to be listed in Docker's `insecure-registries` first.
 

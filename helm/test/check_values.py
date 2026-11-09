@@ -21,6 +21,7 @@ secret or a real host. Needs helm, and helm/helmfile (./bootstrap.sh) or helmfil
 The tables below are the design's: every key, and the variable it sets.
 """
 
+import ast
 import os
 import re
 import subprocess
@@ -81,6 +82,8 @@ ENVIRONMENTS = ("default", "production", "localAndIonos")
 RESERVED = (".invalid", ".example", ".test", ".local", ".localhost")
 PUBLIC_REGISTRY = "ghcr.io/industryfusion"
 SECRET_LIKE = re.compile(r"(?i)secret|password|token|apikey|key$")
+# Keys whose values are host names or addresses, with or without a scheme.
+ADDRESS_KEYS = ("Url", "Host", "Registry", "Origins", "Contexts")
 HOST = re.compile(r"(?:^|//|@)([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+)(?::\d+)?(?:[/?#]|$)")
 
 failures: list[str] = []
@@ -172,6 +175,57 @@ def check_old_variables_stop(helm_dir: Path) -> None:
     print(f"{len(OLD_VARIABLES)} old variables stop the render, naming their replacements: checked")
 
 
+# Backend settings without an environment key, as the design lists them, each with its reason.
+NO_KEY = {
+    "LANGFUSE_BASE_URL": "the same setting as LANGFUSE_HOST",
+    "BACKEND_HOST": "set by the chart",
+    "BACKEND_PORT": "set by the chart",
+    "BACKEND_RELOAD": "development only",
+    "POSTGRES_SSLROOTCERT": "set from databaseCaSecret",
+}
+
+
+def backend_settings(config: Path) -> set[str]:
+    """The variables the backend's Settings class reads: its fields, upper-cased."""
+    tree = ast.parse(config.read_text())
+    [settings] = [n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "Settings"]
+    return {
+        n.target.id.upper() for n in settings.body
+        if isinstance(n, ast.AnnAssign) and isinstance(n.target, ast.Name) and n.target.id != "model_config"
+    }
+
+
+def settings_problems(variables: set[str]) -> list[str]:
+    covered = set(SETTINGS.values()) | set(SECRETS.values())
+    found = [f"the backend reads {v}, which has no environment key and no listed reason" for v in
+             sorted(variables - covered - set(NO_KEY))]
+    found += [f"{v} has a key but the backend doesn't read it" for v in sorted((covered | set(NO_KEY)) - variables)]
+    return found
+
+
+def check_settings_cover_the_backend(helm_dir: Path) -> None:
+    variables = backend_settings(helm_dir.parent / "backend/app/config.py")
+    for problem in settings_problems(variables):
+        fail(problem)
+    # The check itself has to be able to fail.
+    if not settings_problems(variables | {"SOME_NEW_SETTING"}):
+        fail("the settings check doesn't catch a new backend setting without a key")
+    if not settings_problems(variables - {"LLM_MODEL"}):
+        fail("the settings check doesn't catch a key the backend no longer reads")
+    print(f"{len(variables)} backend settings, each with a key or a listed reason: checked")
+
+
+RETIRED_KEYS = {"ingressClass": "ingressClassName", "existingSecret": "secretLookups", "extraConfig": "its own key"}
+
+
+def check_retired_keys_stop(helm_dir: Path) -> None:
+    for old, new in RETIRED_KEYS.items():
+        result = helmfile(helm_dir, "default", values={old: "x"})
+        if result.returncode == 0 or f"{old} in the environment file is no longer read" not in result.stderr or new not in result.stderr:
+            fail(f"{old} in an environment file doesn't stop the render, naming {new}")
+    print(f"{len(RETIRED_KEYS)} retired environment keys stop the render, naming their replacements: checked")
+
+
 def committed_file_problems(name: str, values: dict) -> list[str]:
     found = []
     for key, value in (values or {}).items():
@@ -185,8 +239,8 @@ def committed_file_problems(name: str, values: dict) -> list[str]:
         if SECRET_LIKE.search(key) and key not in names_secrets:
             found.append(f"{name}: {key} is named like a secret but isn't one of the design's secret keys")
         if key == "imageRegistry" and text.rstrip("/") == PUBLIC_REGISTRY:
-            continue
-        if "://" not in text and not key.endswith(("Url", "Host")):
+            continue  # the published images, and nothing else on that registry
+        if "://" not in text and not key.endswith(ADDRESS_KEYS):
             continue  # not an address
         for host in HOST.findall(text):
             if not host.lower().endswith(RESERVED):
@@ -204,11 +258,19 @@ def check_committed_files(helm_dir: Path) -> None:
         "a secret value": {"anthropicApiKey": "sk-real"},
         "a secret-like key": {"someToken": "x"},
         "a real host": {"ngsiUrl": "http://scorpio.example.org:9090"},
+        "a real registry": {"imageRegistry": "registry.ionos.example-corp.com/xana"},
+        "another path on the public registry": {"imageRegistry": "ghcr.io/someone-else"},
+        "a real Ingress host": {"ingressHost": "xana.example-corp.com"},
+        "a real origin": {"wsAllowedOrigins": "https://xana.example-corp.com"},
     }
     for what, values in probes.items():
         if not committed_file_problems("probe", values):
             fail(f"the committed-file check doesn't catch {what}")
-    for fine in ({"pgrestUrl": "http://pgrest:3000"}, {"ingressHost": "xana.replace-me.invalid"}):
+    for fine in (
+        {"pgrestUrl": "http://pgrest:3000"}, {"ingressHost": "xana.replace-me.invalid"},
+        {"imageRegistry": "ghcr.io/industryfusion"}, {"imageRegistry": "registry.replace-me.invalid/xana"},
+        {"llmModel": "llama3.1"},
+    ):
         if committed_file_problems("probe", fine):
             fail(f"the committed-file check refuses {fine}")
     print("no secret or real host in committed environment files: checked")
@@ -221,6 +283,8 @@ def main() -> None:
         check_each_setting_reaches_its_variable,
         check_secrets_file_and_shell,
         check_old_variables_stop,
+        check_retired_keys_stop,
+        check_settings_cover_the_backend,
         check_committed_files,
     ):
         check(helm_dir)

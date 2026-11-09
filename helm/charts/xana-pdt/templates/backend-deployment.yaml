@@ -62,12 +62,7 @@ spec:
             - secretRef:
                 name: {{ include "xana-pdt.backend" . }}
             {{- end }}
-          {{- $lookups := list }}
-          {{- range .Values.backend.secretLookups }}
-          {{- if not (hasKey $given .variable) }}
-          {{- $lookups = append $lookups . }}
-          {{- end }}
-          {{- end }}
+          {{- $lookups := (include "xana-pdt.secretLookups" . | fromJson).lookups }}
           {{- $build := include "xana-pdt.buildsDatabaseUrls" . }}
           {{- if or $build $lookups }}
           env:
@@ -93,7 +88,7 @@ spec:
             {{- end }}
             {{- end }}
             {{- range $lookups }}
-            - name: {{ required "each of secretLookups needs a variable" .variable }}
+            - name: {{ .variable }}
               valueFrom:
                 secretKeyRef:
                   name: {{ required "each of secretLookups needs a secret" .secret }}

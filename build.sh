@@ -42,7 +42,8 @@ Builds the backend and frontend images (or the one named) and pushes them as
   -h, --help  this text
 
 REGISTRY defaults to k3d-iff.localhost:12345 and IMAGE_TAG to latest. Shell variables
-win over .env next to this script, which holds KEY=VALUE lines for those two keys.
+win over .env next to this script, which holds KEY=VALUE lines for those two keys
+(an optional leading "export " and spaces around = are allowed). It is read as data, never run.
 TEXT
 }
 
@@ -67,11 +68,13 @@ read_config() {
     number=$((number + 1))
     line="${line%$'\r'}"
     [[ "$line" =~ ^[[:space:]]*(#.*)?$ ]] && continue
-    if [[ ! "$line" =~ ^[[:space:]]*([A-Z_]+)=(.*)$ ]]; then
+    # A leading "export " and spaces around = are allowed, as in a file other tools read.
+    if [[ ! "$line" =~ ^[[:space:]]*(export[[:space:]]+)?([A-Z_]+)[[:space:]]*=[[:space:]]*(.*)$ ]]; then
       fail "$CONFIG line $number is not KEY=VALUE: $line"
     fi
-    key="${BASH_REMATCH[1]}"
-    value="${BASH_REMATCH[2]}"
+    key="${BASH_REMATCH[2]}"
+    value="${BASH_REMATCH[3]}"
+    value="${value%"${value##*[![:space:]]}"}"
     if [[ " $CONFIG_KEYS " != *" $key "* ]]; then
       fail "$CONFIG line $number sets $key; only $CONFIG_KEYS are read"
     fi

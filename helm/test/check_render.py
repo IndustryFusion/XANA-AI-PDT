@@ -102,6 +102,45 @@ def check_secret_lookups(chart: str) -> None:
     assert rendered["Secret/x-backend"]["stringData"]["OPENAI_API_KEY"] == SECRET_VALUE
 
 
+def render_error(chart: str, *settings: str) -> str:
+    flags = []
+    for setting in settings:
+        flags += ("--set-json", setting[5:]) if setting.startswith("json:") else ("--set", setting)
+    result = subprocess.run(["helm", "template", "x", chart, *flags], capture_output=True, text=True)
+    assert result.returncode != 0, f"rendered with {settings}"
+    return result.stderr
+
+
+def lookup(variable: str) -> str:
+    return '{"variable":"%s","secret":"s","key":"k"}' % variable
+
+
+def check_secret_lookups_refused(chart: str) -> None:
+    error = render_error(chart, f"json:backend.secretLookups=[{lookup('ALERTA_API_KEY')},{lookup('ALERTA_API_KEY')}]")
+    assert "secretLookups lists ALERTA_API_KEY more than once" in error, error
+    for variable in ("DB_USER", "DB_PASSWORD", "TIMESCALE_DB_URL", "POSTGRES_MEMORY_URL"):
+        error = render_error(chart, f"json:backend.secretLookups=[{lookup(variable)}]")
+        assert f"secretLookups can't set {variable}: the chart builds it" in error, error
+    # Given as a secret, the URL isn't built, so a lookup for it is skipped rather than refused.
+    render(chart, f"json:backend.secretLookups=[{lookup('TIMESCALE_DB_URL')}]",
+           f"backend.secret.TIMESCALE_DB_URL={SECRET_VALUE}")
+    # Without the operator's Secret, nothing is built and a lookup may set the URLs.
+    rendered = render(chart, "backend.postgresCredential.secret=",
+                      f"json:backend.secretLookups=[{lookup('TIMESCALE_DB_URL')},{lookup('POSTGRES_MEMORY_URL')}]")
+    assert env_names(backend_container(rendered)) == {"TIMESCALE_DB_URL", "POSTGRES_MEMORY_URL"}
+
+
+def check_notes_list_used_lookups(chart: str) -> None:
+    notes = subprocess.run(
+        ["helm", "install", "x", chart, "--dry-run=client",
+         "--set-json", f"backend.secretLookups=[{lookup('ALERTA_API_KEY')},{lookup('OPENAI_API_KEY')}]",
+         "--set", f"backend.secret.OPENAI_API_KEY={SECRET_VALUE}"],
+        check=True, capture_output=True, text=True,
+    ).stdout.split("NOTES:", 1)[1]
+    assert "ALERTA_API_KEY comes from key k of Secret s" in notes, notes
+    assert "OPENAI_API_KEY" not in notes, notes
+
+
 def check_no_secret_in_a_config_map(chart: str) -> None:
     for settings in (
         [f"backend.secret.ANTHROPIC_API_KEY={SECRET_VALUE}"],
@@ -203,6 +242,8 @@ CHECKS = (
     check_one_url_given,
     check_urls_given,
     check_secret_lookups,
+    check_secret_lookups_refused,
+    check_notes_list_used_lookups,
     check_no_secret_in_a_config_map,
     check_machine_events_settings,
     check_auto_archive_setting,

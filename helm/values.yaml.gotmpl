@@ -32,6 +32,14 @@
 {{- fail (printf "%s is no longer read: use %s instead (see helm/README.md)." $name (index $old $name)) }}
 {{- end }}
 {{- end }}
+{{- /* Keys the environment files used to have; one still set stops the render. */}}
+{{- $retired := dict "ingressClass" "use ingressClassName instead" "existingSecret" "use secretLookups instead"
+  "extraConfig" "give each setting its own key, as listed in helm/README.md" }}
+{{- range $key := keys $retired | sortAlpha }}
+{{- if hasKey $.Values $key }}
+{{- fail (printf "%s in the environment file is no longer read: %s." $key (index $retired $key)) }}
+{{- end }}
+{{- end }}
 {{- /* Settings: environment key, backend variable. */}}
 {{- $settings := list
   (list "llmProvider" "LLM_PROVIDER") (list "llmModel" "LLM_MODEL") (list "llmProviderName" "LLM_PROVIDER_NAME")
