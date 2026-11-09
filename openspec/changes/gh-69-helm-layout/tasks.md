@@ -30,3 +30,11 @@
 ## 6. Documents
 
 - [x] 6.1 `helm/README.md`: the layout, the environments, every key, the secrets and the steps; `architecture.md`, and the build section for `.env`; verify against the design's tables
+
+## 7. Review fixes
+
+- [ ] 7.1 Stop the render for a `secretLookups` variable listed twice or set by the chart itself; NOTES list only the lookups used; verify with `check_render.py`, and that it fails without the stop
+- [ ] 7.2 The committed-file check covers `imageRegistry` and every address key, with only `ghcr.io/industryfusion` exempt; the settings check reads `backend/app/config.py`; `ingressClass`, `existingSecret` and `extraConfig` in an environment file stop the render; verify each fails when undone
+- [ ] 7.3 `envs/iff-cluster.sh`: returns its status, exports a variable set but not exported, refuses a shell other than bash, prints the kube context; verify with `iff_cluster_test.sh` on the local test cluster
+- [ ] 7.4 `build.sh` accepts a leading `export ` and spaces around `=` in `.env`, and still runs nothing; verify with `build_test.sh`
+- [ ] 7.5 README: a shell variable wins only when set and non-empty; the database URL warning; creating `xana-pdt-credentials`; bash only; the `.env` forms

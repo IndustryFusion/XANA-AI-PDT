@@ -125,7 +125,7 @@ A database URL given as a secret (shell or file) is used as it is. Otherwise the
 
 Other cluster Secrets, into `backend.secretLookups`:
 
-`secretLookups` is a list of `{variable, secret, key}`, for example `{variable: ALERTA_API_KEY, secret: alerta, key: alerta-admin-key}`. Each becomes an environment variable read from that Secret's key when the Pod starts. A variable also given in `backend.secret` is taken from there, and its lookup is left out. Default: an empty list.
+`secretLookups` is a list of `{variable, secret, key}`, for example `{variable: ALERTA_API_KEY, secret: alerta, key: alerta-admin-key}`. Each becomes an environment variable read from that Secret's key when the Pod starts. A variable also given in `backend.secret` is taken from there, and its lookup is left out. A lookup for a variable the chart sets itself (`DB_USER`, `DB_PASSWORD`, and a database URL it builds from `postgresCredential`), or a variable listed twice, stops the render with a message naming it, so a Pod never gets two values for one name. Default: an empty list.
 
 Chart and release keys, not backend settings:
 
@@ -145,6 +145,10 @@ Keys dropped:
 - `extraConfig`: every setting now has its own key.
 - `existingSecret`: replaced by `secretLookups`.
 - `ingressClass`: renamed `ingressClassName`.
+
+An environment file that still sets one of them stops the render, naming what replaces it.
+
+A check reads the fields of the backend's `Settings` class from `backend/app/config.py`, and fails for a field with neither a key nor a reason in the list above, and for a key the backend no longer reads.
 
 ### `XANA_*` variables and `existingSecret`: replaced
 
@@ -167,11 +171,11 @@ It pins helmfile 1.1.9, the version CI uses, with the SHA-256 of each release ar
 
 ### `envs/iff-cluster.sh` (proposed Secrets and keys)
 
-It is sourced (`source envs/iff-cluster.sh`), so its exports reach the shell that runs `helmfile`. Without `kubectl`, or without access to the namespace, it says so and exports nothing.
+It is sourced from bash (`source envs/iff-cluster.sh`), so its exports reach the shell that runs `helmfile`. Another shell, such as zsh, is refused with a message before anything runs. Without `kubectl`, or without access to the namespace's Secrets, it says so, exports nothing and returns status 1, so `source envs/iff-cluster.sh || exit` can react; under `set -e` that ends the caller's shell.
 
-- **Never overwrites:** a variable already set in the shell is kept, so an operator can override any secret by exporting it first.
-- **No values shown or stored:** it writes nothing to disk. It prints only which variables it exported and which it didn't find, never a value.
-- **Safe to source:** it doesn't change the shell's options, so a missing Secret doesn't end the caller's shell.
+- **Never overwrites:** a variable already set and non-empty in the shell is kept, and exported if it wasn't, so it reaches `helmfile`. An operator can override any secret by setting it first.
+- **No values shown or stored:** it writes nothing to disk. It prints the kube context it reads from, and which variables it exported and which it didn't find, never a value.
+- **Safe to source:** it doesn't change the shell's options. A missing Secret or key is reported and skipped, and isn't a failure.
 
 | Variable | Secret, key (in namespace `IFF_NAMESPACE`, default `iff`) | Note |
 |---|---|---|
@@ -203,9 +207,9 @@ Alternative: generate the ConfigMap from the image's file with `.Files.Get`. A c
 The check covers `default.yaml`, `production.yaml` and `localAndIonos.yaml`:
 - Every secret key in the table above is empty.
 - No key outside that table is named like a secret.
-- Every host with a dot is under a reserved name: `.invalid`, `.example`, `.test`, `.local` or `.localhost`.
+- Every host with a dot is under a reserved name: `.invalid`, `.example`, `.test`, `.local` or `.localhost`. This covers every value with a scheme, and every key for an address with or without one: those ending in `Url`, `Host`, `Registry`, `Origins` or `Contexts`, such as `imageRegistry` and `ingressHost`.
 - A single-label in-cluster Service name, such as `pgrest`, is allowed.
-- `imageRegistry` may name the project's public registry, `ghcr.io/industryfusion`.
+- `imageRegistry` may be exactly the project's public registry, `ghcr.io/industryfusion`; another path on it is refused.
 
 The existing `localAndIonos` placeholder and inherited-address checks stay.
 
@@ -213,7 +217,7 @@ The existing `localAndIonos` placeholder and inherited-address checks stay.
 
 As the maintainer decided while reviewing this change: `build.sh` reads `REGISTRY` and `IMAGE_TAG` from a git-ignored `.env` at the repository root instead of `build.conf`. `build.conf` and `build.conf.example` are removed. The keys go into a new, committed `.env.example` at the root (there is none yet), with the header. Everything else stays:
 - shell variables still win;
-- `.env` is read as `KEY=VALUE` data for those two keys, never sourced or run;
+- `.env` is read as `KEY=VALUE` data for those two keys, never sourced or run; a leading `export ` and spaces around `=` are accepted, as other tools write them;
 - a line that isn't one of them stops the script, naming it;
 - the defaults stay `k3d-iff.localhost:12345` and `latest`.
 
