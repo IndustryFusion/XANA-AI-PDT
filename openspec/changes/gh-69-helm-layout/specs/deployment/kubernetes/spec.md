@@ -19,11 +19,11 @@
 - **WHEN** `REGISTRY=<host>/<path> IMAGE_TAG=1.2.3 ./build.sh` runs against a registry
 - **THEN** `<host>/<path>/xana-ai-pdt-backend:1.2.3` and `<host>/<path>/xana-ai-pdt-frontend:1.2.3` are in that registry
 
-#### Scenario: Settings file and shell
+#### Scenario: Config file and shell
 - **WHEN** `.env` sets the registry and tag, and the shell sets the tag too
 - **THEN** the registry from the file and the tag from the shell are used
 
-#### Scenario: A settings file it can't read
+#### Scenario: A config file it can't read
 - **WHEN** `.env` holds another key or a line that isn't `KEY=VALUE`
 - **THEN** the script stops before building, naming the line, and nothing in the file runs
 
