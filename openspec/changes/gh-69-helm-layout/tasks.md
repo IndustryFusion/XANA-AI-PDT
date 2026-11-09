@@ -23,6 +23,10 @@
 - [ ] 4.2 On the local test cluster: `postgresCredential` and a `secretLookups` entry resolve from its Secrets, and the smoke test passes through the frontend's ConfigMap
 - [ ] 4.3 `build.sh`'s chart test with the new value names; verify it passes and still fails with a wrong image name
 
-## 5. Documents
+## 5. Build script settings
 
-- [ ] 5.1 `helm/README.md`: the layout, the environments, every key, the secrets and the steps; and `architecture.md`; verify against the design's tables
+- [ ] 5.1 `build.sh` reads `.env` at the root instead of `build.conf`; remove `build.conf.example`; add the keys to a new root `.env.example`; `.gitignore` covers `.env`; verify with `helm/test/build_test.sh`, updated, including that a `.env` line can't run, and shellcheck
+
+## 6. Documents
+
+- [ ] 6.1 `helm/README.md`: the layout, the environments, every key, the secrets and the steps; `architecture.md`, and the build section for `.env`; verify against the design's tables

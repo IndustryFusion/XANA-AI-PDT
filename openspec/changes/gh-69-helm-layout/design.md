@@ -209,6 +209,16 @@ The check covers `default.yaml`, `production.yaml` and `localAndIonos.yaml`:
 
 The existing `localAndIonos` placeholder and inherited-address checks stay.
 
+### `build.sh` settings in the root `.env`
+
+As the maintainer decided while reviewing this change: `build.sh` reads `REGISTRY` and `IMAGE_TAG` from a git-ignored `.env` at the repository root instead of `build.conf`. `build.conf` and `build.conf.example` are removed. The keys go into a new, committed `.env.example` at the root (there is none yet), with the header. Everything else stays:
+- shell variables still win;
+- `.env` is read as `KEY=VALUE` data for those two keys, never sourced or run;
+- a line that isn't one of them stops the script, naming it;
+- the defaults stay `k3d-iff.localhost:12345` and `latest`.
+
+`.gitignore` covers `.env`. Only the root `.env` is read, so the backend's own `backend/.env` is unaffected.
+
 ### Steps for an operator
 
 1. Set the values in an environment file.

@@ -28,6 +28,7 @@ XANA's `helm/` differs from the layout the IndustryFusion platform (DigitalTwin,
 - **Frontend proxy configuration:** the chart adds `frontend-configmap.yaml` with the frontend's nginx configuration, the same as the template built into the image, mounted over it.
 - **Local test cluster:** `helm/test/` deploys `default` with a generated values file, which is not committed. CI renders the three environments and runs the smoke test as today.
 - **Checks:** a check fails if a committed environment file holds a secret or a real host.
+- **`build.sh` settings:** they move from `build.conf` to a git-ignored `.env` at the repository root, with the keys in a committed root `.env.example`; `build.conf` and `build.conf.example` are removed, as the maintainer decided.
 - **Documents:** `helm/README.md` documents the layout, the environments, every key, the secrets and the steps. `build.sh`'s chart test and `check_render.py` follow the new value names.
 
 ## Capabilities
@@ -48,7 +49,7 @@ None.
   - The chart's `values.yaml` and its backend Deployment, ConfigMap and Secret.
   - New `frontend-configmap.yaml`, and the frontend Deployment.
   - `test/` (`check_render.py`, `check_environments.py`, `build_test.sh`, the local cluster set-up), `README.md`.
-- `.gitignore`: `helm/helmfile`.
+- `.gitignore`: `helm/helmfile` and `.env`; `build.sh`, root `.env.example`, `build.conf.example` removed.
 - `.github/workflows/deployment.yml`: the environment list, the local cluster with the `default` environment, and the checks.
 - `architecture.md`: the deployment section.
 - No change to the backend or frontend code or images.
