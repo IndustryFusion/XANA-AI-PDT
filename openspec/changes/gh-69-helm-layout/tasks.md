@@ -19,7 +19,7 @@
 
 ## 4. Local cluster and CI
 
-- [ ] 4.1 The local test cluster on `default` with a generated values file, and CI rendering the three environments; verify on the Pull Request
+- [x] 4.1 The local test cluster on `default` with a generated values file, and CI rendering the three environments; verify on the Pull Request
 - [x] 4.2 On the local test cluster: `postgresCredential` and a `secretLookups` entry resolve from its Secrets, and the smoke test passes through the frontend's ConfigMap
 - [x] 4.3 `build.sh`'s chart test with the new value names; verify it passes and still fails with a wrong image name
 
