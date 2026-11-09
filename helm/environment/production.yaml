@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-# Set XANA_INGRESS_HOST in the shell, and the TLS Secret's name and image tag here.
+# Set ingressHost for your cluster, and the TLS Secret's name and image tag here.
 imageTag: v0.1.0
 imagePullPolicy: IfNotPresent
 ingressTlsSecret: xana-tls

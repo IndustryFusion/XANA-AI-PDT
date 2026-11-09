@@ -35,7 +35,7 @@ on:
       - "backend/db-init/**"
       - "helm/**"
       - "build.sh"
-      - "build.conf.example"
+      - ".env.example"
       - ".github/workflows/deployment.yml"
   push:
     branches: [main]
@@ -56,7 +56,7 @@ on:
       - "backend/db-init/**"
       - "helm/**"
       - "build.sh"
-      - "build.conf.example"
+      - ".env.example"
       - ".github/workflows/deployment.yml"
     tags: ["v*"]
 
@@ -65,7 +65,6 @@ permissions:
 
 env:
   IMAGE_PREFIX: ghcr.io/industryfusion/xana-ai-pdt
-  HELMFILE_VERSION: 1.1.9
 
 jobs:
   chart:
@@ -83,7 +82,7 @@ jobs:
           python helm/test/check_render.py helm/charts/xana-pdt
       - name: Check the build script
         run: |
-          shellcheck build.sh helm/test/build_test.sh
+          shellcheck build.sh helm/bootstrap.sh helm/envs/iff-cluster.sh helm/test/*.sh
           helm/test/build_test.sh
 
   # The documented install on a local cluster, with stand-ins for the platform's services.
@@ -95,24 +94,23 @@ jobs:
       - uses: azure/setup-helm@v4
         with:
           version: v3.17.3 # Helmfile 1.1 does not support Helm 4
-      - name: Install Helmfile
-        run: |
-          curl -fsSL "https://github.com/helmfile/helmfile/releases/download/v$HELMFILE_VERSION/helmfile_${HELMFILE_VERSION}_linux_amd64.tar.gz" \
-            | sudo tar -xz -C /usr/local/bin helmfile
+      - name: Install Helmfile, with the pinned bootstrap
+        working-directory: helm
+        run: ./bootstrap.sh
       - name: Check every environment renders
         working-directory: helm
         run: |
-          for environment in default production local localAndIonos; do
-            helmfile -e "$environment" template > /dev/null
+          for environment in default production localAndIonos; do
+            ./helmfile -e "$environment" template > /dev/null
           done
       - name: Check secrets from the shell reach the Secret, and never the ConfigMap
         working-directory: helm
         env:
-          XANA_ANTHROPIC_API_KEY: helmfile-test-value
+          ANTHROPIC_API_KEY: helmfile-test-value
         run: |
           pip install pyyaml
           for environment in default localAndIonos; do
-            helmfile -e "$environment" template > rendered.yaml
+            ./helmfile -e "$environment" template > rendered.yaml
             python - <<'EOF'
           import yaml
           docs = [d for d in yaml.safe_load_all(open("rendered.yaml")) if d]
@@ -122,6 +120,8 @@ jobs:
           EOF
           done
           rm rendered.yaml
+      - name: Check the environment keys, the values file and the old variables
+        run: python helm/test/check_values.py helm
       - name: Check the layering of localAndIonos, and that the check fails with the order reversed
         run: python helm/test/check_environments.py helm
       - uses: helm/kind-action@v1
@@ -146,13 +146,26 @@ jobs:
           kubectl -n iff create configmap xana-db-init --from-file=backend/db-init
           kubectl -n iff apply -f helm/test/stand-ins.yaml
           kubectl -n iff apply -f helm/test/sample-data.yaml
-      - name: Install the release
+      - name: The cluster-secrets helper
+        env:
+          IFF_NAMESPACE: iff
+        run: helm/test/iff_cluster_test.sh
+      - name: Install the release, on the default environment with the local test values
         working-directory: helm
-        run: helmfile -e local sync
+        run: |
+          test/local-values.sh > "$RUNNER_TEMP/local-values.yaml"
+          ./helmfile -e default --state-values-file "$RUNNER_TEMP/local-values.yaml" sync
       - name: All Pods reach ready
         run: |
           kubectl -n iff wait --for=condition=available deploy --all --timeout=600s
           kubectl -n iff wait --for=condition=complete job/xana-sample-data --timeout=600s
+      - name: Secrets from the cluster reach the backend
+        run: |
+          # secretLookups: EVENT_WEBHOOK_SECRET from a Secret of the test values.
+          test "$(kubectl -n iff exec deploy/xana-pdt-backend -- printenv EVENT_WEBHOOK_SECRET)" = local-test-webhook-secret
+          # The database URLs are built in the Pod from the operator's Secret.
+          kubectl -n iff exec deploy/xana-pdt-backend -- sh -c 'case "$TIMESCALE_DB_URL" in postgresql://*@acid-cluster:5432/tsdb*) ;; *) exit 1;; esac'
+          kubectl -n iff exec deploy/xana-pdt-backend -- sh -c 'case "$POSTGRES_MEMORY_URL" in postgresql://*@acid-cluster:5432/memory*) ;; *) exit 1;; esac'
       - name: A run and its live stream through the Ingress
         run: |
           pip install httpx websockets

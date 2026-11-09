@@ -20,7 +20,7 @@
 #   ./build.sh [--no-push] [all|backend|frontend]
 #
 # REGISTRY (default k3d-iff.localhost:12345) and IMAGE_TAG (default latest) come from the shell,
-# else from build.conf next to this script (see build.conf.example). Log in to the registry first.
+# else from .env next to this script, at the repository root (see .env.example). Log in to the registry first.
 set -euo pipefail
 
 readonly DEFAULT_REGISTRY="k3d-iff.localhost:12345"
@@ -28,7 +28,7 @@ readonly DEFAULT_TAG="latest"
 readonly CONFIG_KEYS="REGISTRY IMAGE_TAG"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly HERE
-CONFIG="$HERE/build.conf"
+CONFIG="$HERE/.env"
 readonly CONFIG
 
 usage() {
@@ -42,7 +42,8 @@ Builds the backend and frontend images (or the one named) and pushes them as
   -h, --help  this text
 
 REGISTRY defaults to k3d-iff.localhost:12345 and IMAGE_TAG to latest. Shell variables
-win over build.conf next to this script, which holds KEY=VALUE lines for those two keys.
+win over .env next to this script, which holds KEY=VALUE lines for those two keys
+(an optional leading "export " and spaces around = are allowed). It is read as data, never run.
 TEXT
 }
 
@@ -51,7 +52,7 @@ fail() {
   exit 1
 }
 
-# Reads build.conf as data: KEY=VALUE lines for the known keys, comments and blank lines.
+# Reads .env as data, never as shell code: KEY=VALUE lines for the known keys, comments and blank lines.
 # Sets file_REGISTRY and file_IMAGE_TAG, and the line of each in line_REGISTRY and line_IMAGE_TAG;
 # anything else stops the script, naming the line.
 file_REGISTRY=""
@@ -67,11 +68,13 @@ read_config() {
     number=$((number + 1))
     line="${line%$'\r'}"
     [[ "$line" =~ ^[[:space:]]*(#.*)?$ ]] && continue
-    if [[ ! "$line" =~ ^[[:space:]]*([A-Z_]+)=(.*)$ ]]; then
+    # A leading "export " and spaces around = are allowed, as in a file other tools read.
+    if [[ ! "$line" =~ ^[[:space:]]*(export[[:space:]]+)?([A-Z_]+)[[:space:]]*=[[:space:]]*(.*)$ ]]; then
       fail "$CONFIG line $number is not KEY=VALUE: $line"
     fi
-    key="${BASH_REMATCH[1]}"
-    value="${BASH_REMATCH[2]}"
+    key="${BASH_REMATCH[2]}"
+    value="${BASH_REMATCH[3]}"
+    value="${value%"${value##*[![:space:]]}"}"
     if [[ " $CONFIG_KEYS " != *" $key "* ]]; then
       fail "$CONFIG line $number sets $key; only $CONFIG_KEYS are read"
     fi

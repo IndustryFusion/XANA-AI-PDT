@@ -78,20 +78,29 @@ check "registry and tag from the shell, trailing slash dropped" eval '[[ $status
   "build -t reg.test:5000/team/xana-ai-pdt-backend:1.2.3 backend" "build -t reg.test:5000/team/xana-ai-pdt-frontend:1.2.3 frontend" \
   "push reg.test:5000/team/xana-ai-pdt-backend:1.2.3" "push reg.test:5000/team/xana-ai-pdt-frontend:1.2.3"'
 
-setup; printf '# mine\n\nREGISTRY=file.test:5000\nIMAGE_TAG="from-file"\n' >"$work/build.conf"; run ./build.sh --no-push backend
-check "values from build.conf" eval '[[ $status == 0 ]] && calls_are "build -t file.test:5000/xana-ai-pdt-backend:from-file backend"'
+setup; printf '# mine\n\nREGISTRY=file.test:5000\nIMAGE_TAG="from-file"\n' >"$work/.env"; run ./build.sh --no-push backend
+check "values from the .env file" eval '[[ $status == 0 ]] && calls_are "build -t file.test:5000/xana-ai-pdt-backend:from-file backend"'
 
-setup; printf 'REGISTRY=file.test:5000\nIMAGE_TAG=from-file\n' >"$work/build.conf"; run env IMAGE_TAG=from-shell ./build.sh --no-push backend
-check "a shell variable wins over build.conf" eval '[[ $status == 0 ]] && calls_are "build -t file.test:5000/xana-ai-pdt-backend:from-shell backend"'
+setup; printf 'REGISTRY=file.test:5000\nIMAGE_TAG=from-file\n' >"$work/.env"; run env IMAGE_TAG=from-shell ./build.sh --no-push backend
+check "a shell variable wins over the .env file" eval '[[ $status == 0 ]] && calls_are "build -t file.test:5000/xana-ai-pdt-backend:from-shell backend"'
 
-setup; printf 'REGISTRY=file.test:5000\nIMAGE_TAG=from-file\n' >"$work/build.conf"; run env REGISTRY=shell.test:5000 ./build.sh --no-push backend
-check "a shell registry wins over build.conf" eval '[[ $status == 0 ]] && calls_are "build -t shell.test:5000/xana-ai-pdt-backend:from-file backend"'
+setup; printf 'REGISTRY=file.test:5000\nIMAGE_TAG=from-file\n' >"$work/.env"; run env REGISTRY=shell.test:5000 ./build.sh --no-push backend
+check "a shell registry wins over the .env file" eval '[[ $status == 0 ]] && calls_are "build -t shell.test:5000/xana-ai-pdt-backend:from-file backend"'
 
-setup; printf 'REGISTRY=file.test\nPATH=/nowhere\n' >"$work/build.conf"; run ./build.sh
-check "another key in build.conf stops before building" eval '[[ $status != 0 ]] && grep -q "line 2 sets PATH" "$work/out" && [[ ! -s "$CALLS" ]]'
+setup; printf 'REGISTRY=file.test\nPATH=/nowhere\n' >"$work/.env"; run ./build.sh
+check "another key in the .env file stops before building" eval '[[ $status != 0 ]] && grep -q "line 2 sets PATH" "$work/out" && [[ ! -s "$CALLS" ]]'
 
-setup; printf 'REGISTRY=file.test\n$(touch %s/ran)\n' "$work" >"$work/build.conf"; run ./build.sh
+setup; printf 'REGISTRY=file.test\n$(touch %s/ran)\n' "$work" >"$work/.env"; run ./build.sh
 check "a line that isn't KEY=VALUE stops, and nothing in the file runs" eval '[[ $status != 0 ]] && grep -q "line 2 is not KEY=VALUE" "$work/out" && [[ ! -e "$work/ran" && ! -s "$CALLS" ]]'
+
+setup; printf 'export REGISTRY = file.test:5000  \nIMAGE_TAG= "spaced"\n' >"$work/.env"; run ./build.sh --no-push backend
+check "a leading export and spaces around = are accepted" eval '[[ $status == 0 ]] && calls_are "build -t file.test:5000/xana-ai-pdt-backend:spaced backend"'
+
+setup; printf 'export REGISTRY=$(touch %s/ran)\nIMAGE_TAG=`touch %s/ran`\n' "$work" "$work" >"$work/.env"; run ./build.sh
+check "code in an exported value doesn't run" eval '[[ $status != 0 ]] && grep -q "line 1 is not a registry" "$work/out" && [[ ! -e "$work/ran" && ! -s "$CALLS" ]]'
+
+setup; printf 'export PATH=/nowhere\n' >"$work/.env"; run ./build.sh
+check "export of another key stops" eval '[[ $status != 0 ]] && grep -q "line 1 sets PATH" "$work/out" && [[ ! -s "$CALLS" ]]'
 
 setup; run ./build.sh --no-push
 check "build only pushes nothing" eval '[[ $status == 0 ]] && ! grep -q "^push" "$CALLS" && [[ $(grep -c "^build" "$CALLS") == 2 ]]'
@@ -112,16 +121,16 @@ check "a failed build of the second image pushes neither" eval '[[ $status != 0 
 setup; run env STUB_FAIL="^push .*xana-ai-pdt-backend" ./build.sh
 check "a failed push stops with non-zero, naming it, and pushes nothing more" eval '[[ $status != 0 ]] && grep -q "pushing k3d-iff.localhost:12345/xana-ai-pdt-backend:latest failed" "$work/out" && ! grep -q "^push .*frontend" "$CALLS"'
 
-setup; printf 'REGISTRY=crlf.test:5000\r\nIMAGE_TAG=from-windows\r\n' >"$work/build.conf"; run ./build.sh --no-push backend
-check "a build.conf with Windows line ends is read" eval '[[ $status == 0 ]] && calls_are "build -t crlf.test:5000/xana-ai-pdt-backend:from-windows backend"'
+setup; printf 'REGISTRY=crlf.test:5000\r\nIMAGE_TAG=from-windows\r\n' >"$work/.env"; run ./build.sh --no-push backend
+check "a the .env file with Windows line ends is read" eval '[[ $status == 0 ]] && calls_are "build -t crlf.test:5000/xana-ai-pdt-backend:from-windows backend"'
 
 for bad in "reg:5000 # mine" "reg:5000 " "reg//" "reg:5000/a//b" "reg:5000/Team"; do
   setup; run env REGISTRY="$bad" ./build.sh
   check "REGISTRY '$bad' from the shell is refused before building, naming it" eval '[[ $status != 0 ]] && grep -qF "REGISTRY '"'"'${bad%/}'"'"' from the shell (REGISTRY) is not a registry" "$work/out" && [[ ! -s "$CALLS" ]]'
 done
 
-setup; printf '# mine\nREGISTRY=reg.test:5000 # mine\n' >"$work/build.conf"; run ./build.sh
-check "a bad REGISTRY in build.conf names its line" eval '[[ $status != 0 ]] && grep -q "from .*build.conf line 2 is not a registry" "$work/out" && [[ ! -s "$CALLS" ]]'
+setup; printf '# mine\nREGISTRY=reg.test:5000 # mine\n' >"$work/.env"; run ./build.sh
+check "a bad REGISTRY in the .env file names its line" eval '[[ $status != 0 ]] && grep -q "from .*/.env line 2 is not a registry" "$work/out" && [[ ! -s "$CALLS" ]]'
 
 setup; run env IMAGE_TAG="bad tag" ./build.sh
 check "an invalid tag stops before building" eval '[[ $status != 0 ]] && grep -q "not a valid image tag" "$work/out" && [[ ! -s "$CALLS" ]]'
@@ -130,7 +139,7 @@ check "an invalid tag stops before building" eval '[[ $status != 0 ]] && grep -q
 if command -v helm >/dev/null; then
   setup; run env REGISTRY=reg.test:5000/team IMAGE_TAG=1.2.3 ./build.sh --no-push
   chart="$(cd "$(dirname "$SCRIPT")" && pwd)/helm/charts/xana-pdt"
-  rendered="$(helm template x "$chart" --set image.registry=reg.test:5000/team --set image.tag=1.2.3 \
+  rendered="$(helm template x "$chart" --set imageRegistry=reg.test:5000/team --set imageTag=1.2.3 \
     | sed -n 's/^ *image: //p' | sort -u)"
   check "the chart renders the images the script builds" eval 'diff <(echo "$rendered") \
     <(sed -n "s/^build -t \([^ ]*\) .*/\1/p" "$CALLS" | sort -u) >/dev/null'

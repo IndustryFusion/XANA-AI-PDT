@@ -1,2 +1,4 @@
-# Settings of build.sh for this machine; see build.conf.example.
-build.conf
+# The pinned helmfile that helm/bootstrap.sh downloads.
+helm/helmfile
+# Settings of build.sh for this machine; see .env.example.
+.env

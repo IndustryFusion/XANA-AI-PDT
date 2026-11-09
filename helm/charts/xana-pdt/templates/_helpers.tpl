@@ -26,7 +26,7 @@ app.kubernetes.io/component: {{ .component }}
 {{- end }}
 
 {{- define "xana-pdt.image" -}}
-{{- printf "%s/%s:%s" .root.Values.image.registry .name (.root.Values.image.tag | default (printf "v%s" .root.Chart.AppVersion)) -}}
+{{- printf "%s/%s:%s" (trimSuffix "/" .root.Values.imageRegistry) .name (.root.Values.imageTag | default (printf "v%s" .root.Chart.AppVersion)) -}}
 {{- end }}
 
 {{- define "xana-pdt.backend" -}}
@@ -40,4 +40,43 @@ app.kubernetes.io/component: {{ .component }}
 {{/* Where the database's CA certificate is mounted, when one is named. */}}
 {{- define "xana-pdt.databaseCaPath" -}}
 /etc/xana/database-ca/ca.crt
+{{- end }}
+
+{{/* Whether the chart builds the database URLs from postgresCredential: not when both are given as secrets. */}}
+{{- define "xana-pdt.buildsDatabaseUrls" -}}
+{{- $s := .Values.backend.secret | default dict -}}
+{{- if and .Values.backend.postgresCredential.secret (not (and (hasKey $s "TIMESCALE_DB_URL") (hasKey $s "POSTGRES_MEMORY_URL"))) -}}
+true
+{{- end -}}
+{{- end }}
+
+{{- /*
+The secretLookups the backend uses, as JSON {"lookups": [...]}: those whose variable isn't given in
+backend.secret. Stops the render for a variable listed twice, or one the chart already sets itself.
+*/}}
+{{- define "xana-pdt.secretLookups" -}}
+{{- $given := .Values.backend.secret | default dict -}}
+{{- $set := list -}}
+{{- if include "xana-pdt.buildsDatabaseUrls" . -}}
+{{- $set = list "DB_USER" "DB_PASSWORD" -}}
+{{- range list "TIMESCALE_DB_URL" "POSTGRES_MEMORY_URL" -}}
+{{- if not (hasKey $given .) }}{{ $set = append $set . }}{{ end -}}
+{{- end -}}
+{{- end -}}
+{{- $seen := dict -}}
+{{- $used := list -}}
+{{- range .Values.backend.secretLookups | default list -}}
+{{- $variable := required "each of secretLookups needs a variable" .variable -}}
+{{- if hasKey $seen $variable -}}
+{{- fail (printf "secretLookups lists %s more than once; keep one entry." $variable) -}}
+{{- end -}}
+{{- $_ := set $seen $variable true -}}
+{{- if has $variable $set -}}
+{{- fail (printf "secretLookups can't set %s: the chart builds it from databaseCredentialsSecret. Give the database URLs as secrets instead, or remove the entry." $variable) -}}
+{{- end -}}
+{{- if not (hasKey $given $variable) -}}
+{{- $used = append $used . -}}
+{{- end -}}
+{{- end -}}
+{{- toJson (dict "lookups" $used) -}}
 {{- end }}

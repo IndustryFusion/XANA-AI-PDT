@@ -21,9 +21,9 @@ metadata:
 data:
   BACKEND_HOST: "0.0.0.0"
   BACKEND_PORT: "8000"
-  {{- if .Values.database.caCert.secret }}
+  {{- if .Values.backend.postgresCredential.caSecret }}
   POSTGRES_SSLROOTCERT: {{ include "xana-pdt.databaseCaPath" . | quote }}
   {{- end }}
-  {{- range $key, $value := .Values.config }}
+  {{- range $key, $value := .Values.backend.config }}
   {{ $key }}: {{ $value | toString | quote }}
   {{- end }}
