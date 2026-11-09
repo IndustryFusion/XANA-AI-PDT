@@ -21,8 +21,10 @@ nginx configuration.
 Needs Helm and PyYAML.
 """
 
+import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import yaml
@@ -130,13 +132,30 @@ def check_secret_lookups_refused(chart: str) -> None:
     assert env_names(backend_container(rendered)) == {"TIMESCALE_DB_URL", "POSTGRES_MEMORY_URL"}
 
 
+def render_notes(chart: str, *flags: str) -> str:
+    """Renders NOTES.txt offline: helm template leaves it out, so a copy of the chart includes it in a ConfigMap."""
+    with tempfile.TemporaryDirectory() as work:
+        copy = Path(work) / "chart"
+        shutil.copytree(chart, copy)
+        notes = (copy / "templates/NOTES.txt").read_text()
+        (copy / "templates/_notes_check.tpl").write_text('{{- define "notes-check" -}}' + notes + "{{- end }}")
+        (copy / "templates/notes-check.yaml").write_text(
+            'apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: notes-check\n'
+            'data:\n  notes: {{ include "notes-check" . | quote }}\n'
+        )
+        output = subprocess.run(
+            ["helm", "template", "x", str(copy), "--show-only", "templates/notes-check.yaml", *flags],
+            check=True, capture_output=True, text=True,
+        ).stdout
+    return yaml.safe_load(output)["data"]["notes"]
+
+
 def check_notes_list_used_lookups(chart: str) -> None:
-    notes = subprocess.run(
-        ["helm", "install", "x", chart, "--dry-run=client",
-         "--set-json", f"backend.secretLookups=[{lookup('ALERTA_API_KEY')},{lookup('OPENAI_API_KEY')}]",
-         "--set", f"backend.secret.OPENAI_API_KEY={SECRET_VALUE}"],
-        check=True, capture_output=True, text=True,
-    ).stdout.split("NOTES:", 1)[1]
+    notes = render_notes(
+        chart,
+        "--set-json", f"backend.secretLookups=[{lookup('ALERTA_API_KEY')},{lookup('OPENAI_API_KEY')}]",
+        "--set", f"backend.secret.OPENAI_API_KEY={SECRET_VALUE}",
+    )
     assert "ALERTA_API_KEY comes from key k of Secret s" in notes, notes
     assert "OPENAI_API_KEY" not in notes, notes
 
