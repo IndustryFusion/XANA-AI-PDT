@@ -16,7 +16,7 @@
 
 ## 4. Local test cluster and CI
 
-- [ ] 4.1 Stand-ins in `iff` with a password needing encoding, the lookup Secret in `xana-pdt`, XANA in `xana-pdt` after sourcing the helper; CI's render steps with test credentials; verify on a local kind cluster with an explicit KUBECONFIG, then on the Pull Request
+- [x] 4.1 Stand-ins in `iff` with a password needing encoding, the lookup Secret in `xana-pdt`, XANA in `xana-pdt` after sourcing the helper; CI's render steps with test credentials; verify on a local kind cluster with an explicit KUBECONFIG, then on the Pull Request
 - [x] 4.2 CI checks on that cluster: the backend ready, no Secret it doesn't render, URLs naming `acid-cluster.iff`, the lookup, the smoke test and the restart
 
 ## 5. Documents
