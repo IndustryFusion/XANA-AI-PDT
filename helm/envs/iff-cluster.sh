@@ -14,23 +14,34 @@
 # limitations under the License.
 #
 # shellcheck shell=bash
-# Source this from bash before helmfile: it reads the backend's secrets from the IFF cluster's Secrets with kubectl and
-# exports them under the backend's variable names, for helm/values.yaml.gotmpl.
+# Source this from bash before helmfile: it reads the backend's secrets from the cluster's Secrets with kubectl and
+# exports them under the backend's variable names, for helm/values.yaml.gotmpl. It is optional: apply reads the
+# same Secrets itself.
+#
+# Which Secret it reads where:
+#   XANA's own, in XANA_NAMESPACE (default xana-pdt):
+#     xana-pdt-credentials: GATEWAY_CLIENT_SECRET, SETTINGS_ENCRYPTION_KEY, EVENT_WEBHOOK_SECRET,
+#                           ANTHROPIC_API_KEY, OPENAI_API_KEY, LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY
+#   The platform's, in IFF_NAMESPACE (default iff):
+#     alerta: ALERTA_API_KEY; keycloak-client-secret-xana: KEYCLOAK_SERVICE_CLIENT_SECRET;
+#     ngb.acid-cluster.credentials: DATABASE_USERNAME, DATABASE_PASSWORD
 #
 #   source helm/envs/iff-cluster.sh
 #
 # A variable already set and non-empty in the shell is kept, and exported so helmfile sees it. Nothing is
-# written to disk, and only variable names and the kube context are printed.
+# written to disk, and only variable names, the two namespaces and the kube context are printed.
 # The database operator's credentials are exported as DATABASE_USERNAME and DATABASE_PASSWORD; the chart keeps
 # them in a Secret in XANA's namespace and builds the database URLs from it in the Pod. After a password change
 # on the platform, source this again in a new shell (or after unsetting them), then apply again.
 #
-# Overrides, all optional: IFF_NAMESPACE (default iff), and the Secrets' names IFF_ALERTA_SECRET (default alerta),
+# Overrides, all optional: XANA_NAMESPACE (default xana-pdt), IFF_NAMESPACE (default iff), and the Secrets' names
+# IFF_ALERTA_SECRET (default alerta),
 # IFF_KEYCLOAK_CLIENT_SECRET (default keycloak-client-secret-xana), IFF_XANA_SECRET (default xana-pdt-credentials)
 # and IFF_DATABASE_SECRET (default ngb.acid-cluster.credentials).
 #
 # It changes no shell option. A missing Secret or key is reported and skipped, and doesn't count as a failure.
-# Sourcing fails (status 1), exporting nothing, when kubectl is missing or the namespace's Secrets can't be read,
+# A namespace whose Secrets can't be read has its variables reported as not found. Sourcing fails (status 1),
+# exporting nothing, when kubectl is missing or neither namespace's Secrets can be read,
 # and when the shell isn't bash (zsh and others are refused with a message before anything runs). Under set -e
 # that ends the shell that sources it; to go on regardless, use
 #   source helm/envs/iff-cluster.sh || true
@@ -73,6 +84,8 @@ _iff_secret_into() {
 
 _iff_export_secrets() {
   local _iff_namespace="${IFF_NAMESPACE:-iff}"
+  local xana_namespace="${XANA_NAMESPACE:-xana-pdt}"
+  local platform_namespace="$_iff_namespace"
   local alerta="${IFF_ALERTA_SECRET:-alerta}"
   local client="${IFF_KEYCLOAK_CLIENT_SECRET:-keycloak-client-secret-xana}"
   local own="${IFF_XANA_SECRET:-xana-pdt-credentials}"
@@ -81,15 +94,26 @@ _iff_export_secrets() {
     echo "iff-cluster.sh: kubectl is not installed; nothing was exported." >&2
     return 1
   fi
-  if ! kubectl -n "$_iff_namespace" get secrets -o name >/dev/null 2>&1; then
-    echo "iff-cluster.sh: can't read Secrets in namespace $_iff_namespace (cluster: $(kubectl config current-context 2>/dev/null || echo none)); nothing was exported." >&2
+  local context readable=0 namespace
+  context="$(kubectl config current-context 2>/dev/null || echo none)"
+  for namespace in "$platform_namespace" "$xana_namespace"; do
+    if kubectl -n "$namespace" get secrets -o name >/dev/null 2>&1; then
+      readable=$((readable + 1))
+    else
+      echo "iff-cluster.sh: can't read Secrets in namespace $namespace; its variables are reported as not found." >&2
+    fi
+  done
+  if [[ $readable == 0 ]]; then
+    echo "iff-cluster.sh: can't read Secrets in namespace $platform_namespace or $xana_namespace (cluster: $context); nothing was exported." >&2
     return 1
   fi
-  echo "Secrets of namespace $_iff_namespace, kube context $(kubectl config current-context 2>/dev/null || echo none):"
+  echo "The platform's Secrets, in namespace $platform_namespace, kube context $context:"
   _iff_secret_into ALERTA_API_KEY "$alerta" alerta-admin-key
   _iff_secret_into KEYCLOAK_SERVICE_CLIENT_SECRET "$client" CLIENT_SECRET
   _iff_secret_into DATABASE_USERNAME "$database" username
   _iff_secret_into DATABASE_PASSWORD "$database" password
+  echo "XANA's own Secret, in namespace $xana_namespace:"
+  _iff_namespace="$xana_namespace"
   local variable
   for variable in GATEWAY_CLIENT_SECRET SETTINGS_ENCRYPTION_KEY EVENT_WEBHOOK_SECRET ANTHROPIC_API_KEY \
     OPENAI_API_KEY LANGFUSE_PUBLIC_KEY LANGFUSE_SECRET_KEY; do

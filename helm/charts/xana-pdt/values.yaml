@@ -68,12 +68,14 @@ backend:
     # The database operator's Secret, with keys username and password, read in platformNamespace when
     # deploying unless databaseCredentials are given. Its values are stored percent-encoded in the chart's Secret.
     secret: ngb.acid-cluster.credentials
+    # Where that Secret is: $platformNamespace, $namespace (the release's) or a namespace's name.
+    namespace: $platformNamespace
     # A Secret holding the database's CA certificate as ca.crt, for POSTGRES_SSLMODE verify-ca or verify-full.
     # It is mounted, and POSTGRES_SSLROOTCERT points at it.
     caSecret: ""
-  # Variables read when deploying from a key of a Secret, in `namespace` or else platformNamespace, and copied
-  # into the backend's Secret:
-  #   - { variable: ALERTA_API_KEY, secret: alerta, key: alerta-admin-key }
+  # Variables read when deploying from a key of a Secret, and copied into the backend's Secret. `namespace` is
+  # $namespace (the release's), $platformNamespace, or a namespace's name; without it, platformNamespace:
+  #   - { variable: ALERTA_API_KEY, secret: alerta, key: alerta-admin-key, namespace: $platformNamespace }
   # A variable also in `secret` is taken from there.
   secretLookups: []
 
