@@ -104,7 +104,7 @@ jobs:
           DATABASE_USERNAME: render-check
           DATABASE_PASSWORD: render-check
         run: |
-          for environment in default production localAndIonos; do
+          for environment in default production; do
             ./helmfile -e "$environment" template > /dev/null
           done
       - name: Check secrets from the shell reach the Secret, and never the ConfigMap
@@ -115,7 +115,7 @@ jobs:
           DATABASE_PASSWORD: render-check
         run: |
           pip install pyyaml
-          for environment in default localAndIonos; do
+          for environment in default production; do
             ./helmfile -e "$environment" template > rendered.yaml
             python - <<'EOF'
           import base64, yaml
@@ -128,7 +128,7 @@ jobs:
           rm rendered.yaml
       - name: Check the environment keys, the values file and the old variables
         run: python helm/test/check_values.py helm
-      - name: Check the layering of localAndIonos, and that the check fails with the order reversed
+      - name: Check the layering of production, its overrides only, and that -e localAndIonos stops
         run: python helm/test/check_environments.py helm
       - uses: helm/kind-action@v1
         with:
@@ -158,13 +158,10 @@ jobs:
         env:
           IFF_NAMESPACE: iff
         run: helm/test/iff_cluster_test.sh
-      - name: Install the release in xana-pdt, on the default environment with the local test values
+      - name: Install the release in xana-pdt, on the default environment with the local test values; the platform's Secrets are read when deploying
         working-directory: helm
         run: |
           test/local-values.sh > "$RUNNER_TEMP/local-values.yaml"
-          source envs/iff-cluster.sh
-          # The stand-ins have no Keycloak, so the service client the helper's test Secret names can't be used.
-          unset KEYCLOAK_SERVICE_CLIENT_SECRET
           ./helmfile -e default --state-values-file "$RUNNER_TEMP/local-values.yaml" sync
       - name: All Pods reach ready
         run: |

@@ -67,15 +67,20 @@ SECRETS = {
 # keeps them in a Secret of its own, and the Pod builds the database URLs from them.
 CREDENTIALS = {"databaseUsername": "DATABASE_USERNAME", "databasePassword": "DATABASE_PASSWORD"}
 TEST_CREDENTIALS = {"DATABASE_USERNAME": "check", "DATABASE_PASSWORD": "check"}
-# The platform's addresses: an empty key is the platform's Service in platformNamespace.
+# The platform's addresses, written out in full in Section 1 of default.yaml.
 PLATFORM = {
-    "ngsiUrl": ("NGSI_URL", "http://scorpio-all-in-one-runner.{}:9090"),
-    "pgrestUrl": ("PGREST_URL", "http://pgrest.{}:3000"),
-    "alertaUrl": ("ALERTA_URL", "http://alerta.{}:8080/api"),
-    "fusekiUrl": ("FUSEKI_URL", "http://fuseki.{}:3030"),
-    "mqttBrokerUrl": ("MQTT_BROKER_URL", "mqtt://emqx-listeners.{}:1883"),
-    "mqttMgmtUrl": ("MQTT_MGMT_URL", "http://emqx-dashboard.{}:18083"),
+    "ngsiUrl": "NGSI_URL", "pgrestUrl": "PGREST_URL", "alertaUrl": "ALERTA_URL", "fusekiUrl": "FUSEKI_URL",
+    "mqttBrokerUrl": "MQTT_BROKER_URL", "mqttMgmtUrl": "MQTT_MGMT_URL", "databaseHost": None,
+    "callbackBaseUrl": "CALLBACK_BASE_URL",
 }
+# The sections of default.yaml, as the design lists them.
+SECTION_HEADERS = ("# 1. FILLED IN FOR YOU", "# 2. FILL IN FOR YOUR CLUSTER", "# 3. SECRETS")
+SECTION_2 = {
+    "ingressHost", "ingressClassName", "ingressTlsSecret", "keycloakUrl", "factoryId", "keycloakServiceClientId",
+    "llmProvider", "llmModel", "llmProviderName", "ollamaUrl", "openaiBaseUrl", "gatewayUrl", "gatewayKeycloakUrl",
+    "gatewayClientId", "ifricUrl", "fusekiGraphBase", "langfuseHost",
+}
+LOOKUP_KEYS = {"databaseCredentialsSecret", "secretLookups"}
 DATABASE = {
     "databaseHost", "databasePort", "databaseTimeseriesName", "databaseMemoryName", "databaseCredentialsSecret",
     "databaseCaSecret",
@@ -93,8 +98,8 @@ OLD_VARIABLES = {
     "XANA_KEYCLOAK_URL": "keycloakUrl", "XANA_LANGFUSE_HOST": "langfuseHost",
     "XANA_AUTO_ARCHIVE_AFTER_S": "autoArchiveAfterS",
 }
-ENVIRONMENTS = ("default", "production", "localAndIonos")
-RESERVED = (".invalid", ".example", ".test", ".local", ".localhost")
+ENVIRONMENTS = ("default", "production")
+RESERVED = (".invalid", ".example", ".test", ".local", ".localhost")  # .svc.cluster.local is under .local
 PUBLIC_REGISTRY = "ghcr.io/industryfusion"
 SECRET_LIKE = re.compile(r"(?i)secret|password|token|apikey|key$")
 # Keys whose values are host names or addresses, with or without a scheme.
@@ -125,6 +130,7 @@ def helmfile(helm_dir: Path, environment: str, values: dict | None = None, env: 
     }
     if credentials:
         clean |= TEST_CREDENTIALS
+    clean["KUBECONFIG"] = os.devnull  # offline: the chart reads no cluster
     try:
         return subprocess.run(
             [*command, "template"], cwd=helm_dir, capture_output=True, text=True, env=clean | (env or {})
@@ -162,8 +168,13 @@ def check_keys_known(helm_dir: Path) -> None:
 
 
 def check_each_setting_reaches_its_variable(helm_dir: Path) -> None:
-    marks = {key: f"mark-{n}" for n, key in enumerate(SETTINGS)}
-    rendered = documents(helmfile(helm_dir, "default", values=marks))
+    # Marks that pass the chart's checks: plain names, and Alerta's address ending in /api. The secrets the
+    # marked settings need come from the shell.
+    marks = {key: f"mark{n}" for n, key in enumerate(SETTINGS)}
+    marks["alertaUrl"] = "http://mark/api"
+    needed = {"KEYCLOAK_SERVICE_CLIENT_SECRET": "x", "EVENT_WEBHOOK_SECRET": "x", "OPENAI_API_KEY": "x",
+              "ANTHROPIC_API_KEY": "x", "SETTINGS_ENCRYPTION_KEY": "r8kO0dYd9Oq6K3WkLz8m2N1pQ4sT7vX0yB5cE8fH2jA="}
+    rendered = documents(helmfile(helm_dir, "default", values=marks, env=needed))
     config = rendered["ConfigMap/xana-pdt-backend"]["data"]
     for key, variable in SETTINGS.items():
         if config.get(variable) != marks[key]:
@@ -171,14 +182,23 @@ def check_each_setting_reaches_its_variable(helm_dir: Path) -> None:
     print("each setting reaches its variable: checked")
 
 
+def secret_value(prefix: str, key: str, n: int) -> str:
+    """A test value for a secret; the encryption key has the form the chart checks for."""
+    if key == "settingsEncryptionKey":
+        return (prefix + "A" * 43)[:43] + "="
+    return f"{prefix}-{n}"
+
+
 def check_secrets_file_and_shell(helm_dir: Path) -> None:
-    from_file = {key: f"file-{n}" for n, key in enumerate(SECRETS)}
+    from_file = {key: secret_value("file", key, n) for n, key in enumerate(SECRETS)}
+    # The service client's secret needs its ID and Keycloak, as the backend checks.
+    from_file |= {"keycloakServiceClientId": "xana-events", "keycloakUrl": "https://keycloak.example.org/auth"}
     rendered = documents(helmfile(helm_dir, "default", values=from_file))
     secret = rendered["Secret/xana-pdt-backend"]["stringData"]
     for key, variable in SECRETS.items():
         if secret.get(variable) != from_file[key]:
             fail(f"{key} in the file doesn't reach the Secret as {variable}")
-    from_shell = {variable: f"shell-{n}" for n, variable in enumerate(SECRETS.values())}
+    from_shell = {variable: secret_value("shell", key, n) for n, (key, variable) in enumerate(SECRETS.items())}
     rendered = documents(helmfile(helm_dir, "default", values=from_file, env=from_shell))
     secret = rendered["Secret/xana-pdt-backend"]["stringData"]
     for variable, value in from_shell.items():
@@ -186,12 +206,48 @@ def check_secrets_file_and_shell(helm_dir: Path) -> None:
             fail(f"the shell's {variable} doesn't win over the file")
     for name, document in rendered.items():
         text = str(document) if name.startswith("ConfigMap/") else ""
-        if any(v in text for v in [*from_shell.values(), *from_file.values()]):
+        if any(v in text for v in [*from_shell.values(), *(from_file[k] for k in SECRETS)]):
             fail(f"a secret is in {name}")
     deployment = rendered["Deployment/xana-pdt-backend"]["spec"]["template"]["spec"]["containers"][0]
     if "env" in deployment:
         fail("database URLs given as secrets are still built from postgresCredential")
     print("secrets from the file and the shell, the shell winning, none in a ConfigMap: checked")
+
+
+def check_langfuse_address(helm_dir: Path) -> None:
+    for env, want in (({"LANGFUSE_BASE_URL": "https://base.example.org"}, "https://base.example.org"),
+                      ({"LANGFUSE_HOST": "https://host.example.org"}, "https://host.example.org"),
+                      ({"LANGFUSE_HOST": "https://same.example.org", "LANGFUSE_BASE_URL": "https://same.example.org/"},
+                       "https://same.example.org")):
+        config = backend_config(helm_dir, env=env, values={"langfuseHost": "https://file.example.org"})
+        if config.get("LANGFUSE_HOST") != want:
+            fail(f"{env} gives LANGFUSE_HOST {config.get('LANGFUSE_HOST')!r}, not {want}")
+        if "LANGFUSE_BASE_URL" in config:
+            fail("the chart passes LANGFUSE_BASE_URL; it passes only LANGFUSE_HOST")
+    result = helmfile(helm_dir, "default", env={"LANGFUSE_HOST": "https://a.example.org", "LANGFUSE_BASE_URL": "https://b.example.org"})
+    if result.returncode == 0 or "LANGFUSE_HOST and LANGFUSE_BASE_URL name different addresses" not in result.stderr:
+        fail("different LANGFUSE_HOST and LANGFUSE_BASE_URL don't stop the render")
+    print("LANGFUSE_HOST or LANGFUSE_BASE_URL from the shell, the same or the render stops: checked")
+
+
+def check_secrets_from_an_env_file(helm_dir: Path) -> None:
+    """The README's way: an env file sourced with set -a, then helmfile. Its values win over the file's."""
+    with tempfile.TemporaryDirectory() as work:
+        env_file = Path(work) / "my-secrets.env"
+        env_file.write_text("EVENT_WEBHOOK_SECRET=from-env-file\nDATABASE_USERNAME=env-user\nDATABASE_PASSWORD='env p@ss'\n")
+        binary = str(helm_dir / "helmfile") if (helm_dir / "helmfile").exists() else "helmfile"
+        clean = {k: v for k, v in os.environ.items() if k not in SECRETS.values() and k not in CREDENTIALS.values()}
+        result = subprocess.run(
+            ["bash", "-c", 'set -a; source "$1"; set +a; "$2" -e default --state-values-set eventWebhookSecret=from-file template',
+             "_", str(env_file), binary],
+            cwd=helm_dir, capture_output=True, text=True, env=clean | {"KUBECONFIG": os.devnull},
+        )
+    rendered = documents(result)
+    if rendered["Secret/xana-pdt-backend"]["stringData"].get("EVENT_WEBHOOK_SECRET") != "from-env-file":
+        fail("a secret from an env file sourced with set -a doesn't win over the environment file's")
+    if rendered["Secret/xana-pdt-database"]["stringData"] != {"username": "env-user", "password": "env%20p%40ss"}:
+        fail("the database credentials from an env file sourced with set -a don't reach the chart's Secret")
+    print("secrets from an env file sourced with set -a, winning over the file: checked")
 
 
 def check_old_variables_stop(helm_dir: Path) -> None:
@@ -206,7 +262,7 @@ def check_old_variables_stop(helm_dir: Path) -> None:
 
 # Backend settings without an environment key, as the design lists them, each with its reason.
 NO_KEY = {
-    "LANGFUSE_BASE_URL": "the same setting as LANGFUSE_HOST",
+    "LANGFUSE_BASE_URL": "the same setting as LANGFUSE_HOST; accepted from the shell for langfuseHost",
     "BACKEND_HOST": "set by the chart",
     "BACKEND_PORT": "set by the chart",
     "BACKEND_RELOAD": "development only",
@@ -258,21 +314,79 @@ def check_platform_addresses(helm_dir: Path) -> None:
     default = yaml.safe_load((helm_dir / "environment/default.yaml").read_text())
     if default.get("namespace") != "xana-pdt" or default.get("platformNamespace") != "iff":
         fail("default.yaml: namespace isn't xana-pdt, or platformNamespace isn't iff")
-    for namespace, values in (("iff", None), ("platform", {"platformNamespace": "platform"})):
+    for key in PLATFORM:
+        host = urllib.parse.urlsplit(str(default.get(key)) if "://" in str(default.get(key)) else f"x://{default.get(key)}")
+        if not (host.hostname or "").endswith(".svc.cluster.local"):
+            fail(f"default.yaml: {key} isn't written out as <service>.<namespace>.svc.cluster.local: {default.get(key)!r}")
+    # platformNamespace changes no address: each is used as written.
+    for values in (None, {"platformNamespace": "platform"}):
         config = backend_config(helm_dir, values=values)
-        for key, (variable, form) in PLATFORM.items():
-            if config.get(variable) != form.format(namespace):
-                fail(f"{key} with platformNamespace {namespace} is {config.get(variable)!r}, not {form.format(namespace)}")
+        for key, variable in PLATFORM.items():
+            if variable and config.get(variable) != default[key]:
+                fail(f"{key} with {values} renders {config.get(variable)!r}, not {default[key]!r}")
         for variable, url in database_urls(helm_dir, values=values).items():
-            if f"@acid-cluster.{namespace}:5432/" not in (url or ""):
-                fail(f"{variable} with platformNamespace {namespace} is {url!r}")
-    given = {"platformNamespace": "platform", "ngsiUrl": "http://given:1", "databaseHost": "db.given"}
+            if f"@{default['databaseHost']}:5432/" not in (url or ""):
+                fail(f"{variable} with {values} is {url!r}")
+    given = {"ngsiUrl": "http://given:1", "databaseHost": "db.given"}
     config = backend_config(helm_dir, values=given)
     if config.get("NGSI_URL") != "http://given:1":
         fail("a given ngsiUrl isn't used as given")
     if not all("@db.given:5432/" in (url or "") for url in database_urls(helm_dir, values=given).values()):
         fail("a given databaseHost isn't used as given")
-    print("platform addresses from platformNamespace, given ones as given: checked")
+    print("platform addresses written out in full, used as written, whatever platformNamespace is: checked")
+
+
+def section_problems(text: str) -> list[str]:
+    """The sections of default.yaml, the key placement, and each key's comments."""
+    found = []
+    positions = [text.find(h) for h in SECTION_HEADERS]
+    if -1 in positions or positions != sorted(positions):
+        return [f"default.yaml: the section headers {SECTION_HEADERS} aren't all there, in order"]
+    parts = [text[positions[0]:positions[1]], text[positions[1]:positions[2]], text[positions[2]:]]
+    expected_3 = set(SECRETS) | set(CREDENTIALS) | LOOKUP_KEYS
+    for number, part in enumerate(parts, 1):
+        lines = part.splitlines()
+        for index, line in enumerate(lines):
+            match = re.match(r"^([A-Za-z][A-Za-z0-9]*):", line)
+            if not match:
+                continue
+            key = match.group(1)
+            want = 2 if key in SECTION_2 else 3 if key in expected_3 else 1
+            if want != number:
+                found.append(f"default.yaml: {key} is in Section {number}, not Section {want}")
+            comments = []
+            for previous in reversed(lines[:index]):
+                if not previous.startswith("#"):
+                    break
+                comments.insert(0, previous)
+            block = "\n".join(comments)
+            if number == 2 and not ("Example:" in block and "If empty:" in block):
+                found.append(f"default.yaml: {key} in Section 2 lacks its Example: or If empty: line")
+            if number == 3 and key in set(SECRETS) | set(CREDENTIALS):
+                variable = SECRETS.get(key) or CREDENTIALS[key]
+                if not comments or comments[0] != f"# {variable}" or not all(
+                    f"#   {label}:" in block for label in ("For", "Required", "Get")
+                ):
+                    found.append(f"default.yaml: {key} lacks its heading {variable}, or a For:, Required: or Get: line")
+    return found
+
+
+def check_sections(helm_dir: Path) -> None:
+    text = (helm_dir / "environment/default.yaml").read_text()
+    for problem in section_problems(text):
+        fail(problem)
+    # The check itself has to be able to fail.
+    probes = {
+        "a missing Example line": text.replace("#   Example:  https://keycloak.example.org/auth\n", "", 1),
+        "a missing Get line": text.replace("#   Get:      openssl rand -hex 32\n", "", 1),
+        "a key in the wrong section": text.replace("keycloakUrl: \"\"\n", "", 1).replace(
+            "logLevel: INFO\n", "logLevel: INFO\nkeycloakUrl: \"\"\n", 1),
+        "sections out of order": text.replace("# 3. SECRETS", "# 3. SECRET", 1),
+    }
+    for what, probe in probes.items():
+        if probe == text or not section_problems(probe):
+            fail(f"the sections check doesn't catch {what}")
+    print("default.yaml in its three sections, each key placed and explained: checked")
 
 
 def leaked_credentials(rendered: dict, username: str, password: str) -> list[str]:
@@ -307,9 +421,10 @@ def check_database_credentials(helm_dir: Path) -> None:
                                   env={"DATABASE_PASSWORD": "shell"}))
     if rendered["Secret/xana-pdt-database"]["stringData"] != {"username": "file-user", "password": "shell"}:
         fail("the shell's database credentials don't win over the file's")
+    # Without a cluster (KUBECONFIG=/dev/null) and without credentials, the render goes on and says so.
     result = helmfile(helm_dir, "default", credentials=False)
-    if result.returncode == 0 or "no database credentials in namespace xana-pdt" not in result.stderr:
-        fail("the default environment without database credentials doesn't stop the render")
+    if result.returncode or "Not read: the database credentials, from Secret ngb.acid-cluster.credentials" not in result.stdout:
+        fail("the default environment without credentials or a cluster doesn't render with the note")
     result = helmfile(helm_dir, "default", values={"platformNamespace": ""})
     if result.returncode == 0 or "platformNamespace is empty" not in result.stderr:
         fail("an empty platformNamespace doesn't stop the render")
@@ -335,7 +450,7 @@ def referenced_secrets(rendered: dict) -> set[str]:
 
 def check_secrets_in_the_namespace(helm_dir: Path) -> None:
     """Each environment names only Secrets the chart renders, and the ones it configures, which must be in xana-pdt."""
-    for environment, configured in (("default", set()), ("production", {"xana-tls"}), ("localAndIonos", {"replace-me"})):
+    for environment, configured in (("default", set()), ("production", {"xana-tls"})):
         rendered = documents(helmfile(helm_dir, environment))
         own = {n.split("/", 1)[1] for n in rendered if n.startswith("Secret/")}
         if referenced_secrets(rendered) - own != configured:
@@ -413,8 +528,11 @@ def main() -> None:
         check_each_setting_reaches_its_variable,
         check_secrets_file_and_shell,
         check_old_variables_stop,
+        check_secrets_from_an_env_file,
+        check_langfuse_address,
         check_retired_keys_stop,
         check_platform_addresses,
+        check_sections,
         check_database_credentials,
         check_secrets_in_the_namespace,
         check_settings_cover_the_backend,

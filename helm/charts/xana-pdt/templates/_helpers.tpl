@@ -42,62 +42,9 @@ app.kubernetes.io/component: {{ .component }}
 /etc/xana/database-ca/ca.crt
 {{- end }}
 
-{{/* The database URLs given as secrets or by secretLookups, as JSON {"TIMESCALE_DB_URL": true, ...}. */}}
-{{- define "xana-pdt.givenDatabaseUrls" -}}
-{{- $s := .Values.backend.secret | default dict -}}
-{{- $given := dict -}}
-{{- range list "TIMESCALE_DB_URL" "POSTGRES_MEMORY_URL" -}}
-{{- if hasKey $s . }}{{ $_ := set $given . true }}{{ end -}}
-{{- end -}}
-{{- range $.Values.backend.secretLookups | default list -}}
-{{- if has .variable (list "TIMESCALE_DB_URL" "POSTGRES_MEMORY_URL") }}{{ $_ := set $given .variable true }}{{ end -}}
-{{- end -}}
-{{- toJson $given -}}
-{{- end }}
-
-{{/* Whether the Pod builds a database URL: not when both are given as secrets or by secretLookups. */}}
-{{- define "xana-pdt.buildsDatabaseUrls" -}}
-{{- if lt (len (include "xana-pdt.givenDatabaseUrls" . | fromJson)) 2 -}}
-true
-{{- end -}}
-{{- end }}
-
 {{/* The Secret the chart creates for the database credentials. */}}
 {{- define "xana-pdt.databaseSecret" -}}
 {{- printf "%s-database" .Release.Name -}}
-{{- end }}
-
-{{- /*
-Where the database credentials come from, when the Pod builds the URLs: "chart" (databaseCredentials, stored in
-the chart's own Secret), "copied" (postgresCredential.secret), or "" when the URLs are given. Stops the render
-when neither is there, or when only one of the two credentials is.
-*/}}
-{{- define "xana-pdt.databaseCredentialsSource" -}}
-{{- if include "xana-pdt.buildsDatabaseUrls" . -}}
-{{- $c := .Values.backend.databaseCredentials | default dict -}}
-{{- $user := $c.username | default "" | toString -}}
-{{- $password := $c.password | default "" | toString -}}
-{{- if and $user $password -}}
-chart
-{{- else if $user -}}
-{{- fail "DATABASE_USERNAME is set but DATABASE_PASSWORD isn't: set both, or neither." -}}
-{{- else if $password -}}
-{{- fail "DATABASE_PASSWORD is set but DATABASE_USERNAME isn't: set both, or neither." -}}
-{{- else if .Values.backend.postgresCredential.secret -}}
-copied
-{{- else -}}
-{{- fail (printf "The backend has no database credentials in namespace %s. Source envs/iff-cluster.sh, or set DATABASE_USERNAME and DATABASE_PASSWORD; or set databaseCredentialsSecret to a Secret copied into %s; or give TIMESCALE_DB_URL and POSTGRES_MEMORY_URL." .Release.Namespace .Release.Namespace) -}}
-{{- end -}}
-{{- end -}}
-{{- end }}
-
-{{/* The name of the Secret DB_USER and DB_PASSWORD read from. */}}
-{{- define "xana-pdt.databaseCredentialsSecret" -}}
-{{- if eq (include "xana-pdt.databaseCredentialsSource" .) "chart" -}}
-{{ include "xana-pdt.databaseSecret" . }}
-{{- else -}}
-{{ .Values.backend.postgresCredential.secret }}
-{{- end -}}
 {{- end }}
 
 {{/* Percent-encodes a value for a URL's user-info: urlquery writes a space as "+" and a "+" as "%2B". */}}
@@ -106,29 +53,130 @@ copied
 {{- end }}
 
 {{- /*
-The secretLookups the backend uses, as JSON {"lookups": [...]}: those whose variable isn't given in
-backend.secret. Stops the render for a variable listed twice, or one the chart already sets itself.
+How the platform's Secrets are read: "test" (testLookups, for the render checks only), "cluster" (Helm lookup,
+during install or upgrade), or "offline" (helm template, or a diff without cluster access, where lookup gives
+nothing). Every namespace has ServiceAccount default, so finding it in platformNamespace means a cluster answers.
 */}}
-{{- define "xana-pdt.secretLookups" -}}
-{{- $given := .Values.backend.secret | default dict -}}
-{{- $set := list -}}
-{{- if include "xana-pdt.buildsDatabaseUrls" . -}}
-{{- $set = list "DB_USER" "DB_PASSWORD" -}}
+{{- define "xana-pdt.lookupMode" -}}
+{{- if kindIs "map" .Values.testLookups -}}
+test
+{{- else if lookup "v1" "ServiceAccount" .Values.platformNamespace "default" -}}
+cluster
+{{- else -}}
+offline
 {{- end -}}
+{{- end }}
+
+{{- /*
+Reads one key of one Secret: dict "root" "namespace" "name" "key" "mode". Gives JSON {"value": …} or
+{"problem": …}. In "test" mode, testLookups maps "<namespace>/<name>" to the Secret's keys, in plain text.
+*/}}
+{{- define "xana-pdt.readSecret" -}}
+{{- $where := printf "Secret %s in namespace %s" .name .namespace -}}
+{{- $data := dict -}}
+{{- $found := false -}}
+{{- if eq .mode "test" -}}
+{{- with index .root.Values.testLookups (printf "%s/%s" .namespace .name) -}}
+{{- $found = true -}}
+{{- range $k, $v := . }}{{ $_ := set $data $k ($v | toString | b64enc) }}{{ end -}}
+{{- end -}}
+{{- else -}}
+{{- with lookup "v1" "Secret" .namespace .name -}}
+{{- $found = true -}}
+{{- $data = .data | default dict -}}
+{{- end -}}
+{{- end -}}
+{{- if not $found -}}
+{{- toJson (dict "problem" (printf "%s not found" $where)) -}}
+{{- else if not (index $data .key) -}}
+{{- toJson (dict "problem" (printf "key %s not in %s" .key $where)) -}}
+{{- else -}}
+{{- toJson (dict "value" (index $data .key | b64dec)) -}}
+{{- end -}}
+{{- end }}
+
+{{- /*
+The backend's secrets and database credentials, resolved, as JSON:
+  mode       how the platform's Secrets were read (see lookupMode)
+  secret     each variable: from backend.secret (the shell, else the environment file), else a secretLookups entry
+  lookedUp   [{variable, secret, key, namespace}] of the entries read
+  pending    variables a lookup would give, not read for want of a cluster
+  problems   {variable: why its lookup found nothing}
+  database   {source, username, password}: source "given", "lookup", "offline", or "urls" when both URLs are given
+Stops the render for a lookup listed twice or for DB_USER or DB_PASSWORD, for only one of the two credentials,
+and, with a cluster, for no credentials found.
+*/}}
+{{- define "xana-pdt.resolved" -}}
+{{- $mode := include "xana-pdt.lookupMode" . -}}
+{{- $given := .Values.backend.secret | default dict -}}
+{{- $secret := deepCopy $given -}}
+{{- $lookedUp := list -}}
+{{- $pending := list -}}
+{{- $problems := dict -}}
 {{- $seen := dict -}}
-{{- $used := list -}}
 {{- range .Values.backend.secretLookups | default list -}}
 {{- $variable := required "each of secretLookups needs a variable" .variable -}}
 {{- if hasKey $seen $variable -}}
 {{- fail (printf "secretLookups lists %s more than once; keep one entry." $variable) -}}
 {{- end -}}
 {{- $_ := set $seen $variable true -}}
-{{- if has $variable $set -}}
+{{- if has $variable (list "DB_USER" "DB_PASSWORD") -}}
 {{- fail (printf "secretLookups can't set %s: the chart sets it to build the database URLs. Give both database URLs instead, or remove the entry." $variable) -}}
 {{- end -}}
 {{- if not (hasKey $given $variable) -}}
-{{- $used = append $used . -}}
+{{- $entry := dict "variable" $variable "secret" (required "each of secretLookups needs a secret" .secret) "key" (required "each of secretLookups needs a key" .key) "namespace" (.namespace | default $.Values.platformNamespace) -}}
+{{- if eq $mode "offline" -}}
+{{- $pending = append $pending $variable -}}
+{{- else -}}
+{{- $read := include "xana-pdt.readSecret" (dict "root" $ "namespace" $entry.namespace "name" $entry.secret "key" $entry.key "mode" $mode) | fromJson -}}
+{{- if hasKey $read "value" -}}
+{{- $_ := set $secret $variable $read.value -}}
+{{- $lookedUp = append $lookedUp $entry -}}
+{{- else -}}
+{{- $_ := set $problems $variable $read.problem -}}
 {{- end -}}
 {{- end -}}
-{{- toJson (dict "lookups" $used) -}}
+{{- end -}}
+{{- end -}}
+{{- $urls := 0 -}}
+{{- range list "TIMESCALE_DB_URL" "POSTGRES_MEMORY_URL" -}}
+{{- if or (hasKey $secret .) (has . $pending) }}{{ $urls = add1 $urls }}{{ end -}}
+{{- end -}}
+{{- $c := .Values.backend.databaseCredentials | default dict -}}
+{{- $user := $c.username | default "" | toString -}}
+{{- $password := $c.password | default "" | toString -}}
+{{- $database := dict "source" "urls" -}}
+{{- if lt $urls 2 -}}
+{{- if and $user $password -}}
+{{- $database = dict "source" "given" "username" $user "password" $password -}}
+{{- else if $user -}}
+{{- fail "DATABASE_USERNAME is set but DATABASE_PASSWORD isn't: set both, or neither." -}}
+{{- else if $password -}}
+{{- fail "DATABASE_PASSWORD is set but DATABASE_USERNAME isn't: set both, or neither." -}}
+{{- else if eq $mode "offline" -}}
+{{- $database = dict "source" "offline" -}}
+{{- else -}}
+{{- $name := .Values.backend.postgresCredential.secret -}}
+{{- $why := "databaseCredentialsSecret is empty" -}}
+{{- if $name -}}
+{{- $u := include "xana-pdt.readSecret" (dict "root" $ "namespace" .Values.platformNamespace "name" $name "key" "username" "mode" $mode) | fromJson -}}
+{{- $p := include "xana-pdt.readSecret" (dict "root" $ "namespace" .Values.platformNamespace "name" $name "key" "password" "mode" $mode) | fromJson -}}
+{{- if and (hasKey $u "value") (hasKey $p "value") -}}
+{{- $database = dict "source" "lookup" "username" $u.value "password" $p.value "secret" $name -}}
+{{- else -}}
+{{- $why = $u.problem | default $p.problem -}}
+{{- end -}}
+{{- end -}}
+{{- if ne $database.source "lookup" -}}
+{{- fail (printf "The backend has no database credentials: %s. Set DATABASE_USERNAME and DATABASE_PASSWORD, set databaseCredentialsSecret to the database operator's Secret in namespace %s, or give TIMESCALE_DB_URL and POSTGRES_MEMORY_URL." $why .Values.platformNamespace) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- toJson (dict "mode" $mode "secret" $secret "lookedUp" $lookedUp "pending" $pending "problems" $problems "database" $database) -}}
+{{- end }}
+
+{{- /* The note a Secret carries when the platform's Secrets weren't read. */}}
+{{- define "xana-pdt.offlineNote" -}}
+# The platform's Secrets weren't read: this render had no cluster (helm template, or a diff without
+# --dry-run=server). apply reads them from namespace {{ .Values.platformNamespace }}.
 {{- end }}

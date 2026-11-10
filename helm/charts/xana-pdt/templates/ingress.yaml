@@ -28,11 +28,16 @@ spec:
   {{- end }}
   {{- if .Values.ingress.tlsSecret }}
   tls:
-    - hosts: [{{ .Values.ingress.host | quote }}]
+    - {{- with .Values.ingress.host }}
+      hosts: [{{ . | quote }}]
+      {{- end }}
       secretName: {{ .Values.ingress.tlsSecret }}
   {{- end }}
   rules:
-    - host: {{ .Values.ingress.host | quote }}
+    # Without a host, the Ingress answers for any name.
+    - {{- with .Values.ingress.host }}
+      host: {{ . | quote }}
+      {{- end }}
       http:
         paths:
           # The frontend forwards /api and /ws to the backend.

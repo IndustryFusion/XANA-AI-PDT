@@ -7,18 +7,21 @@ UI: http{{ if .Values.ingress.tlsSecret }}s{{ end }}://{{ .Values.ingress.host }
 Check the connections:
   kubectl -n {{ .Release.Namespace }} exec deploy/{{ include "xana-pdt.backend" . }} -- \
     python -c "import httpx; print(httpx.get('http://localhost:8000/api/diagnostics?fresh=true').text)"
-{{- $source := include "xana-pdt.databaseCredentialsSource" . }}
-{{- if eq $source "chart" }}
+{{- $r := include "xana-pdt.resolved" . | fromJson }}
+{{- if eq $r.database.source "given" }}
 
 The database credentials were given at install time (DATABASE_USERNAME and DATABASE_PASSWORD) and are kept in
 Secret {{ include "xana-pdt.databaseSecret" . }}. After a password change on the platform, give them again and apply.
-{{- else if eq $source "copied" }}
+{{- else if eq $r.database.source "lookup" }}
 
-The database credentials come from Secret {{ .Values.backend.postgresCredential.secret }}, which must be in this namespace.
-After a password change, copy it again and restart the backend.
+The database credentials were read from Secret {{ $r.database.secret }} in namespace {{ .Values.platformNamespace }} and are kept
+in Secret {{ include "xana-pdt.databaseSecret" . }}. After a password change on the platform, apply again.
 {{- end }}
-{{- range (include "xana-pdt.secretLookups" . | fromJson).lookups }}
-{{ .variable }} comes from key {{ .key }} of Secret {{ .secret }}, which must be in this namespace.
+{{- range $r.lookedUp }}
+{{ .variable }} was read from key {{ .key }} of Secret {{ .secret }} in namespace {{ .namespace }}.
+{{- end }}
+{{- range $variable, $problem := $r.problems }}
+{{ $variable }} wasn't read: {{ $problem }}.
 {{- end }}
 {{- if .Values.backend.config.KEYCLOAK_URL }}
 

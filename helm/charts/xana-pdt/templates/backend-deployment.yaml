@@ -14,7 +14,8 @@
 # limitations under the License.
 #
 {{- $d := .Values.backend.postgresCredential }}
-{{- $given := .Values.backend.secret | default dict }}
+{{- $r := include "xana-pdt.resolved" . | fromJson }}
+{{- include "xana-pdt.checks" (dict "root" . "resolved" $r) }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -59,43 +60,30 @@ spec:
           envFrom:
             - configMapRef:
                 name: {{ include "xana-pdt.backend" . }}
-            {{- if .Values.backend.secret }}
+            {{- if or $r.secret $r.pending }}
             - secretRef:
                 name: {{ include "xana-pdt.backend" . }}
             {{- end }}
-          {{- $lookups := (include "xana-pdt.secretLookups" . | fromJson).lookups }}
-          {{- $build := include "xana-pdt.databaseCredentialsSource" . }}
-          {{- $credentials := include "xana-pdt.databaseCredentialsSecret" . }}
-          {{- if or $build $lookups }}
+          {{- if ne $r.database.source "urls" }}
           env:
-            {{- if $build }}
-            # The database URLs, built when the Pod starts from the database credentials in this namespace.
+            # The database URLs, built when the Pod starts from the credentials in the chart's own Secret.
             - name: DB_USER
               valueFrom:
                 secretKeyRef:
-                  name: {{ $credentials }}
+                  name: {{ include "xana-pdt.databaseSecret" . }}
                   key: username
             - name: DB_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ $credentials }}
+                  name: {{ include "xana-pdt.databaseSecret" . }}
                   key: password
-            {{- $urls := include "xana-pdt.givenDatabaseUrls" . | fromJson }}
-            {{- if not (hasKey $urls "TIMESCALE_DB_URL") }}
+            {{- if not (or (hasKey $r.secret "TIMESCALE_DB_URL") (has "TIMESCALE_DB_URL" $r.pending)) }}
             - name: TIMESCALE_DB_URL
               value: postgresql://$(DB_USER):$(DB_PASSWORD)@{{ $d.host }}:{{ $d.port }}/{{ $d.timeseriesDatabase }}
             {{- end }}
-            {{- if not (hasKey $urls "POSTGRES_MEMORY_URL") }}
+            {{- if not (or (hasKey $r.secret "POSTGRES_MEMORY_URL") (has "POSTGRES_MEMORY_URL" $r.pending)) }}
             - name: POSTGRES_MEMORY_URL
               value: postgresql://$(DB_USER):$(DB_PASSWORD)@{{ $d.host }}:{{ $d.port }}/{{ $d.memoryDatabase }}
-            {{- end }}
-            {{- end }}
-            {{- range $lookups }}
-            - name: {{ .variable }}
-              valueFrom:
-                secretKeyRef:
-                  name: {{ required "each of secretLookups needs a secret" .secret }}
-                  key: {{ required "each of secretLookups needs a key" .key }}
             {{- end }}
           {{- end }}
           {{- with $d.caSecret }}

@@ -15,8 +15,9 @@
 # limitations under the License.
 #
 # Checks, on the local test cluster, that the backend in XANA's namespace gets its secrets from that namespace
-# only: its Deployment names no Secret but the chart's own and the test lookup's, the database URLs are built
-# from the chart's Secret and name the platform's database in iff, and the secretLookups variable arrives.
+# only: its Deployment names no Secret but the chart's own two; the database URLs are built from the chart's
+# Secret, with the credentials read when deploying from the operator's Secret in iff; and the secretLookups
+# variables arrive, read when deploying from a Secret in xana-pdt and one in iff.
 # Prints no secret. Needs kubectl pointed at the cluster.
 #
 #   helm/test/check_cluster_secrets.sh xana-pdt
@@ -37,20 +38,22 @@ for c in spec["containers"]:
     names |= {e["valueFrom"]["secretKeyRef"]["name"] for e in c.get("env", []) if "secretKeyRef" in e.get("valueFrom", {})}
 print(" ".join(sorted(names)))')"
 echo "Secrets the backend names: $names"
-[[ "$names" == "xana-pdt-backend xana-pdt-database xana-test-lookup" || "$names" == "xana-pdt-database xana-test-lookup" ]] ||
-  fail "the backend names a Secret other than the chart's and the test lookup's"
+[[ "$names" == "xana-pdt-backend xana-pdt-database" ]] ||
+  fail "the backend names a Secret other than the chart's own two"
 for name in $names; do
   kubectl -n "$namespace" get secret "$name" -o name >/dev/null || fail "Secret $name is not in $namespace"
 done
 
 # shellcheck disable=SC2016 # expanded in the Pod
 kubectl -n "$namespace" exec "$deployment" -- sh -c '
-  case "$TIMESCALE_DB_URL" in postgresql://xana:p%40ss%3Aw%2Frd%20%25%2Bx@acid-cluster.iff:5432/tsdb) ;; *) exit 1;; esac
-  case "$POSTGRES_MEMORY_URL" in postgresql://xana:p%40ss%3Aw%2Frd%20%25%2Bx@acid-cluster.iff:5432/memory) ;; *) exit 1;; esac' ||
-  fail "the database URLs aren't built from the chart's Secret, percent-encoded, for acid-cluster.iff"
+  case "$TIMESCALE_DB_URL" in postgresql://xana:p%40ss%3Aw%2Frd%20%25%2Bx@acid-cluster.iff.svc.cluster.local:5432/tsdb) ;; *) exit 1;; esac
+  case "$POSTGRES_MEMORY_URL" in postgresql://xana:p%40ss%3Aw%2Frd%20%25%2Bx@acid-cluster.iff.svc.cluster.local:5432/memory) ;; *) exit 1;; esac' ||
+  fail "the database URLs aren't built from the chart's Secret, percent-encoded, for acid-cluster.iff.svc.cluster.local"
 
 [[ "$(kubectl -n "$namespace" exec "$deployment" -- printenv EVENT_WEBHOOK_SECRET)" == local-test-webhook-secret ]] ||
-  fail "the secretLookups variable didn't arrive"
+  fail "the secretLookups variable from xana-pdt didn't arrive"
+[[ "$(kubectl -n "$namespace" exec "$deployment" -- printenv ALERTA_API_KEY)" == local-test-alerta-key ]] ||
+  fail "the secretLookups variable from iff didn't arrive"
 
 # The backend reaches both databases, and the stand-in context broker in iff: its health report says so.
 kubectl -n "$namespace" exec "$deployment" -- python -c '
