@@ -175,6 +175,12 @@ As the maintainer decided, no run on a local cluster is planned for this change:
 
 Lookup results can't be produced offline. The chart's lookup logic takes the looked-up Secrets through one helper; the render checks give it test data in place of the cluster's, through a value used only by the checks, and the offline path is checked as it is.
 
+### Found while implementing
+
+- **An empty `ingressHost`** now renders an Ingress rule without a host, which answers for any name, instead of a rule with `host: ""`. Section 2 says what empty does for every key, and this one had none.
+- **The key format check** accepts 43 URL-safe base64 characters and a closing `=`, which is what `Fernet.generate_key()` gives; a key in another form the backend would also accept, such as standard base64, is refused when deploying.
+- **The render checks' test data** goes in through a chart value, `testLookups` ("<namespace>/<name>" to the Secret's keys), which no environment file sets. With it, the chart behaves as with a cluster.
+
 ## Risks
 
 - **A diff without cluster access** shows looked-up keys as removed on every `apply`, so `apply` always syncs. `--suppress-secrets` hides the noise; `--diff-args=--dry-run=server` avoids it.
