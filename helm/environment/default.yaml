@@ -13,131 +13,264 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-# The default environment: the digital twin platform's services, in the release's namespace.
-# production.yaml and localAndIonos.yaml are layered over it; a later file wins.
-# Every key is described in README.md. Secrets stay empty here: set them as shell variables of the
-# backend's own names (for example ANTHROPIC_API_KEY), which win over these keys, or source
-# envs/iff-cluster.sh to export them from the cluster.
-# XANA's own namespace, and the one the digital twin platform runs in.
-namespace: xana-pdt
-platformNamespace: iff
-imageRegistry: ghcr.io/industryfusion
-imageTag: ""
+# The default environment: every key the chart reads, in three sections. production.yaml is layered over it.
+# See README.md for the steps.
+
+# =====================================================================================================
+# 1. FILLED IN FOR YOU
+#    The platform's in-cluster addresses and XANA's defaults. Change one only if your platform differs.
+# =====================================================================================================
+
+namespace: xana-pdt                     # XANA's own namespace
+platformNamespace: iff                  # where the platform runs; the platform's Secrets are read there
+
+imageRegistry: ghcr.io/industryfusion   # the published images
+imageTag: ""                            # empty: the chart's version
 imagePullPolicy: IfNotPresent
 
-# The language model.
-llmProvider: ollama
-llmModel: llama3.1
-llmProviderName: ""
-llmNumCtx: 32768
-llmTimeoutS: 120
-ollamaUrl: ""
-openaiBaseUrl: ""
+# The platform's services, written out in full as <service>.<namespace>.svc.cluster.local.
+ngsiUrl: http://scorpio-all-in-one-runner.iff.svc.cluster.local:9090    # the context broker (Scorpio)
+pgrestUrl: http://pgrest.iff.svc.cluster.local:3000                     # the history service
+alertaUrl: http://alerta.iff.svc.cluster.local:8080/api                 # Alerta; must end in /api
+fusekiUrl: http://fuseki.iff.svc.cluster.local:3030                     # the ontology store
+mqttBrokerUrl: mqtt://emqx-listeners.iff.svc.cluster.local:1883         # the message broker
+mqttMgmtUrl: http://emqx-dashboard.iff.svc.cluster.local:18083          # its management API
+mqttBrokerNotifyUrl: ""                 # the broker as Scorpio reaches it, if different
+databaseHost: acid-cluster.iff.svc.cluster.local                        # PostgreSQL with tsdb and memory
 
-# The diagnosis.
-decisionConfidenceThreshold: 0.9
-maxConcurrentRounds: 2
-# Finished runs move to incident history after this many seconds without a change. 0 keeps them until archived.
-autoArchiveAfterS: 3600
+# Machine events: the backend as Scorpio reaches it. It needs EVENT_WEBHOOK_SECRET (Section 3); empty turns
+# machine events off.
+callbackBaseUrl: http://xana-pdt-backend.xana-pdt.svc.cluster.local:8000
 
-# Sign-in. Empty turns it off. Use Keycloak's external address, as tokens must match the issuer that services check.
-keycloakUrl: ""
-keycloakRealm: iff
-keycloakClientId: scorpio
-factoryId: ""
-# A client with a service account, for machine events with nobody signed in.
-keycloakServiceClientId: ""
-
-# The digital twin.
-# The platform's addresses below, left empty, are its Services in platformNamespace, for example
-# http://scorpio-all-in-one-runner.iff:9090 (see README.md). A value set here is used as given.
-ngsiUrl: ""
-ngsiTenant: ""
-# JSON-LD context for short names. Without it, names are the platform's full IRIs.
-ngsiContextUrl: ""
-# Further contexts an import may name, comma-separated.
-ngsiAllowedContexts: ""
-pgrestUrl: ""
-# Machine events: the backend as Scorpio reaches it, for example http://xana-pdt-backend.xana-pdt:8000. Empty means no
-# subscription. On data with full IRIs, name the type and attributes as the platform does.
-callbackBaseUrl: ""
-machineWatchType: Machine
-machineWatchAttributes: status,errorCode,alarmLevel,faultCode
-
-# Alerts. Must end in /api.
-alertaUrl: ""
-alertsRefreshIntervalS: 30
-
-# The dataspace. Empty means none.
-gatewayUrl: ""
-gatewayKeycloakUrl: ""
-gatewayKeycloakRealm: dataspace
-gatewayClientId: ""
-dataSharingPolicy: minimal
-inboxPollIntervalS: 15
-# The IFRIC registry, including its port. Empty means none.
-ifricUrl: ""
-
-# Machine ontology and shapes. The graph base is http://<Fuseki's external host>/<realm> on the platform.
-fusekiUrl: ""
-fusekiDataset: iff
-fusekiGraphBase: http://fuseki.local/iff
-
-# Live updates in the Data Explorer. Operators need Factory-Admin or Factory-Reader on client scorpio.
-mqttBrokerUrl: ""
-mqttMgmtUrl: ""
-# The MQTT broker as Scorpio reaches it, if different.
-mqttBrokerNotifyUrl: ""
-# Browser origins allowed on the backend's WebSockets, comma-separated. Empty allows the backend's own.
-wsAllowedOrigins: ""
-
-# Traces to your own Langfuse server, for example https://langfuse.example.org. Empty uses Langfuse's default.
-# Nothing is traced without the two Langfuse keys.
-langfuseHost: ""
-
-# The databases. Without timescaleDbUrl and postgresMemoryUrl, both URLs are built when the Pod starts, from
-# databaseUsername and databasePassword below (envs/iff-cluster.sh exports them from the platform), else from
-# databaseCredentialsSecret. Empty databaseHost is acid-cluster in platformNamespace.
-databaseHost: ""
+# The databases.
 databasePort: 5432
 databaseTimeseriesName: tsdb
 databaseMemoryName: memory
-# A Secret in XANA's namespace with keys username and password, for example the database operator's Secret
-# copied there. Used only without databaseUsername and databasePassword.
-databaseCredentialsSecret: ""
-# A Secret holding the database's CA certificate as ca.crt, for postgresSslMode verify-ca or verify-full.
-databaseCaSecret: ""
-postgresSslMode: require
+postgresSslMode: require                # TLS without checking the server; verify-ca or verify-full need:
+databaseCaSecret: ""                    # a Secret in xana-pdt with the CA certificate as ca.crt
 timescaleTable: attributes
 timescaleEntityTable: entities
 
-# Health checks and logs.
+# Realms, clients and the data model.
+keycloakRealm: iff                      # the platform's realm
+keycloakClientId: scorpio               # the platform's client operators sign in with
+gatewayKeycloakRealm: dataspace         # the dataspace's realm
+dataSharingPolicy: minimal              # minimal, adjacent or timeseries
+fusekiDataset: iff
+machineWatchType: Machine               # on data with full IRIs, the platform's names, with status in full
+machineWatchAttributes: status,errorCode,alarmLevel,faultCode
+ngsiTenant: ""                          # the NGSI-LD tenant, if any
+ngsiContextUrl: ""                      # a JSON-LD context for short names; without it, full IRIs
+ngsiAllowedContexts: ""                 # further contexts an import may name, comma-separated
+
+# Operational defaults.
+llmNumCtx: 32768
+llmTimeoutS: 120
+decisionConfidenceThreshold: 0.9
+maxConcurrentRounds: 2
+autoArchiveAfterS: 3600                 # finished runs move to incident history after this; 0 keeps them
+alertsRefreshIntervalS: 30
+inboxPollIntervalS: 15
 healthTimeoutS: 3
 healthCacheS: 10
 logLevel: INFO
-
-# Secrets. Keep them empty in committed files; a shell variable of the name in brackets wins.
-anthropicApiKey: ""               # (ANTHROPIC_API_KEY)
-openaiApiKey: ""                  # (OPENAI_API_KEY)
-langfusePublicKey: ""             # (LANGFUSE_PUBLIC_KEY)
-langfuseSecretKey: ""             # (LANGFUSE_SECRET_KEY)
-keycloakServiceClientSecret: ""   # (KEYCLOAK_SERVICE_CLIENT_SECRET)
-eventWebhookSecret: ""            # (EVENT_WEBHOOK_SECRET)
-gatewayClientSecret: ""           # (GATEWAY_CLIENT_SECRET)
-settingsEncryptionKey: ""         # (SETTINGS_ENCRYPTION_KEY)
-alertaApiKey: ""                  # (ALERTA_API_KEY)
-timescaleDbUrl: ""                # (TIMESCALE_DB_URL)
-postgresMemoryUrl: ""             # (POSTGRES_MEMORY_URL)
-databaseUsername: ""              # (DATABASE_USERNAME)
-databasePassword: ""              # (DATABASE_PASSWORD)
-
-# Variables read when the Pod starts from keys of Secrets in the release's namespace, for example
-#   - { variable: ALERTA_API_KEY, secret: alerta, key: alerta-admin-key }
-# A variable also given as a secret above, or in the shell, is taken from there instead.
-secretLookups: []
-
-# The platform's default ingress controller is Traefik; nginx is also supported.
+wsAllowedOrigins: ""                    # browser origins allowed on the WebSockets; empty: the backend's own
 ingressEnabled: true
-ingressClassName: traefik
+
+# =====================================================================================================
+# 2. FILL IN FOR YOUR CLUSTER
+#    External addresses and choices only you know. Each says what it is, an example, and what empty does.
+# =====================================================================================================
+
+# The host name XANA is served under.
+#   Example:  xana.example.org
+#   If empty: the Ingress has no host and answers for any name. xana.local resolves nowhere.
 ingressHost: xana.local
+
+# The cluster's Ingress controller: traefik, the platform's, or nginx.
+#   Example:  nginx
+#   If empty: the cluster's default class picks it up, if it has one.
+ingressClassName: traefik
+
+# The TLS Secret for ingressHost. It must be in xana-pdt; copy it there first.
+#   Example:  xana-tls
+#   If empty: plain HTTP, and the operator's password crosses the Ingress unencrypted.
 ingressTlsSecret: ""
+
+# The platform's Keycloak as browsers reach it, with /auth if it has it.
+#   Example:  https://keycloak.example.org/auth
+#   If empty: sign-in is off, and anyone who reaches the UI can use it.
+keycloakUrl: ""
+
+# The factory this XANA serves, in the IFRIC registry.
+#   Example:  urn:ifric:factory:plant-1
+#   If empty: escalation to machine builders through IFRIC is off.
+factoryId: ""
+
+# A Keycloak client with a service account and read access to Scorpio, for machine events with nobody
+# signed in. Needs keycloakUrl, and KEYCLOAK_SERVICE_CLIENT_SECRET (Section 3).
+#   Example:  xana-events
+#   If empty: machine events start runs only while an operator is signed in.
+keycloakServiceClientId: ""
+
+# The language model: ollama, openai (also OpenVINO and other OpenAI-compatible servers), anthropic or scripted.
+#   Example:  openai
+#   If empty: ollama.
+llmProvider: ollama
+
+# The model's name on that server.
+#   Example:  llama3.1
+#   If empty: llama3.1.
+llmModel: llama3.1
+
+# The provider's name as operators see it.
+#   Example:  OpenVINO
+#   If empty: llmProvider.
+llmProviderName: ""
+
+# The Ollama server, with llmProvider ollama.
+#   Example:  http://ollama.ai.svc.cluster.local:11434
+#   If empty: localhost, which nothing answers inside the Pod.
+ollamaUrl: ""
+
+# An OpenAI-compatible server, with llmProvider openai.
+#   Example:  http://ovms.ai.svc.cluster.local:8000/v3
+#   If empty: OpenAI's own service, which needs OPENAI_API_KEY.
+openaiBaseUrl: ""
+
+# The dataspace gateway. Needs gatewayKeycloakUrl and SETTINGS_ENCRYPTION_KEY (Section 3).
+#   Example:  https://gateway.example.org
+#   If empty: no dataspace; escalation to machine builders is off.
+gatewayUrl: ""
+
+# Keycloak as the dataspace's services know it; they compare a token's issuer exactly.
+#   Example:  https://keycloak-dataspace.example.org/auth
+#   If empty: allowed only without gatewayUrl.
+gatewayKeycloakUrl: ""
+
+# XANA's client in the dataspace's realm.
+#   Example:  xana
+#   If empty: the operator enters it on the Settings screen.
+gatewayClientId: ""
+
+# The IFRIC registry, with its port.
+#   Example:  https://ifric.example.org:4007
+#   If empty: machine builders aren't looked up.
+ifricUrl: ""
+
+# The base of the ontology's graph names: http://<Fuseki's external host>/<realm>.
+#   Example:  http://fuseki.example.org/iff
+#   If empty: value hints read the default graph only.
+fusekiGraphBase: http://fuseki.local/iff
+
+# Your own Langfuse server for traces. LANGFUSE_HOST or LANGFUSE_BASE_URL in the shell win over it.
+#   Example:  https://langfuse.example.org
+#   If empty: Langfuse's own service, when the two Langfuse keys are set.
+langfuseHost: ""
+
+# =====================================================================================================
+# 3. SECRETS
+#    Keep them empty here. Set the shell variable instead, for example from your own env file:
+#      set -a; source my-secrets.env; set +a
+#    A secret given neither way is read from the platform's Secrets when deploying (see the end).
+# =====================================================================================================
+
+# ANTHROPIC_API_KEY
+#   For:      the Anthropic model.
+#   Required: with llmProvider anthropic.
+#   Get:      Anthropic's console, API keys.
+anthropicApiKey: ""
+
+# OPENAI_API_KEY
+#   For:      OpenAI's model.
+#   Required: with llmProvider openai and no openaiBaseUrl.
+#   Get:      OpenAI's dashboard, API keys.
+openaiApiKey: ""
+
+# ALERTA_API_KEY
+#   For:      reading and acknowledging alerts in Alerta.
+#   Required: for the alerts screen; without it, alerts can't be read.
+#   Get:      Alerta's admin key, key alerta-admin-key of Secret alerta in the platform's namespace.
+alertaApiKey: ""
+
+# EVENT_WEBHOOK_SECRET
+#   For:      checking that machine events come from Scorpio and Alerta.
+#   Required: with callbackBaseUrl, which is set above.
+#   Get:      openssl rand -hex 32
+eventWebhookSecret: ""
+
+# KEYCLOAK_SERVICE_CLIENT_SECRET
+#   For:      the service client that reads Scorpio for machine events.
+#   Required: with keycloakServiceClientId.
+#   Get:      that client's Credentials tab in Keycloak.
+keycloakServiceClientSecret: ""
+
+# SETTINGS_ENCRYPTION_KEY
+#   For:      encrypting the dataspace client secret that operators enter, in the database. Keep it: a new
+#             key makes the stored secret unreadable.
+#   Required: with gatewayUrl.
+#   Get:      python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'
+settingsEncryptionKey: ""
+
+# GATEWAY_CLIENT_SECRET
+#   For:      XANA's client in the dataspace's realm.
+#   Required: never; without it, the operator enters it on the Settings screen.
+#   Get:      the client's Credentials tab in the dataspace's Keycloak.
+gatewayClientSecret: ""
+
+# LANGFUSE_PUBLIC_KEY
+#   For:      sending traces to Langfuse.
+#   Required: together with LANGFUSE_SECRET_KEY; without both, nothing is traced.
+#   Get:      the Langfuse project's settings, API keys.
+langfusePublicKey: ""
+
+# LANGFUSE_SECRET_KEY
+#   For:      sending traces to Langfuse.
+#   Required: together with LANGFUSE_PUBLIC_KEY.
+#   Get:      the Langfuse project's settings, API keys.
+langfuseSecretKey: ""
+
+# DATABASE_USERNAME
+#   For:      the database login; the chart keeps it in Secret xana-pdt-database.
+#   Required: unless read from databaseCredentialsSecret below, or both database URLs are given.
+#   Get:      key username of the database operator's Secret, ngb.acid-cluster.credentials.
+databaseUsername: ""
+
+# DATABASE_PASSWORD
+#   For:      the database login, kept percent-encoded in Secret xana-pdt-database.
+#   Required: with DATABASE_USERNAME.
+#   Get:      key password of the database operator's Secret, ngb.acid-cluster.credentials.
+databasePassword: ""
+
+# TIMESCALE_DB_URL
+#   For:      the time-series database's full URL, in place of the one built from the login.
+#   Required: never.
+#   Get:      postgresql://<user>:<password>@<host>:5432/tsdb
+timescaleDbUrl: ""
+
+# POSTGRES_MEMORY_URL
+#   For:      the memory database's full URL, in place of the one built from the login.
+#   Required: never.
+#   Get:      postgresql://<user>:<password>@<host>:5432/memory
+postgresMemoryUrl: ""
+
+# Read from the platform's Secrets when deploying -------------------------------------------------------
+# A secret not given above or in the shell is read with your own kubectl access during apply, from these
+# Secrets in platformNamespace (or an entry's own namespace), and copied into XANA's Secrets in xana-pdt.
+# helmfile template, without a cluster, skips this and says so in the rendered Secrets.
+
+# The database operator's Secret, with keys username and password.
+databaseCredentialsSecret: ngb.acid-cluster.credentials
+
+# Each entry: the variable, the Secret and its key, and optionally the namespace (default platformNamespace).
+secretLookups:
+  - { variable: ALERTA_API_KEY, secret: alerta, key: alerta-admin-key }
+  - { variable: EVENT_WEBHOOK_SECRET, secret: xana-pdt-credentials, key: EVENT_WEBHOOK_SECRET }
+  - { variable: SETTINGS_ENCRYPTION_KEY, secret: xana-pdt-credentials, key: SETTINGS_ENCRYPTION_KEY }
+  - { variable: GATEWAY_CLIENT_SECRET, secret: xana-pdt-credentials, key: GATEWAY_CLIENT_SECRET }
+  - { variable: ANTHROPIC_API_KEY, secret: xana-pdt-credentials, key: ANTHROPIC_API_KEY }
+  - { variable: OPENAI_API_KEY, secret: xana-pdt-credentials, key: OPENAI_API_KEY }
+  - { variable: LANGFUSE_PUBLIC_KEY, secret: xana-pdt-credentials, key: LANGFUSE_PUBLIC_KEY }
+  - { variable: LANGFUSE_SECRET_KEY, secret: xana-pdt-credentials, key: LANGFUSE_SECRET_KEY }
+  # With keycloakServiceClientId set:
+  # - { variable: KEYCLOAK_SERVICE_CLIENT_SECRET, secret: keycloak-client-secret-xana, key: CLIENT_SECRET }

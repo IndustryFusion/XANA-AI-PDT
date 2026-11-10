@@ -69,19 +69,20 @@
   (list "keycloakServiceClientSecret" "KEYCLOAK_SERVICE_CLIENT_SECRET") (list "eventWebhookSecret" "EVENT_WEBHOOK_SECRET")
   (list "gatewayClientSecret" "GATEWAY_CLIENT_SECRET") (list "settingsEncryptionKey" "SETTINGS_ENCRYPTION_KEY")
   (list "alertaApiKey" "ALERTA_API_KEY") (list "timescaleDbUrl" "TIMESCALE_DB_URL") (list "postgresMemoryUrl" "POSTGRES_MEMORY_URL") }}
-{{- /* The platform's addresses: an empty key is the platform's Service in platformNamespace. */}}
+{{- /* The platform's Secrets are read in platformNamespace; it changes no address. */}}
 {{- $ns := required "platformNamespace is empty: set it to the namespace the platform runs in, for example iff." .Values.platformNamespace }}
-{{- $platform := dict
-  "ngsiUrl" (printf "http://scorpio-all-in-one-runner.%s:9090" $ns) "pgrestUrl" (printf "http://pgrest.%s:3000" $ns)
-  "alertaUrl" (printf "http://alerta.%s:8080/api" $ns) "fusekiUrl" (printf "http://fuseki.%s:3030" $ns)
-  "mqttBrokerUrl" (printf "mqtt://emqx-listeners.%s:1883" $ns) "mqttMgmtUrl" (printf "http://emqx-dashboard.%s:18083" $ns)
-  "databaseHost" (printf "acid-cluster.%s" $ns) }}
+{{- /* Langfuse's address: LANGFUSE_HOST or LANGFUSE_BASE_URL from the shell win over langfuseHost, as Langfuse's
+own env files name it either way. Two different addresses stop the render, as they stop the backend. */}}
 {{- $values := merge (dict) .Values }}
-{{- range $key, $default := $platform }}
-{{- if not (index $.Values $key) }}
-{{- $_ := set $values $key $default }}
+{{- $langfuseHost := env "LANGFUSE_HOST" }}
+{{- $langfuseBase := env "LANGFUSE_BASE_URL" }}
+{{- if and $langfuseHost $langfuseBase (ne (trimSuffix "/" $langfuseHost) (trimSuffix "/" $langfuseBase)) }}
+{{- fail "LANGFUSE_HOST and LANGFUSE_BASE_URL name different addresses; set one of them, or the same in both" }}
 {{- end }}
+{{- with $langfuseHost | default $langfuseBase }}
+{{- $_ := set $values "langfuseHost" . }}
 {{- end }}
+platformNamespace: {{ $ns | quote }}
 imageRegistry: {{ .Values.imageRegistry | quote }}
 imageTag: {{ .Values.imageTag | quote }}
 imagePullPolicy: {{ .Values.imagePullPolicy | quote }}
@@ -104,7 +105,7 @@ backend:
     username: {{ env "DATABASE_USERNAME" | default (.Values.databaseUsername | toString) | quote }}
     password: {{ env "DATABASE_PASSWORD" | default (.Values.databasePassword | toString) | quote }}
   postgresCredential:
-    host: {{ $values.databaseHost | quote }}
+    host: {{ .Values.databaseHost | quote }}
     port: {{ .Values.databasePort }}
     timeseriesDatabase: {{ .Values.databaseTimeseriesName | quote }}
     memoryDatabase: {{ .Values.databaseMemoryName | quote }}

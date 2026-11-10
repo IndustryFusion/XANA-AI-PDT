@@ -57,9 +57,11 @@ def flags_for(settings, credentials: bool) -> list[str]:
     return flags
 
 
-def render(chart: str, *settings: str, credentials: bool = True) -> dict[str, dict]:
+def render(chart: str, *settings: str, credentials: bool = True, raw: bool = False):
     flags = flags_for(settings, credentials)
     output = subprocess.run(["helm", "template", "x", chart, *flags], check=True, capture_output=True, text=True).stdout
+    if raw:
+        return output
     documents = [decoded(d) for d in yaml.safe_load_all(output) if d]
     return {f"{d['kind']}/{d['metadata']['name']}": d for d in documents}
 
@@ -99,33 +101,51 @@ def check_operator_secret(chart: str) -> None:
     assert rendered["Secret/x-database"]["stringData"] == {"username": "xana", "password": ENCODED_PASSWORD}
     assert urllib.parse.unquote(ENCODED_PASSWORD) == "p@ss:w/rd %+x"
     urls = {e["name"]: e["value"] for e in container["env"] if e["name"].endswith("_URL")}
-    assert urls["TIMESCALE_DB_URL"] == "postgresql://$(DB_USER):$(DB_PASSWORD)@acid-cluster.iff:5432/tsdb"
-    assert urls["POSTGRES_MEMORY_URL"] == "postgresql://$(DB_USER):$(DB_PASSWORD)@acid-cluster.iff:5432/memory"
+    assert urls["TIMESCALE_DB_URL"] == "postgresql://$(DB_USER):$(DB_PASSWORD)@acid-cluster.iff.svc.cluster.local:5432/tsdb"
+    assert urls["POSTGRES_MEMORY_URL"] == "postgresql://$(DB_USER):$(DB_PASSWORD)@acid-cluster.iff.svc.cluster.local:5432/memory"
     assert not secret_refs(container)
     assert "Secret/x-backend" not in rendered
 
 
 def check_copied_secret(chart: str) -> None:
-    rendered = render(chart, "backend.postgresCredential.secret=copied", credentials=False)
-    assert credential_secrets(backend_container(rendered)) == ["copied"] * 2
-    assert "Secret/x-database" not in rendered
-    # Credentials given win over a copied Secret.
-    rendered = render(chart, "backend.postgresCredential.secret=copied")
+    """The operator's Secret, read when deploying (here from test data), into the chart's Secret, percent-encoded."""
+    rendered = render(chart, operator_secret("op", "p@ss:w/rd %+x"), credentials=False)
     assert credential_secrets(backend_container(rendered)) == ["x-database"] * 2
+    assert rendered["Secret/x-database"]["stringData"] == {"username": "op", "password": ENCODED_PASSWORD}
+    # Credentials given win over the operator's Secret.
+    rendered = render(chart, operator_secret("op", "other"))
+    assert rendered["Secret/x-database"]["stringData"]["username"] == "xana"
 
 
 def check_no_credentials(chart: str) -> None:
-    error = render_error(chart, credentials=False)
-    for named in ("no database credentials in namespace default", "envs/iff-cluster.sh", "DATABASE_USERNAME",
-                  "DATABASE_PASSWORD", "databaseCredentialsSecret", "TIMESCALE_DB_URL and POSTGRES_MEMORY_URL"):
+    # With a cluster to read from, and nothing found there.
+    error = render_error(chart, "json:testLookups={}", credentials=False)
+    for named in ("no database credentials: Secret ngb.acid-cluster.credentials in namespace iff not found",
+                  "DATABASE_USERNAME and DATABASE_PASSWORD", "databaseCredentialsSecret",
+                  "TIMESCALE_DB_URL and POSTGRES_MEMORY_URL"):
         assert named in error, error
+    error = render_error(chart, 'json:testLookups={"iff/ngb.acid-cluster.credentials":{"username":"op"}}',
+                         credentials=False)
+    assert "key password not in Secret ngb.acid-cluster.credentials in namespace iff" in error, error
     error = render_error(chart, "backend.databaseCredentials.username=xana", credentials=False)
     assert "DATABASE_USERNAME is set but DATABASE_PASSWORD isn't" in error, error
     error = render_error(chart, "backend.databaseCredentials.password=x", credentials=False)
     assert "DATABASE_PASSWORD is set but DATABASE_USERNAME isn't" in error, error
     # Both URLs given: no credentials needed.
-    render(chart, f"backend.secret.TIMESCALE_DB_URL={SECRET_VALUE}", f"backend.secret.POSTGRES_MEMORY_URL={SECRET_VALUE}",
-           credentials=False)
+    render(chart, "json:testLookups={}", f"backend.secret.TIMESCALE_DB_URL={SECRET_VALUE}",
+           f"backend.secret.POSTGRES_MEMORY_URL={SECRET_VALUE}", credentials=False)
+
+
+def check_offline(chart: str) -> None:
+    """Without a cluster, nothing is read, the Secrets say so, and nothing stops that apply would pass."""
+    rendered = render(chart, "backend.config.CALLBACK_BASE_URL=http://x", "backend.config.GATEWAY_URL=http://g",
+                      "backend.config.GATEWAY_KEYCLOAK_URL=http://k",
+                      f"json:backend.secretLookups=[{lookup('EVENT_WEBHOOK_SECRET')},{lookup('SETTINGS_ENCRYPTION_KEY')}]",
+                      credentials=False, raw=True)
+    database = rendered.split("name: x-database")[0].rsplit("---", 1)[-1]
+    assert "The platform's Secrets weren't read: this render had no cluster" in database, database
+    assert "Not read: the database credentials, from Secret ngb.acid-cluster.credentials." in database, database
+    assert "# Not read: EVENT_WEBHOOK_SECRET, SETTINGS_ENCRYPTION_KEY." in rendered, rendered
 
 
 def check_special_characters(chart: str) -> None:
@@ -159,8 +179,9 @@ def check_only_own_secrets(chart: str) -> None:
     for settings, configured in (
         ((), set()),
         ((f"backend.secret.ANTHROPIC_API_KEY={SECRET_VALUE}",), set()),
-        (("backend.postgresCredential.caSecret=db-ca", f"json:backend.secretLookups=[{lookup('ALERTA_API_KEY')}]"),
-         {"db-ca", "s"}),
+        # A lookup is copied into the backend's Secret, so the Pod names no other Secret for it.
+        (("backend.postgresCredential.caSecret=db-ca", f"json:backend.secretLookups=[{lookup('ALERTA_API_KEY')}]",
+          'json:testLookups={"iff/s":{"k":"v"}}'), {"db-ca"}),
         # As the production environment sets it, and a pull Secret.
         (("ingress.tlsSecret=xana-tls", 'json:imagePullSecrets=[{"name":"registry-pull"}]'), {"xana-tls", "registry-pull"}),
     ):
@@ -200,15 +221,30 @@ def check_urls_given(chart: str) -> None:
     assert not env_names(container)
 
 
+def operator_secret(username: str, password: str) -> str:
+    return "json:testLookups=" + json.dumps({"iff/ngb.acid-cluster.credentials": {"username": username, "password": password}})
+
+
 def check_secret_lookups(chart: str) -> None:
+    """Shell or file (backend.secret) first, then a lookup, which is copied into the backend's Secret."""
+    data = {"iff/ngb.acid-cluster.credentials": {"username": "op", "password": "pw"},
+            "iff/alerta": {"alerta-admin-key": "looked-up-alerta"}, "xana-pdt/mine": {"openai": "looked-up-openai"},
+            "iff/other": {"k": "looked-up-other"}}
     lookups = (
         'json:backend.secretLookups=[{"variable":"ALERTA_API_KEY","secret":"alerta","key":"alerta-admin-key"},'
-        '{"variable":"OPENAI_API_KEY","secret":"mine","key":"openai"}]'
+        '{"variable":"OPENAI_API_KEY","secret":"mine","key":"openai","namespace":"xana-pdt"},'
+        '{"variable":"LANGFUSE_HOST_UNUSED","secret":"missing","key":"k"}]'
     )
-    rendered = render(chart, lookups, f"backend.secret.OPENAI_API_KEY={SECRET_VALUE}")
-    env = {e["name"]: e for e in backend_container(rendered)["env"]}
-    assert env["ALERTA_API_KEY"]["valueFrom"]["secretKeyRef"] == {"name": "alerta", "key": "alerta-admin-key"}
-    assert "OPENAI_API_KEY" not in env  # given as a secret, so taken from there
+    rendered = render(chart, lookups, "json:testLookups=" + json.dumps(data))
+    secret = rendered["Secret/x-backend"]["stringData"]
+    assert secret["ALERTA_API_KEY"] == "looked-up-alerta"
+    assert secret["OPENAI_API_KEY"] == "looked-up-openai"  # from the entry's own namespace
+    assert "LANGFUSE_HOST_UNUSED" not in secret  # not found, and nothing needs it
+    refs = {e["valueFrom"]["secretKeyRef"]["name"] for e in backend_container(rendered)["env"] if "valueFrom" in e}
+    assert refs == {"x-database"}, refs  # the Pod reads no looked-up Secret itself
+    # The shell or the file wins over a lookup.
+    rendered = render(chart, lookups, "json:testLookups=" + json.dumps(data),
+                      f"backend.secret.OPENAI_API_KEY={SECRET_VALUE}")
     assert rendered["Secret/x-backend"]["stringData"]["OPENAI_API_KEY"] == SECRET_VALUE
 
 
@@ -229,15 +265,15 @@ def check_secret_lookups_refused(chart: str) -> None:
     for variable in ("DB_USER", "DB_PASSWORD"):
         error = render_error(chart, f"json:backend.secretLookups=[{lookup(variable)}]")
         assert f"secretLookups can't set {variable}: the chart sets it" in error, error
-    # A URL from a lookup isn't built.
-    rendered = render(chart, f"json:backend.secretLookups=[{lookup('TIMESCALE_DB_URL')}]")
-    env = backend_container(rendered)["env"]
-    assert [e["name"] for e in env].count("TIMESCALE_DB_URL") == 1
-    assert {"DB_USER", "POSTGRES_MEMORY_URL"} <= env_names(backend_container(rendered))
+    # A URL from a lookup isn't built, with a cluster or without one.
+    for test in ('json:testLookups={"iff/s":{"k":"postgresql://looked-up"}}', None):
+        rendered = render(chart, f"json:backend.secretLookups=[{lookup('TIMESCALE_DB_URL')}]", *([test] if test else []))
+        names = [e["name"] for e in backend_container(rendered)["env"]]
+        assert "TIMESCALE_DB_URL" not in names and {"DB_USER", "POSTGRES_MEMORY_URL"} <= set(names), names
     # Both URLs from lookups: nothing is built, and no credentials are needed.
     rendered = render(chart, f"json:backend.secretLookups=[{lookup('TIMESCALE_DB_URL')},{lookup('POSTGRES_MEMORY_URL')}]",
-                      credentials=False)
-    assert env_names(backend_container(rendered)) == {"TIMESCALE_DB_URL", "POSTGRES_MEMORY_URL"}
+                      'json:testLookups={"iff/s":{"k":"postgresql://looked-up"}}', credentials=False)
+    assert not env_names(backend_container(rendered))
 
 
 def render_notes(chart: str, *flags: str) -> str:
@@ -259,17 +295,71 @@ def render_notes(chart: str, *flags: str) -> str:
 
 
 def check_notes_list_used_lookups(chart: str) -> None:
+    data = {"iff/s": {"k": "looked-up"}}
     notes = render_notes(
         chart,
-        "--set-json", f"backend.secretLookups=[{lookup('ALERTA_API_KEY')},{lookup('OPENAI_API_KEY')}]",
-        "--set", f"backend.secret.OPENAI_API_KEY={SECRET_VALUE}",
+        "--set-json", f"backend.secretLookups=[{lookup('ALERTA_API_KEY')},{lookup('OPENAI_API_KEY')},"
+                      '{"variable":"GATEWAY_CLIENT_SECRET","secret":"gone","key":"k"}]',
+        "--set", f"backend.secret.OPENAI_API_KEY={SECRET_VALUE}", "--set-json", "testLookups=" + json.dumps(data),
     )
-    assert "ALERTA_API_KEY comes from key k of Secret s" in notes, notes
+    assert "ALERTA_API_KEY was read from key k of Secret s in namespace iff" in notes, notes
     assert "OPENAI_API_KEY" not in notes, notes
+    assert "GATEWAY_CLIENT_SECRET wasn't read: Secret gone in namespace iff not found" in notes, notes
     assert "kept in\nSecret x-database" in notes, notes
     notes = render_notes(chart, "--set", "backend.databaseCredentials.username=", "--set",
-                         "backend.databaseCredentials.password=", "--set", "backend.postgresCredential.secret=copied")
-    assert "come from Secret copied" in notes, notes
+                         "backend.databaseCredentials.password=", "--set-json",
+                         "testLookups=" + json.dumps({"iff/ngb.acid-cluster.credentials": {"username": "u", "password": "p"}}))
+    assert "read from Secret ngb.acid-cluster.credentials in namespace iff" in notes, notes
+
+
+FERNET_KEY = "r8kO0dYd9Oq6K3WkLz8m2N1pQ4sT7vX0yB5cE8fH2jA="
+# Each check the backend makes when it starts, made when deploying: the settings, and the backend's message.
+PAIRS = (
+    (("backend.config.LLM_PROVIDER=anthropic",), "ANTHROPIC_API_KEY is required when LLM_PROVIDER is anthropic"),
+    (("backend.config.LLM_PROVIDER=openai",),
+     "OPENAI_API_KEY is required when LLM_PROVIDER is openai without OPENAI_BASE_URL"),
+    (("backend.config.GATEWAY_URL=http://g", "backend.config.GATEWAY_KEYCLOAK_URL=http://k"),
+     "SETTINGS_ENCRYPTION_KEY is required when GATEWAY_URL is set. Make one with: "
+     "python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'"),
+    (("backend.secret.SETTINGS_ENCRYPTION_KEY=not-a-key",), "SETTINGS_ENCRYPTION_KEY is not a valid key."),
+    (("backend.config.GATEWAY_URL=http://g", f"backend.secret.SETTINGS_ENCRYPTION_KEY={FERNET_KEY}"),
+     "GATEWAY_KEYCLOAK_URL is required when GATEWAY_URL is set"),
+    (("backend.config.CALLBACK_BASE_URL=http://c",), "EVENT_WEBHOOK_SECRET is required when CALLBACK_BASE_URL is set"),
+    (("backend.config.KEYCLOAK_SERVICE_CLIENT_ID=x", "backend.config.KEYCLOAK_URL=http://k"),
+     "KEYCLOAK_SERVICE_CLIENT_ID and KEYCLOAK_SERVICE_CLIENT_SECRET must be set together"),
+    (("backend.secret.KEYCLOAK_SERVICE_CLIENT_SECRET=x",),
+     "KEYCLOAK_SERVICE_CLIENT_ID and KEYCLOAK_SERVICE_CLIENT_SECRET must be set together"),
+    (("backend.config.KEYCLOAK_SERVICE_CLIENT_ID=x", "backend.secret.KEYCLOAK_SERVICE_CLIENT_SECRET=x"),
+     "KEYCLOAK_URL is required when KEYCLOAK_SERVICE_CLIENT_ID is set"),
+    (("backend.secret.LANGFUSE_PUBLIC_KEY=x",), "LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY must be set together"),
+    (("backend.config.ALERTA_URL=http://alerta:8080",),
+     "must end in /api, for example http://alerta:8080/api; without it, Alerta answers with its web page"),
+    (("backend.config.FUSEKI_DATASET=a b",), "must be a dataset name (letters, digits, dashes, underscores)"),
+    (("backend.config.TIMESCALE_TABLE=a-b",), "must be a table name (letters, digits, underscores, optional schema)"),
+    (("backend.secret.ALERTA_API_KEY=a b",), "must not contain spaces or line breaks"),
+)
+
+
+def check_paired_settings(chart: str) -> None:
+    config = (Path(__file__).resolve().parents[2] / "backend/app/config.py").read_text()
+    for settings, message in PAIRS:
+        error = render_error(chart, *settings)
+        assert message in error, (settings, error)
+        # The backend's own words, so the two stay in step. Python adds the key-making hint from a constant.
+        assert message.split(". Make one with")[0].rstrip(".") in config, message
+    assert "Make one with: python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'" in config
+    # Satisfied: each passes with what it needs.
+    render(chart, "backend.config.GATEWAY_URL=http://g", "backend.config.GATEWAY_KEYCLOAK_URL=http://k",
+           f"backend.secret.SETTINGS_ENCRYPTION_KEY={FERNET_KEY}", "backend.config.CALLBACK_BASE_URL=http://c",
+           "backend.secret.EVENT_WEBHOOK_SECRET=w", "backend.config.LLM_PROVIDER=openai",
+           "backend.config.OPENAI_BASE_URL=http://o")
+    # A secret a lookup would give counts as present without a cluster, and as missing when the lookup found
+    # nothing.
+    entry = f"json:backend.secretLookups=[{lookup('EVENT_WEBHOOK_SECRET')}]"
+    render(chart, "backend.config.CALLBACK_BASE_URL=http://c", entry)
+    error = render_error(chart, "backend.config.CALLBACK_BASE_URL=http://c", entry, "json:testLookups={}")
+    assert "EVENT_WEBHOOK_SECRET is required when CALLBACK_BASE_URL is set" in error, error
+    render(chart, "backend.config.CALLBACK_BASE_URL=http://c", entry, 'json:testLookups={"iff/s":{"k":"w"}}')
 
 
 def check_no_secret_in_a_config_map(chart: str) -> None:
@@ -290,6 +380,7 @@ def check_machine_events_settings(chart: str) -> None:
         "backend.config.CALLBACK_BASE_URL=http://x-backend:8000",
         f"backend.secret.EVENT_WEBHOOK_SECRET={SECRET_VALUE}",
         f"backend.secret.KEYCLOAK_SERVICE_CLIENT_SECRET={SECRET_VALUE}",
+        "backend.config.KEYCLOAK_SERVICE_CLIENT_ID=xana-events", "backend.config.KEYCLOAK_URL=https://kc.example.org",
     )
     config = rendered["ConfigMap/x-backend"]["data"]
     assert config["CALLBACK_BASE_URL"] == "http://x-backend:8000"
@@ -371,6 +462,8 @@ CHECKS = (
     check_operator_secret,
     check_copied_secret,
     check_no_credentials,
+    check_offline,
+    check_paired_settings,
     check_special_characters,
     check_only_own_secrets,
     check_credentials_restart,

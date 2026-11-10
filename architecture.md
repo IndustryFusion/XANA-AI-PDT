@@ -557,21 +557,20 @@ XANA AI PDT uses a two-layer deployment model:
          Keycloak │ Dataspace Gateway │ IFRIC Registry
 ```
 
-The frontend's nginx configuration is a ConfigMap, mounted over the image's template, and takes the backend's address from `XANA_BACKEND_URL` at container start. A release goes in its own namespace, `xana-pdt`, and reaches the platform's services in `platformNamespace` (`iff`) by `<service>.<namespace>`. Its Pods name only Secrets in `xana-pdt`. The backend's settings are in its ConfigMap; its secrets come from shell variables of the backend's own names, which `helm/envs/iff-cluster.sh` can export from the platform's Secrets, or from Secrets in `xana-pdt` read when the Pod starts (`secretLookups`). The database credentials, exported the same way, are kept percent-encoded in the chart's own Secret, from which the Pod builds the database URLs. See [`helm/README.md`](helm/README.md).
+The frontend's nginx configuration is a ConfigMap, mounted over the image's template, and takes the backend's address from `XANA_BACKEND_URL` at container start. A release goes in its own namespace, `xana-pdt`, and reaches the platform's services in `iff` at their full in-cluster addresses (`<service>.iff.svc.cluster.local`), written out in `helm/environment/default.yaml`. Its Pods name only Secrets in `xana-pdt`. The backend's settings are in its ConfigMap. Each secret comes from the shell variable of the backend's own name, else the environment file, else the platform's Secrets, read with Helm `lookup` when deploying with the deploying user's own access and copied into the chart's Secrets. The database credentials, read the same way from the database operator's Secret, are kept percent-encoded in the chart's own Secret, from which the Pod builds the database URLs. Settings the backend checks when it starts, such as `SETTINGS_ENCRYPTION_KEY` with `GATEWAY_URL`, are checked when deploying. See [`helm/README.md`](helm/README.md).
 
 Deployment is managed with Helmfile 1.1.9, in the layout of the IndustryFusion platform (DigitalTwin, Dataspace):
 
 ```
 helm/
 ├── bootstrap.sh                    # downloads the pinned Helmfile into helm/helmfile, checksum-checked
-├── helmfile.yaml.gotmpl            # release xana-pdt, environments default, production, localAndIonos
+├── helmfile.yaml.gotmpl            # release xana-pdt, environments default and production
 ├── values.yaml.gotmpl              # turns environment keys and shell variables into the chart's values
 ├── environment/
-│   ├── default.yaml                # every key, with its default
-│   ├── production.yaml             # pinned image tag, TLS secret
-│   └── localAndIonos.yaml          # production on a local-and-IONOS cluster; placeholders to fill in
+│   ├── default.yaml                # every key: filled in for you, fill in for your cluster, secrets
+│   └── production.yaml             # pinned image tag, TLS secret
 ├── envs/
-│   └── iff-cluster.sh              # sourced: exports the backend's secrets from the cluster's Secrets
+│   └── iff-cluster.sh              # optional, sourced: exports the backend's secrets from the cluster's Secrets
 ├── test/                           # checks, stand-in services, local test values and a smoke test, used by CI
 └── charts/
     └── xana-pdt/                   # Helm chart (backend + frontend + ingress)
