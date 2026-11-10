@@ -179,30 +179,35 @@ langfuseHost: ""
 #   For:      the Anthropic model.
 #   Required: with llmProvider anthropic.
 #   Get:      Anthropic's console, API keys.
+#   Read:     else from key ANTHROPIC_API_KEY of Secret xana-pdt-credentials in namespace (xana-pdt): XANA's own.
 anthropicApiKey: ""
 
 # OPENAI_API_KEY
 #   For:      OpenAI's model.
 #   Required: with llmProvider openai and no openaiBaseUrl.
 #   Get:      OpenAI's dashboard, API keys.
+#   Read:     else from key OPENAI_API_KEY of Secret xana-pdt-credentials in namespace (xana-pdt): XANA's own.
 openaiApiKey: ""
 
 # ALERTA_API_KEY
 #   For:      reading and acknowledging alerts in Alerta.
 #   Required: for the alerts screen; without it, alerts can't be read.
 #   Get:      Alerta's admin key, key alerta-admin-key of Secret alerta in the platform's namespace.
+#   Read:     else from key alerta-admin-key of Secret alerta in platformNamespace (iff): the platform's.
 alertaApiKey: ""
 
 # EVENT_WEBHOOK_SECRET
 #   For:      checking that machine events come from Scorpio and Alerta.
 #   Required: with callbackBaseUrl, which is set above.
 #   Get:      openssl rand -hex 32
+#   Read:     else from key EVENT_WEBHOOK_SECRET of Secret xana-pdt-credentials in namespace (xana-pdt): XANA's own.
 eventWebhookSecret: ""
 
 # KEYCLOAK_SERVICE_CLIENT_SECRET
 #   For:      the service client that reads Scorpio for machine events.
 #   Required: with keycloakServiceClientId.
 #   Get:      that client's Credentials tab in Keycloak.
+#   Read:     with the commented entry below, from Secret keycloak-client-secret-xana in platformNamespace.
 keycloakServiceClientSecret: ""
 
 # SETTINGS_ENCRYPTION_KEY
@@ -210,36 +215,42 @@ keycloakServiceClientSecret: ""
 #             key makes the stored secret unreadable.
 #   Required: with gatewayUrl.
 #   Get:      python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'
+#   Read:     else from key SETTINGS_ENCRYPTION_KEY of Secret xana-pdt-credentials in namespace (xana-pdt): XANA's own.
 settingsEncryptionKey: ""
 
 # GATEWAY_CLIENT_SECRET
 #   For:      XANA's client in the dataspace's realm.
 #   Required: never; without it, the operator enters it on the Settings screen.
 #   Get:      the client's Credentials tab in the dataspace's Keycloak.
+#   Read:     else from key GATEWAY_CLIENT_SECRET of Secret xana-pdt-credentials in namespace (xana-pdt): XANA's own.
 gatewayClientSecret: ""
 
 # LANGFUSE_PUBLIC_KEY
 #   For:      sending traces to Langfuse.
 #   Required: together with LANGFUSE_SECRET_KEY; without both, nothing is traced.
 #   Get:      the Langfuse project's settings, API keys.
+#   Read:     else from key LANGFUSE_PUBLIC_KEY of Secret xana-pdt-credentials in namespace (xana-pdt): XANA's own.
 langfusePublicKey: ""
 
 # LANGFUSE_SECRET_KEY
 #   For:      sending traces to Langfuse.
 #   Required: together with LANGFUSE_PUBLIC_KEY.
 #   Get:      the Langfuse project's settings, API keys.
+#   Read:     else from key LANGFUSE_SECRET_KEY of Secret xana-pdt-credentials in namespace (xana-pdt): XANA's own.
 langfuseSecretKey: ""
 
 # DATABASE_USERNAME
 #   For:      the database login; the chart keeps it in Secret xana-pdt-database.
 #   Required: unless read from databaseCredentialsSecret below, or both database URLs are given.
 #   Get:      key username of the database operator's Secret, ngb.acid-cluster.credentials.
+#   Read:     else from databaseCredentialsSecret in databaseCredentialsNamespace (iff): the platform's.
 databaseUsername: ""
 
 # DATABASE_PASSWORD
 #   For:      the database login, kept percent-encoded in Secret xana-pdt-database.
 #   Required: with DATABASE_USERNAME.
 #   Get:      key password of the database operator's Secret, ngb.acid-cluster.credentials.
+#   Read:     else from databaseCredentialsSecret in databaseCredentialsNamespace (iff): the platform's.
 databasePassword: ""
 
 # TIMESCALE_DB_URL
@@ -254,23 +265,28 @@ timescaleDbUrl: ""
 #   Get:      postgresql://<user>:<password>@<host>:5432/memory
 postgresMemoryUrl: ""
 
-# Read from the platform's Secrets when deploying -------------------------------------------------------
+# Read from the platform's Secrets and XANA's own when deploying ----------------------------------------
 # A secret not given above or in the shell is read with your own kubectl access during apply, from these
-# Secrets in platformNamespace (or an entry's own namespace), and copied into XANA's Secrets in xana-pdt.
+# Secrets, and copied into XANA's Secrets in xana-pdt. Each entry's namespace is $namespace (XANA's own
+# namespace, xana-pdt), $platformNamespace (iff), or a namespace's name; without one, platformNamespace.
 # helmfile template, without a cluster, skips this and says so in the rendered Secrets.
 
-# The database operator's Secret, with keys username and password.
+# The database operator's Secret, with keys username and password: the platform's.
 databaseCredentialsSecret: ngb.acid-cluster.credentials
+# Where it is: $platformNamespace, or $namespace for a copy kept in xana-pdt, or a namespace's name.
+databaseCredentialsNamespace: $platformNamespace
 
-# Each entry: the variable, the Secret and its key, and optionally the namespace (default platformNamespace).
+# Each entry: the variable, the Secret and its key, and the namespace.
 secretLookups:
-  - { variable: ALERTA_API_KEY, secret: alerta, key: alerta-admin-key }
-  - { variable: EVENT_WEBHOOK_SECRET, secret: xana-pdt-credentials, key: EVENT_WEBHOOK_SECRET }
-  - { variable: SETTINGS_ENCRYPTION_KEY, secret: xana-pdt-credentials, key: SETTINGS_ENCRYPTION_KEY }
-  - { variable: GATEWAY_CLIENT_SECRET, secret: xana-pdt-credentials, key: GATEWAY_CLIENT_SECRET }
-  - { variable: ANTHROPIC_API_KEY, secret: xana-pdt-credentials, key: ANTHROPIC_API_KEY }
-  - { variable: OPENAI_API_KEY, secret: xana-pdt-credentials, key: OPENAI_API_KEY }
-  - { variable: LANGFUSE_PUBLIC_KEY, secret: xana-pdt-credentials, key: LANGFUSE_PUBLIC_KEY }
-  - { variable: LANGFUSE_SECRET_KEY, secret: xana-pdt-credentials, key: LANGFUSE_SECRET_KEY }
+  # The platform's Secrets, in platformNamespace (iff):
+  - { variable: ALERTA_API_KEY, secret: alerta, key: alerta-admin-key, namespace: $platformNamespace }
   # With keycloakServiceClientId set:
-  # - { variable: KEYCLOAK_SERVICE_CLIENT_SECRET, secret: keycloak-client-secret-xana, key: CLIENT_SECRET }
+  # - { variable: KEYCLOAK_SERVICE_CLIENT_SECRET, secret: keycloak-client-secret-xana, key: CLIENT_SECRET, namespace: $platformNamespace }
+  # XANA's own Secret, xana-pdt-credentials, in namespace (xana-pdt). Create it there (see README.md):
+  - { variable: EVENT_WEBHOOK_SECRET, secret: xana-pdt-credentials, key: EVENT_WEBHOOK_SECRET, namespace: $namespace }
+  - { variable: SETTINGS_ENCRYPTION_KEY, secret: xana-pdt-credentials, key: SETTINGS_ENCRYPTION_KEY, namespace: $namespace }
+  - { variable: GATEWAY_CLIENT_SECRET, secret: xana-pdt-credentials, key: GATEWAY_CLIENT_SECRET, namespace: $namespace }
+  - { variable: ANTHROPIC_API_KEY, secret: xana-pdt-credentials, key: ANTHROPIC_API_KEY, namespace: $namespace }
+  - { variable: OPENAI_API_KEY, secret: xana-pdt-credentials, key: OPENAI_API_KEY, namespace: $namespace }
+  - { variable: LANGFUSE_PUBLIC_KEY, secret: xana-pdt-credentials, key: LANGFUSE_PUBLIC_KEY, namespace: $namespace }
+  - { variable: LANGFUSE_SECRET_KEY, secret: xana-pdt-credentials, key: LANGFUSE_SECRET_KEY, namespace: $namespace }

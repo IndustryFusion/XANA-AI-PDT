@@ -68,6 +68,23 @@ offline
 {{- end }}
 
 {{- /*
+A lookup's namespace: dict "root" "namespace". "$namespace" is the release's, "$platformNamespace" is
+platformNamespace, empty is platformNamespace, and any other name is used as given. Another "$" name stops.
+*/}}
+{{- define "xana-pdt.lookupNamespace" -}}
+{{- $n := .namespace | default "$platformNamespace" | toString -}}
+{{- if eq $n "$namespace" -}}
+{{ .root.Release.Namespace }}
+{{- else if eq $n "$platformNamespace" -}}
+{{ .root.Values.platformNamespace }}
+{{- else if hasPrefix "$" $n -}}
+{{- fail (printf "%s isn't a namespace the chart knows: use $namespace, $platformNamespace or a namespace's name." $n) -}}
+{{- else -}}
+{{ $n }}
+{{- end -}}
+{{- end }}
+
+{{- /*
 Reads one key of one Secret: dict "root" "namespace" "name" "key" "mode". Gives JSON {"value": …} or
 {"problem": …}. In "test" mode, testLookups maps "<namespace>/<name>" to the Secret's keys, in plain text.
 */}}
@@ -124,7 +141,7 @@ and, with a cluster, for no credentials found.
 {{- fail (printf "secretLookups can't set %s: the chart sets it to build the database URLs. Give both database URLs instead, or remove the entry." $variable) -}}
 {{- end -}}
 {{- if not (hasKey $given $variable) -}}
-{{- $entry := dict "variable" $variable "secret" (required "each of secretLookups needs a secret" .secret) "key" (required "each of secretLookups needs a key" .key) "namespace" (.namespace | default $.Values.platformNamespace) -}}
+{{- $entry := dict "variable" $variable "secret" (required "each of secretLookups needs a secret" .secret) "key" (required "each of secretLookups needs a key" .key) "namespace" (include "xana-pdt.lookupNamespace" (dict "root" $ "namespace" .namespace)) -}}
 {{- if eq $mode "offline" -}}
 {{- $pending = append $pending $variable -}}
 {{- else -}}
@@ -157,18 +174,19 @@ and, with a cluster, for no credentials found.
 {{- $database = dict "source" "offline" -}}
 {{- else -}}
 {{- $name := .Values.backend.postgresCredential.secret -}}
+{{- $dbNamespace := include "xana-pdt.lookupNamespace" (dict "root" $ "namespace" .Values.backend.postgresCredential.namespace) -}}
 {{- $why := "databaseCredentialsSecret is empty" -}}
 {{- if $name -}}
-{{- $u := include "xana-pdt.readSecret" (dict "root" $ "namespace" .Values.platformNamespace "name" $name "key" "username" "mode" $mode) | fromJson -}}
-{{- $p := include "xana-pdt.readSecret" (dict "root" $ "namespace" .Values.platformNamespace "name" $name "key" "password" "mode" $mode) | fromJson -}}
+{{- $u := include "xana-pdt.readSecret" (dict "root" $ "namespace" $dbNamespace "name" $name "key" "username" "mode" $mode) | fromJson -}}
+{{- $p := include "xana-pdt.readSecret" (dict "root" $ "namespace" $dbNamespace "name" $name "key" "password" "mode" $mode) | fromJson -}}
 {{- if and (hasKey $u "value") (hasKey $p "value") -}}
-{{- $database = dict "source" "lookup" "username" $u.value "password" $p.value "secret" $name -}}
+{{- $database = dict "source" "lookup" "username" $u.value "password" $p.value "secret" $name "namespace" $dbNamespace -}}
 {{- else -}}
 {{- $why = $u.problem | default $p.problem -}}
 {{- end -}}
 {{- end -}}
 {{- if ne $database.source "lookup" -}}
-{{- fail (printf "The backend has no database credentials: %s. Set DATABASE_USERNAME and DATABASE_PASSWORD, set databaseCredentialsSecret to the database operator's Secret in namespace %s, or give TIMESCALE_DB_URL and POSTGRES_MEMORY_URL." $why .Values.platformNamespace) -}}
+{{- fail (printf "The backend has no database credentials: %s. Set DATABASE_USERNAME and DATABASE_PASSWORD, set databaseCredentialsSecret and databaseCredentialsNamespace to the database operator's Secret (read in %s), or give TIMESCALE_DB_URL and POSTGRES_MEMORY_URL." $why $dbNamespace) -}}
 {{- end -}}
 {{- end -}}
 {{- end -}}
@@ -178,5 +196,5 @@ and, with a cluster, for no credentials found.
 {{- /* The note a Secret carries when the platform's Secrets weren't read. */}}
 {{- define "xana-pdt.offlineNote" -}}
 # The platform's Secrets weren't read: this render had no cluster (helm template, or a diff without
-# --dry-run=server). apply reads them from namespace {{ .Values.platformNamespace }}.
+# --dry-run=server). apply reads them, and XANA's own, each in the namespace its entry names.
 {{- end }}

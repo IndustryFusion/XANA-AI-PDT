@@ -80,9 +80,10 @@ SECTION_2 = {
     "llmProvider", "llmModel", "llmProviderName", "ollamaUrl", "openaiBaseUrl", "gatewayUrl", "gatewayKeycloakUrl",
     "gatewayClientId", "ifricUrl", "fusekiGraphBase", "langfuseHost",
 }
-LOOKUP_KEYS = {"databaseCredentialsSecret", "secretLookups"}
+LOOKUP_KEYS = {"databaseCredentialsSecret", "databaseCredentialsNamespace", "secretLookups"}
 DATABASE = {
     "databaseHost", "databasePort", "databaseTimeseriesName", "databaseMemoryName", "databaseCredentialsSecret",
+    "databaseCredentialsNamespace",
     "databaseCaSecret",
 }
 CHART = {

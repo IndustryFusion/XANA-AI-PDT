@@ -81,7 +81,11 @@ LABELS = {
 HINTS = {
     "memory": "Check POSTGRES_MEMORY_URL, and that the database is running. Runs can't be stored without it.",
     "timeseries": "Check TIMESCALE_DB_URL and TIMESCALE_TABLE. The agent reads signal history from it.",
-    "broker": "Check NGSI_URL. A refusal means the signed-in operator's token isn't accepted.",
+    "broker": (
+        "Check, in order: that someone is signed in (the check uses the operator's token); that KEYCLOAK_URL is "
+        "the issuer the context broker checks, Keycloak's external address; that the user has a role on client "
+        "scorpio; and that NGSI_TENANT, if set, names a tenant that exists."
+    ),
     "llm": "Check LLM_PROVIDER and LLM_MODEL, and that the model has been downloaded or the key is valid.",
     "alerta": "Check ALERTA_URL, which ends in /api, and ALERTA_API_KEY. The Alerts screen and alert events use it.",
     "mqtt": "Check MQTT_BROKER_URL, and that operators have Factory-Admin or Factory-Reader on client scorpio.",
@@ -263,18 +267,26 @@ class HealthService:
         return "ok", f"Reachable at {mask_url(url)}; table {table} present"
 
     async def _broker(self) -> tuple[Status, str]:
-        headers = {"Accept": "application/json"}
+        # As the platform's own clients ask: NGSI-LD answers its problem details in JSON-LD.
+        headers = {"Accept": "application/ld+json"}
         if self._s.ngsi_tenant:
             headers["NGSILD-Tenant"] = self._s.ngsi_tenant
-        if self._token and (token := self._token()):
+        token = self._token() if self._token else None
+        if token:
             headers["Authorization"] = f"Bearer {token}"
+        address = f"{self._s.ngsi_url.rstrip('/')}/ngsi-ld/v1/types"
         async with httpx.AsyncClient(timeout=self._s.health_timeout_s, transport=self._transport) as client:
-            response = await client.get(f"{self._s.ngsi_url.rstrip('/')}/ngsi-ld/v1/types", headers=headers)
+            response = await client.get(address, headers=headers)
+        if response.status_code == 200:
+            return "ok", f"Reachable at {mask_url(self._s.ngsi_url)}"
+        sent = "a token was sent" if token else "no token was sent"
+        said = _broker_answer(response, token)
         if response.status_code in (401, 403):
-            return "error", f"{mask_url(self._s.ngsi_url)} refused the token (HTTP {response.status_code})"
-        if response.status_code != 200:
-            return "error", f"{mask_url(self._s.ngsi_url)} answered HTTP {response.status_code}"
-        return "ok", f"Reachable at {mask_url(self._s.ngsi_url)}"
+            what = f"refused the token (HTTP {response.status_code}; {sent})"
+        else:
+            what = f"answered HTTP {response.status_code} ({sent})"
+        # The report's redactor masks every configured secret in this detail as well.
+        return "error", f"{mask_url(address)} {what}. The broker said: {said}"
 
     async def _llm(self) -> tuple[Status, str]:
         s = self._s
@@ -438,6 +450,21 @@ async def _connect(url: str, connect_timeout_s: float) -> psycopg.AsyncConnectio
 async def _select_one(url: str, connect_timeout_s: float) -> None:
     async with await _connect(url, connect_timeout_s) as conn:
         await conn.execute("SELECT 1")
+
+
+def _broker_answer(response: httpx.Response, token: str | None) -> str:
+    """The start of the broker's answer: NGSI-LD's problem details, else its first 300 characters."""
+    text = ""
+    try:
+        body = response.json()
+    except ValueError:
+        body = None
+    if isinstance(body, dict) and (body.get("title") or body.get("detail")):
+        text = ": ".join(str(body[k]) for k in ("title", "detail") if body.get(k))
+    if not text:
+        text = " ".join(response.text.split())
+    text = text[:300] or "nothing"
+    return text.replace(token, "***") if token else text
 
 
 def _usable(check: Check) -> bool:

@@ -110,6 +110,7 @@ backend:
     timeseriesDatabase: {{ .Values.databaseTimeseriesName | quote }}
     memoryDatabase: {{ .Values.databaseMemoryName | quote }}
     secret: {{ .Values.databaseCredentialsSecret | quote }}
+    namespace: {{ .Values.databaseCredentialsNamespace | default "$platformNamespace" | quote }}
     caSecret: {{ .Values.databaseCaSecret | quote }}
   secretLookups: {{ .Values.secretLookups | default list | toJson }}
 ingress:

@@ -200,7 +200,8 @@ The chart's own [`values.yaml`](charts/xana-pdt/values.yaml), for an install wit
 |---|---|---|
 | `databaseHost`, `databasePort` | `acid-cluster.iff.svc.cluster.local`, `5432` | The PostgreSQL server |
 | `databaseTimeseriesName`, `databaseMemoryName` | `tsdb`, `memory` | The two databases |
-| `databaseCredentialsSecret` | `ngb.acid-cluster.credentials` | The database operator's Secret, with keys `username` and `password`, read in `platformNamespace` when deploying |
+| `databaseCredentialsSecret` | `ngb.acid-cluster.credentials` | The database operator's Secret, with keys `username` and `password`, read when deploying |
+| `databaseCredentialsNamespace` | `$platformNamespace` | Where that Secret is: `$platformNamespace`, `$namespace` for a copy in `xana-pdt`, or a namespace's name |
 | `databaseCaSecret` | | A Secret in `xana-pdt` holding the CA certificate as `ca.crt` |
 
 Unless `TIMESCALE_DB_URL` and `POSTGRES_MEMORY_URL` are given, as secrets or by `secretLookups`, the Pod builds them when it starts from the database credentials, host, port and database names; only a missing one is built.
@@ -211,7 +212,7 @@ The credentials come from the first of these, and are kept in the chart's own Se
 
 1. `DATABASE_USERNAME` and `DATABASE_PASSWORD` in the shell;
 2. the keys `databaseUsername` and `databasePassword`, empty in committed files;
-3. `databaseCredentialsSecret`, read in `platformNamespace` when deploying.
+3. `databaseCredentialsSecret`, read in `databaseCredentialsNamespace` when deploying.
 
 With none found, `apply` stops, naming the Secret and namespace it read. It also stops when only one of the two variables is set.
 
@@ -235,6 +236,8 @@ The frontend's nginx configuration is in a ConfigMap, mounted over the image's t
 ### Using it
 
 Sign-in uses `keycloakUrl`, Keycloak's external address with `/auth` if it has it, for example `https://keycloak.example.org/auth`. Tokens must match the issuer that Scorpio checks, so don't use the in-cluster address. The platform's `scorpio` client in realm `iff` is used by default.
+
+The context broker's check, in the System screen and `/api/diagnostics`, asks `…/ngsi-ld/v1/types` with the operator's token. When the broker doesn't answer 200, it shows the status, the address, whether a token was sent, and the start of the broker's answer (its `title` and `detail`, or its first 300 characters), with secrets masked. The usual causes, in order: nobody is signed in; `keycloakUrl` isn't the issuer the broker checks, which is Keycloak's external address; the user has no role on client `scorpio`; `ngsiTenant` names a tenant that doesn't exist.
 
 The Data Explorer reads history from `pgrestUrl`. Set `ngsiContextUrl` if operators or the agent's lookups use short names on data with full IRIs.
 
@@ -303,21 +306,31 @@ The release's existing Secret is not a source: a run without a secret removes it
 
 During `apply` (or `sync`), the chart reads with Helm `lookup`, and copies into its own Secrets in `xana-pdt`:
 
-- the database credentials, from `databaseCredentialsSecret` in `platformNamespace`;
-- each `secretLookups` entry not already given, from its Secret's key, in its `namespace`, or else `platformNamespace`.
+- the database credentials, from `databaseCredentialsSecret` in `databaseCredentialsNamespace`;
+- each `secretLookups` entry not already given, from its Secret's key, in its `namespace`.
 
-The default `secretLookups` read `ALERTA_API_KEY` from Secret `alerta` (key `alerta-admin-key`), and the other secrets from `xana-pdt-credentials` by variable name, all in `iff`. `KEYCLOAK_SERVICE_CLIENT_SECRET` from `keycloak-client-secret-xana` (key `CLIENT_SECRET`) is a commented example, to add with `keycloakServiceClientId`. A lookup that finds nothing leaves the variable unset; that stops `apply` only if something needs it, naming the Secret it read. `NOTES` after `apply` lists what was read and what wasn't.
+A `namespace` is `$namespace` (XANA's own, the release's namespace, `xana-pdt`), `$platformNamespace` (`iff`), or a namespace's name, which is used as given. An entry without one is read in `platformNamespace`. Another `$` name stops the render. With the defaults:
 
-`xana-pdt-credentials` is XANA's own Secret, kept in `iff`, which you create once, with a key per variable it should hold, for example:
+| Secret | Kind | Read in | Gives |
+|---|---|---|---|
+| `xana-pdt-credentials` | XANA's own | `$namespace` (`xana-pdt`) | `EVENT_WEBHOOK_SECRET`, `SETTINGS_ENCRYPTION_KEY`, `GATEWAY_CLIENT_SECRET`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, by variable name |
+| `alerta` | the platform's | `$platformNamespace` (`iff`) | `ALERTA_API_KEY` (key `alerta-admin-key`) |
+| `keycloak-client-secret-xana` | the platform's | `$platformNamespace` | `KEYCLOAK_SERVICE_CLIENT_SECRET` (key `CLIENT_SECRET`), a commented example to add with `keycloakServiceClientId` |
+| `ngb.acid-cluster.credentials` (`databaseCredentialsSecret`) | the platform's | `databaseCredentialsNamespace`, default `$platformNamespace` | `DATABASE_USERNAME`, `DATABASE_PASSWORD`; `$namespace` reads a copy kept in `xana-pdt` |
+
+So changing `namespace`, `platformNamespace` or `databaseCredentialsNamespace` moves the matching lookups. A lookup that finds nothing leaves the variable unset; that stops `apply` only if something needs it, naming the Secret it read. `NOTES` after `apply` lists what was read and what wasn't.
+
+`xana-pdt-credentials` is XANA's own Secret, kept in `xana-pdt` next to XANA, which you create once, with a key per variable it should hold, for example:
 
 ```bash
-kubectl -n iff create secret generic xana-pdt-credentials \
+kubectl create namespace xana-pdt      # if it isn't there yet
+kubectl -n xana-pdt create secret generic xana-pdt-credentials \
   --from-literal=SETTINGS_ENCRYPTION_KEY="$(python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')" \
   --from-literal=EVENT_WEBHOOK_SECRET="$(openssl rand -hex 32)" \
   --from-file=ANTHROPIC_API_KEY=./anthropic-key.txt
 ```
 
-**Permissions.** The lookups run with your own kubeconfig: you need `get` on those Secrets and on ServiceAccount `default` in `iff` (and in any other namespace an entry names), besides what installing in `xana-pdt` needs. Nothing is granted inside the cluster: XANA's Pods get no access to the platform's Secrets. A lookup you may not make stops `apply` with Helm's own error, naming the resource; give that secret in the shell instead.
+**Permissions.** The lookups run with your own kubeconfig: you need `get` on those Secrets, in `xana-pdt` and `iff`, and on ServiceAccount `default` in `iff` (and in any other namespace an entry names), besides what installing in `xana-pdt` needs. Nothing is granted inside the cluster: XANA's Pods get no access to the platform's Secrets. A lookup you may not make stops `apply` with Helm's own error, naming the resource; give that secret in the shell instead.
 
 **Without a cluster.** `helmfile template` and `helm template` read nothing; the chart tells this from "not found" by looking up ServiceAccount `default` in `platformNamespace`. The rendered database and backend Secrets then carry a comment, "The platform's Secrets weren't read: this render had no cluster…", listing what wasn't read, and no check a lookup could satisfy stops the render. `helmfile apply` diffs first, and helm-diff renders without cluster access unless asked: the diff then shows the looked-up keys as removed, and `apply` goes on to `sync`, which reads them. `--suppress-secrets` hides that noise; `--diff-args=--dry-run=server` lets the diff read them too.
 
@@ -336,14 +349,14 @@ The checks the backend makes when it starts are made by the chart when deploying
 
 ### The cluster-secrets helper
 
-**`envs/iff-cluster.sh`** is no longer needed, as the chart reads the same Secrets when deploying; it still works, and what it exports counts as the shell. Sourced from bash, it reads them with `kubectl` from Secrets in namespace `iff` and exports them: `ALERTA_API_KEY` from Secret `alerta` (key `alerta-admin-key`), `KEYCLOAK_SERVICE_CLIENT_SECRET` from `keycloak-client-secret-xana` (key `CLIENT_SECRET`), `DATABASE_USERNAME` and `DATABASE_PASSWORD` from the operator's Secret `ngb.acid-cluster.credentials` (keys `username` and `password`), and the others from `xana-pdt-credentials`, by variable name.
+**`envs/iff-cluster.sh`** is no longer needed, as the chart reads the same Secrets when deploying; it still works, and what it exports counts as the shell. Sourced from bash, it reads them with `kubectl` and exports them: from the platform's namespace, `IFF_NAMESPACE` (default `iff`), `ALERTA_API_KEY` from Secret `alerta` (key `alerta-admin-key`), `KEYCLOAK_SERVICE_CLIENT_SECRET` from `keycloak-client-secret-xana` (key `CLIENT_SECRET`), and `DATABASE_USERNAME` and `DATABASE_PASSWORD` from the operator's Secret `ngb.acid-cluster.credentials` (keys `username` and `password`); and from XANA's namespace, `XANA_NAMESPACE` (default `xana-pdt`), the others from `xana-pdt-credentials`, by variable name. It prints both namespaces. A namespace it can't read has its variables reported as not found; only when it can read neither does the `source` fail.
 
 - It prints the kube context it reads from, so you can check it is the cluster you mean, and only variable names, never a value. It writes no file.
 - A variable already set and not empty is kept, and exported if it wasn't, so `helmfile` sees it. If it differs from the cluster's value, it says so, without printing either.
 - A missing Secret or key is reported by name and skipped.
 - Without `kubectl`, or when it can't read the namespace's Secrets, it exports nothing and the `source` fails with status 1. Under `set -e` that ends the shell; `source envs/iff-cluster.sh || true` goes on regardless.
 - It needs bash. In zsh or another shell it stops with a message and exports nothing; run `bash`, then source it there.
-- `IFF_NAMESPACE`, `IFF_ALERTA_SECRET`, `IFF_KEYCLOAK_CLIENT_SECRET`, `IFF_XANA_SECRET` and `IFF_DATABASE_SECRET` change the namespace and Secret names.
+- `XANA_NAMESPACE`, `IFF_NAMESPACE`, `IFF_ALERTA_SECRET`, `IFF_KEYCLOAK_CLIENT_SECRET`, `IFF_XANA_SECRET` and `IFF_DATABASE_SECRET` change the namespaces and Secret names. `XANA_NAMESPACE` is not one of the earlier names the render refuses.
 
 ### Earlier names
 
@@ -361,6 +374,7 @@ For an install made with the layout before this one:
 - **`localAndIonos`** is gone. Put its values into Section 2, and use `-e production` for the production overrides.
 - **Database credentials** are read from the operator's Secret when deploying. `envs/iff-cluster.sh` is optional. A copy of that Secret in `xana-pdt` is no longer used: `databaseCredentialsSecret` names the Secret in `platformNamespace`.
 - **`secretLookups`** are read when deploying and copied into the chart's Secret, not read by the Pod. An entry for a Secret in `xana-pdt` needs `namespace: xana-pdt`. After a change to a looked-up Secret, `apply` again.
+- **`xana-pdt-credentials`** is read in `xana-pdt` now, not `iff`. If you created it in `iff`, move it (the copy command in [Namespaces](#namespaces) works with the namespaces swapped), or set those entries' `namespace` to `$platformNamespace`.
 - **Checks** of paired settings stop `apply`, not the Pod. With the default `callbackBaseUrl`, that includes `EVENT_WEBHOOK_SECRET`.
 - **A release upgraded in place from before the chart wrote its Secrets as `data`** keeps a dropped secret once, as Helm's merge keeps a live key the old manifest had only under `stringData`. Delete the Secret once (`kubectl -n <namespace> delete secret xana-pdt-backend`), then `apply`. A fresh install in `xana-pdt` isn't affected.
 

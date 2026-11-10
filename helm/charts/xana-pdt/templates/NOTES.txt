@@ -14,7 +14,7 @@ The database credentials were given at install time (DATABASE_USERNAME and DATAB
 Secret {{ include "xana-pdt.databaseSecret" . }}. After a password change on the platform, give them again and apply.
 {{- else if eq $r.database.source "lookup" }}
 
-The database credentials were read from Secret {{ $r.database.secret }} in namespace {{ .Values.platformNamespace }} and are kept
+The database credentials were read from Secret {{ $r.database.secret }} in namespace {{ $r.database.namespace }} and are kept
 in Secret {{ include "xana-pdt.databaseSecret" . }}. After a password change on the platform, apply again.
 {{- end }}
 {{- range $r.lookedUp }}

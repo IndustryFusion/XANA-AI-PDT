@@ -96,7 +96,7 @@ spec:
   ports:
     - port: 9090
 ---
-# Stand-ins for the cluster Secrets that envs/iff-cluster.sh reads. Test values only.
+# Stand-ins for the platform's Secrets that envs/iff-cluster.sh reads. Test values only.
 apiVersion: v1
 kind: Secret
 metadata:
@@ -111,10 +111,3 @@ metadata:
 stringData:
   CLIENT_ID: xana
   CLIENT_SECRET: local-test-client-secret
----
-apiVersion: v1
-kind: Secret
-metadata:
-  name: xana-pdt-credentials
-stringData:
-  OPENAI_API_KEY: local-test-openai-key
