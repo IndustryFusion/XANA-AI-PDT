@@ -20,7 +20,7 @@ Testing for this change is offline, as the maintainer decided: `helm template` a
 
 ## 4. CI
 
-- [ ] 4.1 CI: render `default` and `production`, `-e localAndIonos` stopping; the stand-ins with `EVENT_WEBHOOK_SECRET` in `xana-pdt-credentials` and the lookup test Secret; install without sourcing `envs/iff-cluster.sh`; verify on the Pull Request
+- [x] 4.1 CI: render `default` and `production`, `-e localAndIonos` stopping; the stand-ins with `EVENT_WEBHOOK_SECRET` in `xana-pdt-credentials` and the lookup test Secret; install without sourcing `envs/iff-cluster.sh`; verify on the Pull Request (the install job passed on 1e640cf)
 
 ## 5. Documents
 
