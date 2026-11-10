@@ -211,18 +211,18 @@ A check SHALL fail when a committed environment file holds a secret value, a key
 - **THEN** the script stops, saying so, and leaves no binary
 
 ### Requirement: Cluster secrets helper
-`helm/envs/iff-cluster.sh`, sourced, SHALL export the backend's secrets and the database credentials from the platform namespace's Secrets with `kubectl`, keeping any already set and saying when one differs from the cluster's, writing nothing to disk and printing no secret.
+`helm/envs/iff-cluster.sh`, sourced, SHALL export the backend's secrets and the database credentials with `kubectl`, reading `xana-pdt-credentials` in `XANA_NAMESPACE` (default `xana-pdt`) and the platform's Secrets in `IFF_NAMESPACE` (default `iff`), keeping any already set and saying when one differs, writing nothing to disk and printing no secret.
 
 #### Scenario: From the local test cluster
-- **WHEN** it is sourced against the local test cluster with its Secrets
-- **THEN** the variables, `DATABASE_USERNAME` and `DATABASE_PASSWORD` included, hold the Secrets' values, the output names variables only, and no file was written
+- **WHEN** it is sourced against a cluster with those Secrets in those namespaces
+- **THEN** the variables, `DATABASE_USERNAME` and `DATABASE_PASSWORD` included, hold the Secrets' values, the output names variables and both namespaces only, and no file was written
 
 #### Scenario: Already set, or missing
-- **WHEN** a variable is already set, or a Secret or key doesn't exist
+- **WHEN** a variable is already set, or a Secret, key or one of the two namespaces doesn't exist
 - **THEN** the set value is kept, a missing one is reported by name, and the calling shell goes on
 
 #### Scenario: Shellcheck
-- **WHEN** CI checks the script
+- **WHEN** the script is checked
 - **THEN** shellcheck passes
 
 #### Scenario: A kept value that differs
@@ -248,11 +248,11 @@ The local test cluster in CI SHALL deploy the `default` environment with a gener
 - **THEN** it uses `default` with the generated file, XANA is in `xana-pdt` and the stand-ins in `iff`, the credentials and lookups are read when deploying, the backend connects to the database, and the smoke test passes
 
 ### Requirement: Platform namespace
-The key `platformNamespace` (default `iff`) SHALL name the namespace the chart reads platform Secrets from, for the database credentials and each `secretLookups` entry without a `namespace`. It SHALL NOT change any address: each address SHALL be used as written in the environment files.
+The key `platformNamespace` (default `iff`) SHALL name the namespace of the platform's Secrets: `alerta` and the Keycloak client Secret, each `secretLookups` entry naming `$platformNamespace` or no namespace, and by default the database operator's Secret. XANA's own Secrets SHALL be read in the release's `namespace`. `platformNamespace` SHALL NOT change any address.
 
 #### Scenario: Another platform namespace
 - **WHEN** the chart is rendered with `platformNamespace: platform`
-- **THEN** the lookups read from `platform`, and every address is the one written in `default.yaml`
+- **THEN** the platform's lookups read from `platform`, XANA's own from the release's namespace, and every address is the one written in `default.yaml`
 
 #### Scenario: An address given
 - **WHEN** an environment file sets `ngsiUrl`
@@ -297,15 +297,19 @@ The backend SHALL get its database credentials from `DATABASE_USERNAME` and `DAT
 - **THEN** every Section 2 key has its `Example:` and `If empty:` lines, every secret its `For:`, `Required:` and `Get:` lines, and every Section 1 platform address ends in `.svc.cluster.local`
 
 ### Requirement: Platform Secrets read when deploying
-A secret or credential not given in the shell or the file SHALL be read with Helm `lookup` when deploying, with the deploying user's own permissions, and copied into the chart's Secrets. Without a cluster, the lookups SHALL be skipped, the rendered Secrets SHALL say so, and nothing SHALL stop that `apply` would pass.
+A secret or credential not given in the shell or the file SHALL be read with Helm `lookup` when deploying, with the deploying user's own permissions, in the namespace its entry names (`$namespace`, `$platformNamespace` or a name; the database Secret's in `databaseCredentialsNamespace`), and copied into the chart's Secrets. Without a cluster, the lookups SHALL be skipped and the rendered Secrets SHALL say so.
 
 #### Scenario: Without a cluster
 - **WHEN** `helmfile -e default template` runs with `KUBECONFIG=/dev/null` and no secrets in the shell
 - **THEN** it renders, the database and backend Secrets carry the note that the platform's Secrets weren't read, and no lookup-dependent check stops it
 
 #### Scenario: Looked-up values
-- **WHEN** the render checks give the lookup helper test Secrets in place of a cluster's
-- **THEN** a missing credential or paired secret is taken from them, and one given in the shell or the file wins over them
+- **WHEN** the lookups run with the defaults
+- **THEN** `xana-pdt-credentials` is read in `xana-pdt`, and `alerta` and the database Secret in `iff`; a value given in the shell or the file wins; and changing `namespace`, `platformNamespace` or `databaseCredentialsNamespace` moves the matching lookups
+
+#### Scenario: An unknown reference
+- **WHEN** an entry's `namespace` is a `$` name other than `$namespace` and `$platformNamespace`
+- **THEN** the render stops, naming it
 
 ### Requirement: Checked when deploying
 The render SHALL stop, with the backend's own message from `backend/app/config.py` and a hint where useful, for each pair the backend enforces, such as `SETTINGS_ENCRYPTION_KEY` with `gatewayUrl` (with the command that makes a key), `EVENT_WEBHOOK_SECRET` with `callbackBaseUrl`, and the service client's ID and secret together.
