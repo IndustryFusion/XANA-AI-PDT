@@ -66,6 +66,12 @@ A new key in Section 3, next to `databaseCredentialsSecret`, default `$platformN
 
 At the maintainer's request, no tests are added or run, no local cluster is used, and CI isn't waited for. The existing tests that read the broker detail look for "refused" and the status, which stay.
 
+### Found while implementing
+
+- **The detail reads "The broker said:"**, not "Scorpio said:", as the check calls whatever NGSI-LD broker `NGSI_URL` names.
+- **The stand-in `xana-pdt-credentials`** for CI's cluster moves from `helm/test/stand-ins.yaml` (in `iff`) to `helm/test/xana-pdt-test-secrets.yaml` (in `xana-pdt`), so the helper's existing test finds it where it now looks. No test is added.
+- **The offline note** keeps its first words, and adds that XANA's own Secrets are read too; the database note names the namespace it would read on its own line.
+
 ## Risks
 
 - **An operator who already created `xana-pdt-credentials` in `iff`** gets nothing from it after this change: move it to `xana-pdt`, or set those entries' `namespace` to `$platformNamespace`. The README says so.
