@@ -6,7 +6,7 @@ Lets operators inspect and maintain the plant's digital twin: query NGSI-LD enti
 ## Requirements
 
 ### Requirement: Query entities
-The Data explorer SHALL let the operator query entities by type, entity ID, ID pattern and attribute filters with a result limit, and keep the query in the URL.
+The Data explorer SHALL let the operator query entities by type, entity ID, ID pattern and attribute filters with a result limit, and keep the query in the URL. Type, entity ID and Search SHALL be on one row; the other filters SHALL be in a collapsible section that, when collapsed, shows each filter that is set as a removable chip.
 
 #### Scenario: Query by type
 - **WHEN** the operator selects an entity type and applies the query
@@ -24,16 +24,24 @@ The Data explorer SHALL let the operator query entities by type, entity ID, ID p
 - **WHEN** the query is rejected as invalid
 - **THEN** the reason is shown next to the query bar and the previous results stay
 
+#### Scenario: Collapsed filters
+- **WHEN** the further filters are collapsed and a has-attribute filter and a limit are set
+- **THEN** both show as chips next to the query row, and removing a chip clears that filter and applies the query again
+
+#### Scenario: Compact query bar
+- **WHEN** the further filters are collapsed, at a window width of 1280 pixels
+- **THEN** the first listed entity starts no more than 150 pixels below the top of the query bar
+
 ### Requirement: Entity view
-Selecting an entity SHALL expand it in the result list as a structured document in the entity's own attribute order: one line per attribute with a kind label, name and value, plus units, observation times, sub-attributes (collapsible) and metadata, with a toggle to an editable raw JSON; the URL SHALL identify the expanded entity.
+Selecting an entity SHALL expand it in the result list as a structured document in the entity's own attribute order: one line per attribute with a kind label, name and value, plus units, observation times, metadata and sub-attributes at any depth, with a toggle to an editable raw JSON, which shows the entity as stored, full IRIs included: the one exception to "Short names for IRIs". The URL SHALL identify the expanded entity. Sub-attributes SHALL be shown in the same kind of line as attributes.
 
 #### Scenario: Typed attributes
 - **WHEN** an entity with properties, relationships, geo, JSON, language, list and vocabulary attributes is shown
 - **THEN** each attribute shows its kind as a label and a value presentation suited to that kind
 
 #### Scenario: Raw JSON
-- **WHEN** the operator switches to the raw view
-- **THEN** the entity's JSON is shown and can be copied
+- **WHEN** the operator chooses the raw JSON action
+- **THEN** the entity's JSON is shown as stored, with its full IRIs, and can be copied; closing it shows the short names again
 
 #### Scenario: Edit the raw JSON
 - **WHEN** the operator changes the raw JSON and saves it
@@ -43,8 +51,16 @@ Selecting an entity SHALL expand it in the result list as a structured document 
 - **WHEN** the URL names an entity that does not exist
 - **THEN** the view states that the entity was not found and keeps the query bar usable
 
+#### Scenario: Deep sub-attributes
+- **WHEN** an attribute has a sub-attribute that itself has a sub-attribute
+- **THEN** each level is shown as its own line, indented under its parent with a tree line, with the same kind label, value presentation and actions as an attribute
+
+#### Scenario: One expand control
+- **WHEN** an entity, attribute or sub-attribute has children
+- **THEN** it shows one expand control with the number of children, the same at every depth, and the control expands and collapses them
+
 ### Requirement: Relationship and IRI navigation
-Relationship targets and IRI values SHALL be navigable, each offering a context menu to open, copy, start an incident for it, and show its active incidents or history; relationship targets SHALL also expand in place, nested under the attribute.
+Relationship targets and IRI values SHALL be navigable, and relationship targets SHALL also expand in place, nested under the attribute. Copy, open and incident actions on entities, attributes and IRIs SHALL be offered in one context menu, opened by right-click or from the keyboard, and not as controls in the rows.
 
 #### Scenario: Follow a relationship
 - **WHEN** the operator selects a relationship target
@@ -55,11 +71,31 @@ Relationship targets and IRI values SHALL be navigable, each offering a context 
 - **THEN** the target entity is shown nested and indented under the attribute, and a target already shown above it in the same tree is marked instead of expanded again
 
 #### Scenario: Context menu on an IRI
-- **WHEN** the operator opens the context menu of an IRI value
-- **THEN** open, copy, start incident, show active incidents and show history are offered
+- **WHEN** the operator right-clicks an IRI value or relationship target, or focuses it and presses Shift+F10 or the Menu key
+- **THEN** a menu offers copy the short name, show the full IRI, copy the full IRI, open in the Data explorer, start a new incident, show active incidents and show incident history, and Escape closes it with focus back on the IRI
+
+#### Scenario: Context menu on an attribute
+- **WHEN** the operator opens the context menu of an attribute or sub-attribute
+- **THEN** it offers copy the short name, show the full IRI, copy the full IRI and copy the value
+
+#### Scenario: Context menu on a type or entity ID
+- **WHEN** the operator opens the context menu of an entity's type or of its ID
+- **THEN** it offers copy the short name, show the full IRI and copy the full IRI, together with the entity's open and incident items
+
+#### Scenario: Show the full IRI
+- **WHEN** the operator chooses "Show full IRI" in a context menu
+- **THEN** a small popover next to the name shows the full IRI as selectable text until the operator dismisses it with Escape or by clicking outside, and focus returns to the name, which stays short
+
+#### Scenario: No incident controls in the rows
+- **WHEN** an entity with relationships is shown
+- **THEN** no row holds a control for starting an incident or showing incidents; those are reached only through the context menu
+
+#### Scenario: Nested entities
+- **WHEN** a relationship target is expanded in place
+- **THEN** the nested entity offers no delete and no raw JSON; those are offered on top-level and unnested entities
 
 ### Requirement: Edit attributes
-The operator SHALL be able to change attribute values in place on the attribute's line, add attributes, and delete attributes, sub-attributes and entities, with suggested values where the data model provides them and confirmation before deleting.
+The operator SHALL be able to change attribute and sub-attribute values in place on their line, add attributes and sub-attributes at any depth, and delete attributes, sub-attributes and entities, with suggested values where the data model provides them and confirmation before deleting. Adding SHALL offer every NGSI-LD attribute kind, and names built from the prefixes in use.
 
 #### Scenario: Change a value with suggestions
 - **WHEN** the operator selects the value of an attribute that has suggested values
@@ -73,8 +109,20 @@ The operator SHALL be able to change attribute values in place on the attribute'
 - **WHEN** the operator deletes a sub-attribute and confirms
 - **THEN** only that sub-attribute is removed and the attribute remains
 
+#### Scenario: Add a sub-attribute at depth
+- **WHEN** the operator adds a sub-attribute to a sub-attribute
+- **THEN** it is saved under that sub-attribute, the rest of the attribute is unchanged, and it is shown at its place
+
+#### Scenario: Every kind
+- **WHEN** the operator opens the add form
+- **THEN** it offers Property, Relationship, GeoProperty, JsonProperty, LanguageProperty, ListProperty and VocabularyProperty
+
+#### Scenario: Name from a prefix
+- **WHEN** the operator picks a prefix and enters a local name in the add form, or types `prefix:local` with a known prefix
+- **THEN** the attribute is saved under the prefix's namespace followed by the local name, and is shown with its short name
+
 ### Requirement: Attribute history
-For attributes with recorded history the UI SHALL show the values over a selectable time range as a chart for numeric values and as a table for all values. An attribute whose latest recorded state is deleted SHALL say so.
+For attributes and sub-attributes with recorded history the UI SHALL show the values over a selectable time range as a chart for numeric values and as a table for all values. An attribute whose latest recorded state is deleted SHALL say so.
 
 #### Scenario: Numeric history
 - **WHEN** the operator opens the history of a numeric attribute and picks a time range
@@ -100,6 +148,10 @@ For attributes with recorded history the UI SHALL show the values over a selecta
 - **WHEN** the history cannot be read
 - **THEN** the history says so with the reason, and the rest of the explorer keeps working
 
+#### Scenario: Sub-attribute history
+- **WHEN** a sub-attribute has an observation time
+- **THEN** its history can be opened from its line, the same as an attribute's
+
 ### Requirement: Time-shift
 The operator SHALL be able to view entity types and entities as they were at a chosen past moment, clearly marked as a historical view, and return to the present.
 
@@ -123,7 +175,7 @@ The operator SHALL be able to import entities from a file or a URL after a previ
 - **THEN** the number of deleted entities per type is shown and the list is refreshed
 
 ### Requirement: Live updates
-The Data explorer SHALL show attribute changes as they happen when live updates are on, highlight changed values briefly, and indicate whether live updates are working. When they stop working, it SHALL recover by itself once they work again.
+The Data explorer SHALL show attribute changes as they happen when live updates are on, highlight changed values briefly, and indicate whether live updates are working, connecting or unavailable, with the reason the backend gives. When they stop working, it SHALL recover by itself once they work again.
 
 #### Scenario: Value changes live
 - **WHEN** live updates are on and a shown attribute changes
@@ -131,7 +183,11 @@ The Data explorer SHALL show attribute changes as they happen when live updates 
 
 #### Scenario: Live updates unavailable
 - **WHEN** live updates cannot be delivered
-- **THEN** the indicator says so and the explorer keeps working without them
+- **THEN** the indicator says so, its reason is shown with it, and the explorer keeps working without them
+
+#### Scenario: Being set up
+- **WHEN** the backend reports that live updates are still being set up, such as just after sign-in
+- **THEN** the indicator says they are connecting, not that they are unavailable
 
 #### Scenario: Live updates return
 - **WHEN** live updates work again
@@ -188,3 +244,196 @@ The import dialog SHALL say, before the operator confirms, that importing replac
 #### Scenario: Preview
 - **WHEN** the operator previews an import
 - **THEN** the dialog says that existing entities are replaced, and the result lists replaced entities as updated
+
+### Requirement: Short names for IRIs
+The Data explorer SHALL show every http(s) IRI as `prefix:local`, or `prefix:` for a namespace, and never in full except in the raw JSON view. The full IRI SHALL appear only in the tooltip and through the context menu's "Show full IRI" and "Copy full IRI". Prefixes SHALL come from the configured context, then well-known vocabularies, then a name derived per namespace, and SHALL keep their namespace until reload.
+
+#### Scenario: Platform data
+- **WHEN** entities whose types and attributes are full IRIs are shown
+- **THEN** each is shown as a short name, and hovering a short name shows its full IRI as tooltip
+
+#### Scenario: Stable prefixes
+- **WHEN** the operator runs a second query whose results hold a namespace seen in the first
+- **THEN** that namespace has the same prefix as before
+
+#### Scenario: Context first
+- **WHEN** the configured context defines a prefix for a namespace
+- **THEN** that prefix is used for it, rather than a well-known or derived one
+
+#### Scenario: No configured context
+- **WHEN** no context is configured, or its prefixes can't be read
+- **THEN** well-known and derived prefixes are used, and the explorer works as usual
+
+#### Scenario: No full view in place
+- **WHEN** the operator clicks a short name, or looks for a setting to show names in full
+- **THEN** the name stays short and no such setting exists; clicking does only what clicking that element otherwise does, such as following a relationship
+
+#### Scenario: Prefix legend
+- **WHEN** the operator opens the prefix legend
+- **THEN** every prefix in use is listed with where it comes from (context, well-known or derived), and each namespace is shown only in its tooltip and through its context menu
+
+#### Scenario: Namespace of scheme and host only
+- **WHEN** an IRI's namespace is only scheme and host, such as `http://example.org/x`, or the IRI is the bare `http://example.org`
+- **THEN** it is shown with a prefix, such as `example:x` and `example:`
+
+#### Scenario: IRI that is a namespace
+- **WHEN** an IRI ends in `/` or `#`, such as `http://opcfoundation.org/UA/Pumps/`
+- **THEN** it is shown as its prefix followed by a colon, such as `pumps:`
+
+#### Scenario: Every http IRI has a prefix
+- **WHEN** any http or https IRI is shown anywhere in the explorer outside the raw JSON view
+- **THEN** it is shown with a prefix, and never unchanged
+
+#### Scenario: URNs
+- **WHEN** an identifier is a URN, such as `urn:ngsi-ld:Pump:1`, or a term without a colon that the broker compacted through a configured context
+- **THEN** it is shown as it is: a URN is an entity identifier, not an IRI in a namespace, so this is not an exception to the rule
+
+### Requirement: Short names in every part of the explorer
+The rule of "Short names for IRIs" SHALL hold wherever the Data explorer shows an IRI, not only in the entity tree. Wherever a list or select offers IRIs, each option SHALL show its short name, with the full IRI as its tooltip.
+
+#### Scenario: Query bar
+- **WHEN** the operator uses the type select, has-attribute, attributes to return or the condition builder, or the collapsed filters show as chips
+- **THEN** every type and attribute name in their options, entries and chips is shown as a short name
+
+#### Scenario: Add form
+- **WHEN** the operator adds a relationship and chooses its target
+- **THEN** the offered and chosen targets are shown as short names
+
+#### Scenario: Value suggestions
+- **WHEN** the value editor suggests values that are IRIs
+- **THEN** each suggestion is shown as a short name, and choosing one saves the full IRI
+
+#### Scenario: History pane
+- **WHEN** the history of an attribute is open
+- **THEN** its title shows the attribute's short name, and relationship targets and IRI values in its table are shown as short names
+
+#### Scenario: Time-shift banner
+- **WHEN** the time-shift banner is shown with the types it applies to
+- **THEN** each type is shown as a short name
+
+#### Scenario: Import
+- **WHEN** the import preview or the import result list is shown
+- **THEN** every entity ID, type and attribute name that is an http(s) IRI is shown as a short name
+
+#### Scenario: Delete by type
+- **WHEN** the delete-by-type dialog is shown
+- **THEN** the type it names is shown as a short name
+
+#### Scenario: Entity title from its ID
+- **WHEN** an entity has no name and its title falls back to its ID, and the ID is an http(s) IRI
+- **THEN** the title is the ID's short name
+
+#### Scenario: Messages
+- **WHEN** a message names an entity or attribute, such as "not found" or a rejected change
+- **THEN** the name in the message is its short name
+
+#### Scenario: IRIs inside values
+- **WHEN** a JSON, List or Vocabulary value holds strings that are http(s) IRIs
+- **THEN** each such string is shown as a short name, with the same tooltip and context menu as any other IRI
+
+### Requirement: Short names as input
+Wherever the operator types an IRI in the Data explorer, `prefix:local` with a known prefix SHALL be expanded before any request is sent, and a known prefix SHALL win over a URI scheme of the same name. Otherwise, an identifier field SHALL send a valid absolute URI as typed, and a name field SHALL refuse an unknown prefix, naming it, with nothing sent.
+
+#### Scenario: Known prefix
+- **WHEN** the operator types `prefix:local` with a known prefix as type, entity ID, the start of the ID pattern, has-attribute, a condition's attribute, a condition's value that is an IRI, a relationship target or a new attribute's name
+- **THEN** the request names the prefix's namespace followed by the local name
+
+#### Scenario: Full IRI typed
+- **WHEN** the operator types a full http(s) IRI or a URN in any of these places
+- **THEN** it is sent as typed
+
+#### Scenario: Other URI scheme
+- **WHEN** the operator types an absolute URI in another scheme, such as `did:example:123`, in an identifier field (entity ID, ID pattern, relationship target, IRI value), and `did` is not a known prefix
+- **THEN** it is sent as typed
+
+#### Scenario: Unknown prefix
+- **WHEN** the operator types `x:local` in a name field (type, has-attribute, a condition's attribute, a new attribute's name), where `x` is not a known prefix
+- **THEN** the input says that the prefix is unknown, names it, and no request is sent
+
+#### Scenario: Prefix with the name of a scheme
+- **WHEN** a known prefix has the same name as a URI scheme, and the operator types `name:local`
+- **THEN** it is expanded with the prefix, and typing the full IRI instead sends that IRI
+
+#### Scenario: Text values in conditions
+- **WHEN** the operator enters a text, number or date value that contains a colon in a condition, such as `10:30` or `mode:auto`
+- **THEN** the value is sent unchanged, even if the part before the colon is a known prefix
+
+### Requirement: Icon actions
+The actions in the Data explorer's rows and headers SHALL be icon buttons from one icon set, each with a tooltip and an accessible name, and no row or header SHALL hold a text button. They SHALL be visible without hovering and reachable from the keyboard. Confirm dialogs SHALL keep text buttons.
+
+#### Scenario: Icons in the rows
+- **WHEN** an entity with attributes and sub-attributes is shown
+- **THEN** history, edit, add sub-attribute, delete, raw JSON, pin, unnest and re-nest, where offered, are icons with no visible text, and each names its action as tooltip and to assistive technology
+
+#### Scenario: Icons in headers and panes
+- **WHEN** an entity, a relationship target, the history pane or the raw JSON editor is shown
+- **THEN** add attribute and delete entity on the entity, the relationship target's expand, close history, and the raw JSON editor's copy, save and cancel are icons with a tooltip and an accessible name
+
+#### Scenario: Confirm dialogs
+- **WHEN** a confirm dialog is shown, such as before deleting
+- **THEN** its buttons are text
+
+#### Scenario: Without hovering
+- **WHEN** the pointer is not over a row
+- **THEN** that row's actions are still shown
+
+#### Scenario: Keyboard
+- **WHEN** the operator moves through a row with the keyboard
+- **THEN** each action can be reached and triggered, and its focus is visible
+
+### Requirement: Unnest and re-nest
+An entity expanded in place through a relationship SHALL be movable out of its parent to its own place in the list, and back. This SHALL change the view only, never the data.
+
+#### Scenario: Unnest
+- **WHEN** the operator unnests an entity expanded under a relationship
+- **THEN** it is shown as its own entity after the results, with its expansion kept, and the relationship shows a link that moves to it
+
+#### Scenario: Re-nest
+- **WHEN** the operator re-nests an unnested entity
+- **THEN** it is removed from its own place and shown again under the relationship it came from, if that is still shown
+
+#### Scenario: Data unchanged
+- **WHEN** an entity is unnested or re-nested
+- **THEN** no request changes any entity
+
+#### Scenario: New query
+- **WHEN** the operator applies a new query
+- **THEN** unnested entities that are not pinned are removed from the view
+
+### Requirement: Pinning
+The operator SHALL be able to pin top-level and unnested entities. A pinned entity SHALL stay at the top of the list through new queries and reloads, until unpinned.
+
+#### Scenario: Pin
+- **WHEN** the operator pins an entity and applies a query that doesn't match it
+- **THEN** the entity is still listed at the top, marked as pinned, and the list says how many are pinned
+
+#### Scenario: Unpin a selection
+- **WHEN** the operator selects several pinned entities and unpins them
+- **THEN** they are no longer pinned, and stay only if the query matches them
+
+#### Scenario: After a reload
+- **WHEN** the operator reloads the page
+- **THEN** the pinned entities are listed again at the top, read anew
+
+#### Scenario: Pinned entity gone
+- **WHEN** a pinned entity no longer exists
+- **THEN** it is listed as not found, and can be unpinned
+
+### Requirement: Explorer state is kept
+The Data explorer SHALL show the same view after the operator leaves it and comes back, whether through the main navigation or the browser's back button. A reload SHALL keep the query and the pins.
+
+#### Scenario: Back through the navigation
+- **WHEN** the operator has a query with results, expanded entities and attributes, an unnested entity and a scroll position, opens another area and selects the Data explorer in the navigation
+- **THEN** the same query, results, expansions, unnested entity and scroll position are shown
+
+#### Scenario: Back with the browser
+- **WHEN** the operator returns to the Data explorer with the browser's back button
+- **THEN** the same view is shown as through the navigation
+
+#### Scenario: Values brought up to date
+- **WHEN** the operator comes back after attributes changed meanwhile
+- **THEN** the kept view shows the current values
+
+#### Scenario: Reload
+- **WHEN** the operator reloads the Data explorer
+- **THEN** the query and pins are kept, and expansions start collapsed except for the entity in the URL
