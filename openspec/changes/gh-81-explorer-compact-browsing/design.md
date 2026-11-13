@@ -81,13 +81,17 @@ Namespaces are registered in this order of precedence:
    - IndustryFusion's base and knowledge ontologies (`iffb`, `iffk`).
 3. **A derived name.** It is the last path segment of the namespace that isn't a version (`v1`, `v0.1`) or a generic word (`www`, `ontology`, `contexts`). When the namespace has no path, it is the host's first label that isn't `www` (`http://example.org/` → `example`). It is lower camel case, cut to 12 characters. A clash gets a numeric suffix (`pumps2`). Without a usable segment the name is `ns1`, `ns2` and so on.
 
-`http`, `https` and `urn` are never used as prefixes, so a typed full IRI or URN can't be mistaken for a short name.
+`http`, `https` and `urn` are never used as prefixes, so a typed full IRI or URN can't be mistaken for a short name. Other prefixes may share a name with a URI scheme; then the prefix wins, and the operator can type the full IRI instead.
 
 **Not shortened.** Identifiers that aren't http(s) IRIs, such as URNs (`urn:ngsi-ld:…`), and terms the broker already compacted through a configured context, are shown as they are. They are identifiers without a namespace, so the rule doesn't apply to them.
 
 **The registry's functions:**
 - `shorten(iri)` returns the short name, or the input unchanged when it isn't an http(s) IRI.
-- `expand(text)` returns the full IRI for `prefix:local` with a known prefix; returns text starting with `http:`, `https:` or `urn:`, and text without a colon, unchanged; and throws `UnknownPrefix` naming the prefix otherwise.
+- `expand(text)` reads typed text in this order:
+  1. text starting with `http:`, `https:` or `urn:`, or without a colon, is returned unchanged;
+  2. `prefix:local` with a known prefix is expanded;
+  3. in an identifier field (`expand(text, {identifier: true})`: entity ID, ID pattern, relationship target, IRI value), text that is a valid absolute URI (RFC 3986: a scheme, a colon, no spaces), such as `did:example:123`, is returned unchanged;
+  4. anything else throws `UnknownPrefix` naming the prefix. In a name field (type, has-attribute, a condition's attribute, a new attribute's name) that is every unknown prefix, because a typo in a prefix there would otherwise query or create a name nobody meant.
 
 **Display.** Display components get a `<Iri value kind>` element from the registry:
 - **The element.** It shows the short name, with the full IRI as `title`. Clicking it does only what the surrounding element does, such as following a relationship. There is no toggle and no setting that shows names in full.
@@ -107,7 +111,7 @@ Namespaces are registered in this order of precedence:
 
 `RawJsonEditor.jsx` alone keeps the stored text, because a save has to be exact. It is reached only through the raw JSON action.
 
-**Input.** The same inputs, and the add form's name, call `expand()` before building the request. An `UnknownPrefix` is shown at the input, and no request is sent. The add form's prefix picker stays as a shortcut that fills in `prefix:`.
+**Input.** The same inputs, and the add form's name, call `expand()` before building the request. A condition's value goes through `expand()` only when the condition compares with an IRI: a relationship's object or an IRI value. Text, number and date values are sent unchanged. An `UnknownPrefix` is shown at the input, and no request is sent. The add form's prefix picker stays as a shortcut that fills in `prefix:`.
 
 **Alternatives:**
 - **Derive prefixes from each result set.** This is how the earlier browser did it. The same `ns0` then names a different namespace after the next search, so short names can't be trusted.

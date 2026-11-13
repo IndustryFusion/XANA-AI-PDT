@@ -261,19 +261,31 @@ The rule of "Short names for IRIs" SHALL hold wherever the Data explorer shows a
 - **THEN** each such string is shown as a short name, with the same tooltip and context menu as any other IRI
 
 ### Requirement: Short names as input
-Wherever the operator types an IRI in the Data explorer, `prefix:local` with a known prefix SHALL be accepted and expanded to the full IRI before any request is sent. A typed full IRI SHALL still be accepted. An unknown prefix SHALL be refused with a reason, and nothing SHALL be sent.
+Wherever the operator types an IRI in the Data explorer, `prefix:local` with a known prefix SHALL be expanded before any request is sent, and a known prefix SHALL win over a URI scheme of the same name. Otherwise, an identifier field SHALL send a valid absolute URI as typed, and a name field SHALL refuse an unknown prefix, naming it, with nothing sent.
 
 #### Scenario: Known prefix
-- **WHEN** the operator types `prefix:local` with a known prefix as type, entity ID, the start of the ID pattern, has-attribute, a condition's attribute or value, a relationship target or a new attribute's name
+- **WHEN** the operator types `prefix:local` with a known prefix as type, entity ID, the start of the ID pattern, has-attribute, a condition's attribute, a condition's value that is an IRI, a relationship target or a new attribute's name
 - **THEN** the request names the prefix's namespace followed by the local name
 
 #### Scenario: Full IRI typed
 - **WHEN** the operator types a full http(s) IRI or a URN in any of these places
 - **THEN** it is sent as typed
 
+#### Scenario: Other URI scheme
+- **WHEN** the operator types an absolute URI in another scheme, such as `did:example:123`, in an identifier field (entity ID, ID pattern, relationship target, IRI value), and `did` is not a known prefix
+- **THEN** it is sent as typed
+
 #### Scenario: Unknown prefix
-- **WHEN** the operator types `prefix:local` whose prefix is not known
+- **WHEN** the operator types `x:local` in a name field (type, has-attribute, a condition's attribute, a new attribute's name), where `x` is not a known prefix
 - **THEN** the input says that the prefix is unknown, names it, and no request is sent
+
+#### Scenario: Prefix with the name of a scheme
+- **WHEN** a known prefix has the same name as a URI scheme, and the operator types `name:local`
+- **THEN** it is expanded with the prefix, and typing the full IRI instead sends that IRI
+
+#### Scenario: Text values in conditions
+- **WHEN** the operator enters a text, number or date value that contains a colon in a condition, such as `10:30` or `mode:auto`
+- **THEN** the value is sent unchanged, even if the part before the colon is a known prefix
 
 ### Requirement: Icon actions
 The actions in the Data explorer's rows and headers SHALL be icon buttons from one icon set, each with a tooltip and an accessible name, and no row or header SHALL hold a text button. They SHALL be visible without hovering and reachable from the keyboard. Confirm dialogs SHALL keep text buttons.
