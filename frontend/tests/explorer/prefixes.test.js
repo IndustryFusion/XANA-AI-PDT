@@ -14,7 +14,7 @@
 // limitations under the License.
 //
 
-import { createRegistry, deriveName, namespaceOf, UnknownPrefixError } from '../../src/features/explorer/prefixes'
+import { createRegistry, deriveName, leadingLiteral, namespaceOf, UnknownPrefixError } from '../../src/features/explorer/prefixes'
 
 const PUMPS = 'http://opcfoundation.org/UA/Pumps/'
 
@@ -127,5 +127,30 @@ describe('typed short names', () => {
     expect(() => reg.expand('nope:Thing')).toThrow(UnknownPrefixError)
     expect(() => reg.expand('nope:Thing')).toThrow('The prefix nope: is unknown')
     expect(() => reg.expand('did2:x y', { identifier: true })).toThrow(UnknownPrefixError)
+  })
+})
+
+describe('ID patterns', () => {
+  test('the leading literal part stops at the first special character or a class escape', () => {
+    expect(leadingLiteral('http://ex\\.org/P.*')).toBe('http://ex.org/P')
+    expect(leadingLiteral('http://ex\\.org/P\\d+')).toBe('http://ex.org/P')
+    expect(leadingLiteral('^urn')).toBe('')
+  })
+
+  test('shortening and expanding use the same rule, also for any context prefix', () => {
+    const reg = createRegistry()
+    reg.loadContext([{ prefix: '_iff', namespace: 'http://ex.org/iff/' }])
+    const pattern = 'http://ex\\.org/iff/P.*'
+    expect(reg.shortenPattern(pattern)).toBe('_iff:P.*')
+    expect(reg.expandPattern('_iff:P.*')).toBe(pattern)
+    expect(reg.expandPattern('nope:P.*')).toBe('nope:P.*')
+    expect(reg.expandPattern('urn:ngsi-ld:.*')).toBe('urn:ngsi-ld:.*')
+  })
+
+  test('a namespace not registered yet gets its prefix, as shorten() gives it', () => {
+    const reg = createRegistry()
+    expect(reg.shortenPattern('https://example\\.com/plant/v1/Pump.*')).toBe('plant:Pump.*')
+    expect(reg.shorten('https://example.com/plant/v1/Valve')).toBe('plant:Valve')
+    expect(reg.shortenPattern('.*Pump')).toBe('.*Pump')
   })
 })

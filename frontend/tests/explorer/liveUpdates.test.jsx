@@ -171,4 +171,45 @@ describe('live-update indicator', () => {
     expect(handlers.length).toBe(given + 1)
     expect(result.current.status).toBe('ok')
   })
+
+  async function givenUp(answers, extra = {}) {
+    vi.spyOn(entities, 'getLiveUpdateHealth').mockImplementation(async () => ({ detail: null, ...answers.at(-1) }))
+    const control = { failing: true, handlers: [] }
+    vi.spyOn(entities, 'subscribeEntities').mockImplementation((_params, onEvent) => {
+      control.handlers.push(onEvent)
+      if (control.failing) queueMicrotask(() => onEvent({ type: 'error', error: new Error('refused') }))
+      return () => {}
+    })
+    const hook = renderHook((props) => useLiveUpdates({ ids: ['urn:a'], ...props }), { initialProps: { enabled: true, ...extra } })
+    for (let i = 0; i < 12; i++) await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
+    expect(hook.result.current.detail).toBe(GAVE_UP)
+    return { ...hook, control }
+  }
+
+  test('switching live updates off and on again starts afresh after giving up', async () => {
+    vi.useFakeTimers()
+    const { result, rerender, control } = await givenUp([{ status: 'ok', state: 'active' }])
+    control.failing = false
+    rerender({ enabled: false })
+    expect(result.current.status).toBe('off')
+    rerender({ enabled: true })
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
+    expect(result.current.status).toBe('ok')
+    expect(result.current.detail).toBeNull()
+  })
+
+  test('after giving up, a recovery through connecting is tried again', async () => {
+    vi.useFakeTimers()
+    const answers = [{ status: 'ok', state: 'active' }]
+    const { result, control } = await givenUp(answers)
+    const given = control.handlers.length
+    control.failing = false
+    answers.push({ status: 'unavailable', state: 'connecting' })
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
+    expect(result.current.status).toBe('connecting')
+    answers.push({ status: 'ok', state: 'active' })
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
+    expect(control.handlers.length).toBe(given + 1)
+    expect(result.current.status).toBe('ok')
+  })
 })

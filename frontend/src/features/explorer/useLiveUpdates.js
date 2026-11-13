@@ -39,7 +39,7 @@ export function healthState(health) {
 /** How long a reopened stream must stay open without failing to count as working again. */
 export const STABLE_MS = 30_000
 /** What the indicator says once the stream kept failing while the backend reported it working. */
-export const GAVE_UP = 'The live update stream keeps closing. It is tried again when the backend reports another outage, or after a reload.'
+export const GAVE_UP = 'The live update stream keeps closing. Switch live updates off and on to try again.'
 
 /**
  * Live updates of the expanded entities. Returns the health (`off`,
@@ -54,8 +54,9 @@ export const GAVE_UP = 'The live update stream keeps closing. It is tried again 
  *
  * A stream that fails at once although the backend says it works is tried
  * again after 1, 2, 5 and 10 s, and then no more: the indicator then says
- * so, until the backend reports an outage of its own (whose recovery is
- * tried again) or a reload. A stream proves itself, and the count starts
+ * so, until the backend reports an outage of its own or sets live updates
+ * up again (whose recovery is tried again), they are switched off and on,
+ * or the page is reloaded. A stream proves itself, and the count starts
  * afresh, when an update arrives or it stays open for `STABLE_MS`.
  */
 export function useLiveUpdates({ enabled, ids = [], onResync }) {
@@ -81,8 +82,9 @@ export function useLiveUpdates({ enabled, ids = [], onResync }) {
 
   /** What the health check reports. */
   const reportHealth = useCallback((next, reason = null) => {
-    if (next === 'unavailable') {
-      // The backend's own outage: its recovery is tried again, however often the stream failed.
+    if (next !== 'ok') {
+      // The backend's own outage, or it is setting live updates up again: its recovery is tried
+      // again, however often the stream failed before.
       gap.current = true
       failures.current = 0
     }
@@ -97,6 +99,9 @@ export function useLiveUpdates({ enabled, ids = [], onResync }) {
   useEffect(() => {
     if (!enabled) return undefined
     let cancelled = false
+    // Switched on (again): start afresh, also after the stream was given up.
+    gap.current = false
+    failures.current = 0
     statusRef.current = 'connecting'
     setStatus('connecting')
     const check = () => entities.getLiveUpdateHealth().then(

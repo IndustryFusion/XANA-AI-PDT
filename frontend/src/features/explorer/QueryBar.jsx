@@ -19,7 +19,7 @@ import { Button } from '../../ui/components'
 import { IconButton } from '../../ui/icons'
 import { attributeKind } from './attributes'
 import { shortenText, useRegistry } from './Iri'
-import { escapeRegExp, isHttpIri, UnknownPrefixError } from './prefixes'
+import { isHttpIri, UnknownPrefixError } from './prefixes'
 import { buildExpression, DEFAULT_LIMIT, emptyCondition, OPERATORS, parseExpression, takesValue } from './query'
 import { useKept } from './store'
 
@@ -134,12 +134,7 @@ export default function QueryBar({ query, types, attributes, entities = [], erro
       type: take('type', () => reg.expand(f.type)),
       id: take('id', () => reg.expand(f.id, { identifier: true })),
       // Only the start of a pattern can be a short name; the rest is a regular expression.
-      idPattern: take('idPattern', () => {
-        const m = /^([A-Za-z][\w.-]*):/.exec(pattern)
-        if (!m || /^(https?|urn)$/i.test(m[1]) || !reg.lookup(m[1])) return pattern
-        // The namespace is matched literally: its dots are not "any character".
-        return escapeRegExp(reg.expand(m[0])) + pattern.slice(m[0].length)
-      }),
+      idPattern: take('idPattern', () => reg.expandPattern(pattern)),
       hasAttr: take('hasAttr', () => reg.expand(f.hasAttr)),
       limit: f.limit,
     }

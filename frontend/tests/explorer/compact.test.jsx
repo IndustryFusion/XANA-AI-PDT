@@ -474,6 +474,12 @@ describe('review fixes', () => {
     await waitFor(() => expect(new URLSearchParams(window.location.search).get('idPattern')).toBe('http://opcfoundation\\.org/UA/Pumps/P.*'))
   })
 
+  test('after a reload, an ID pattern in a namespace not shown yet still has its short name', async () => {
+    openWith(withPumps(), `${paths.explorer()}?idPattern=${encodeURIComponent('https://example\\.com/plant/v1/Pump.*')}`)
+    expect(await screen.findByRole('list', { name: 'Filters' })).toHaveTextContent('ID pattern plant:Pump.*')
+    expect(fullIrisShown(document.querySelector('.query-bar'))).toEqual([])
+  })
+
   test('removing the conditions chip with an unknown prefix in another field says why nothing was applied', async () => {
     const user = userEvent.setup()
     openWith(withPumps(), `${paths.explorer()}?type=Machine&q=${encodeURIComponent('status=="idle"')}`)

@@ -52,6 +52,30 @@ const MAX_LENGTH = 12
 /** Text for a regular expression that matches it literally. */
 export const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
+const SPECIAL = '.*+?^${}()|[]\\'
+
+/**
+ * The start of a regular expression that matches only itself, unescaped:
+ * up to the first special character that isn't escaped, or the first
+ * escape that isn't of a special character (such as `\\d`).
+ */
+export function leadingLiteral(pattern) {
+  let out = ''
+  for (let i = 0; i < pattern.length; i++) {
+    const ch = pattern[i]
+    if (ch === '\\') {
+      if (!SPECIAL.includes(pattern[i + 1] ?? '')) break
+      out += pattern[i + 1]
+      i++
+    } else if (SPECIAL.includes(ch)) {
+      break
+    } else {
+      out += ch
+    }
+  }
+  return out
+}
+
 /** Whether a string is an http(s) IRI, the only kind that is shortened. */
 export const isHttpIri = (text) => typeof text === 'string' && HTTP.test(text) && !/\s/.test(text)
 
@@ -204,12 +228,27 @@ export function createRegistry() {
      */
     shortenPattern(pattern) {
       const text = String(pattern ?? '')
-      const found = [...byPrefix.values()]
-        .filter((e) => text.startsWith(escapeRegExp(e.namespace)))
-        .sort((a, b) => b.namespace.length - a.namespace.length)[0]
-      if (!found) return text
-      found.used = true
-      return `${found.prefix}:${text.slice(escapeRegExp(found.namespace).length)}`
+      const literal = leadingLiteral(text)
+      if (!isHttpIri(literal)) return text
+      // Registered as `shorten()` would, so a namespace not shown yet also gets its prefix.
+      const entry = ensure(literal)
+      const escaped = escapeRegExp(entry.namespace)
+      if (!text.startsWith(escaped)) return text
+      entry.used = true
+      return `${entry.prefix}:${text.slice(escaped.length)}`
+    },
+
+    /**
+     * The other way: whatever stands before the first colon, when it is a
+     * known prefix, becomes its namespace, escaped so it is matched literally.
+     * Anything else (a full IRI, a URN, a plain pattern) is taken as typed.
+     */
+    expandPattern(pattern) {
+      const text = String(pattern ?? '').trim()
+      const colon = text.indexOf(':')
+      if (colon <= 0 || /^(https?|urn)$/i.test(text.slice(0, colon))) return text
+      const entry = this.lookup(text.slice(0, colon))
+      return entry ? escapeRegExp(entry.namespace) + text.slice(colon + 1) : text
     },
 
     /** The entry of a prefix, or null. A prefix looked up, as when it is typed, is in use from then on. */
