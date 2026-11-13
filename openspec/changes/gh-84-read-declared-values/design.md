@@ -76,6 +76,18 @@ How XANA reads values today:
 - **Why it matters:** without it, the broker would store the text typed as a
   double -- a value no reader can use.
 
+### D5 — Conversation tools hand the raw entity on
+
+- **Chosen:** the conversation agent's entity tools keep giving the model the
+  entity as the broker returned it, declared values included. The raw form is
+  faithful -- it carries the datatype -- and the model reads a value object
+  correctly; it is only wordier, so the tool result's size bound is reached
+  sooner.
+- *Alternative:* pass the tool results' values through the helper. Rejected for
+  this change: the tools would then hand on something other than the broker's
+  answer, which the conversation agent's tools do nowhere else; it can follow
+  if the size bound turns out to bite.
+
 ## Conflicts
 
 None with architecture.md or the existing specs. The new requirements add to
