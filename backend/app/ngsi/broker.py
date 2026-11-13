@@ -533,7 +533,8 @@ class ContextBroker:
 
         def change(level: dict[str, Any]) -> None:
             _check_value(path[-1], level, fragment)
-            level.update(_stamped(level, fragment))
+            # A declared value keeps its datatype here too (gh-84, D3); the whole instance is written.
+            level.update(_stamped(level, _keep_datatype(level, fragment)))
 
         await self._edit_at_path(entity_id, name, path, dataset_id, change)
 

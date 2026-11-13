@@ -742,3 +742,28 @@ def test_the_brokers_own_query_on_a_declared_number_is_recorded(api, declared_en
     found = api.get("/api/ngsi/entities", params={"type": declared_entity["type"], "q": f"{IRI}temp>40"})
     matched = [e["id"] for e in found.json()] == [declared_entity["id"]] if found.status_code == 200 else None
     print(f"GH84-BROKER-Q temp>40 on a declared 42.5: status={found.status_code} matched={matched}")
+
+
+@needs_broker
+def test_a_declared_sub_attribute_round_trips(api):
+    """A declared double in a sub-attribute, edited at its path (gh-84, D3)."""
+    entity_id = unique()
+    body = {
+        "id": entity_id,
+        "type": f"{IRI}cutter_{uuid.uuid4().hex[:8]}",
+        f"{IRI}temp": {
+            "type": "Property",
+            "value": 42,
+            f"{IRI}limit": {"type": "Property", "value": {"@value": 99.0, "@type": DOUBLE}},
+        },
+    }
+    assert api.post("/api/ngsi/import", json=[body]).json()[0]["result"] == "created"
+    try:
+        params = {"name": f"{IRI}temp", "path": f"{IRI}limit"}
+        answer = api.patch(f"/api/ngsi/entities/{entity_id}/attrs", params=params, json={f"{IRI}temp": {"value": 100}})
+        assert answer.status_code == 204, answer.text
+        limit = api.get(f"/api/ngsi/entities/{entity_id}").json()[f"{IRI}temp"][f"{IRI}limit"]
+        assert literal(limit["value"]) == 100
+        assert datatype(limit["value"]) == DOUBLE
+    finally:
+        api.delete(f"/api/ngsi/entities/{entity_id}")

@@ -1147,3 +1147,16 @@ def test_a_number_for_a_declared_number_is_sent_declared(client, broker):
 def test_a_plain_number_is_edited_as_before(client, broker):
     assert client.patch(f"{ENTITY}/attrs", json={attrs(): {"value": 80}}).status_code == 204
     assert _sent_value(broker) == 80
+
+
+def test_a_declared_sub_attribute_keeps_its_datatype_when_edited_at_its_path(client, broker):
+    """A path-addressed edit writes the whole instance; the declared datatype goes with it."""
+    broker.entities[MACHINE][attrs()][attrs("limit")]["value"] = {"type": DOUBLE, "@value": 99}
+    params = {"name": attrs(), "path": attrs("limit")}
+    refused = client.patch(f"{ENTITY}/attrs", params=params, json={attrs(): {"value": "hot"}})
+    assert refused.status_code == 422
+    assert "must be a number" in refused.json()["error"]["message"]
+    assert client.patch(f"{ENTITY}/attrs", params=params, json={attrs(): {"value": 100}}).status_code == 204
+    stored = broker.entities[MACHINE][attrs()]
+    assert stored[attrs("limit")]["value"] == {"@value": 100, "@type": DOUBLE}
+    assert stored["value"] == 42, "the attribute's own value is untouched"
