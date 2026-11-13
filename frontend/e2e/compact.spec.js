@@ -49,9 +49,12 @@ test('dense attribute rows are 13 px and meta information 12 px', async ({ page 
 })
 
 test('raising the browser font size grows text and controls, without cutting anything off', async ({ page }) => {
+  // The browser's own default font size setting, as an operator would raise it.
+  const cdp = await page.context().newCDPSession(page)
+  await cdp.send('Page.enable')
+  await cdp.send('Page.setFontSizes', { fontSizes: { standard: 20 } })
   await page.goto('/explorer?type=Machine')
   await expect(page.getByRole('region', { name: 'Entities' }).locator('article').first()).toBeVisible()
-  await page.addStyleTag({ content: 'html { font-size: 20px; }' })
   const s = await sizes(page)
   expect(s.body).toBeCloseTo(17.5)
   expect(s.input).toBeCloseTo(40)

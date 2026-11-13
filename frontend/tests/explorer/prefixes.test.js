@@ -75,6 +75,14 @@ describe('short names', () => {
     }
   })
 
+  test('a context prefix takes a name not shown yet, and the other namespace gets another', () => {
+    const reg = createRegistry()
+    reg.loadContext([{ prefix: 'schema', namespace: 'http://schema.org/' }])
+    expect(reg.shorten('http://schema.org/name')).toBe('schema:name')
+    expect(reg.expand('schema:name')).toBe('http://schema.org/name')
+    expect(reg.shorten('https://schema.org/name')).toBe('schema2:name')
+  })
+
   test('http, https and urn are never prefixes', () => {
     const reg = createRegistry()
     expect(reg.shorten('https://http.example/x').startsWith('http:')).toBe(false)

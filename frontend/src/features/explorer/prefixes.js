@@ -155,8 +155,9 @@ export function createRegistry() {
     /**
      * The configured context's prefixes. They take precedence over the
      * well-known and derived names: a context prefix replaces the name of its
-     * namespace, unless that name is already shown for another namespace, in
-     * which case the context prefix gets a suffix, so no shown name changes meaning.
+     * namespace, and takes its name from another namespace that hasn't been
+     * shown yet. Only a name already shown for another namespace keeps it, and
+     * the context prefix gets a suffix, so no shown name changes meaning.
      */
     loadContext(prefixes = []) {
       for (const { prefix, namespace } of prefixes) {
@@ -164,7 +165,15 @@ export function createRegistry() {
         const existing = byNamespace.get(namespace)
         if (existing?.source === 'context') continue
         const taken = byPrefix.get(prefix)
-        const name = (taken && taken.namespace !== namespace) || RESERVED.includes(prefix.toLowerCase()) ? free(prefix) : prefix
+        if (taken && taken.namespace !== namespace && !taken.used && taken.source !== 'context') {
+          // Not shown yet: the context's prefix takes the name, and the other namespace another one.
+          const moved = free(prefix)
+          byPrefix.delete(prefix)
+          taken.prefix = moved
+          byPrefix.set(moved, taken)
+        }
+        const clash = byPrefix.get(prefix)
+        const name = (clash && clash.namespace !== namespace) || RESERVED.includes(prefix.toLowerCase()) ? free(prefix) : prefix
         if (existing) byPrefix.delete(existing.prefix)
         add(name, namespace, 'context')
       }
@@ -176,6 +185,7 @@ export function createRegistry() {
     parts(iri) {
       if (!isHttpIri(iri)) return null
       const entry = ensure(iri)
+      entry.used = true
       const local = iri.length > entry.namespace.length ? iri.slice(entry.namespace.length) : ''
       return { text: `${entry.prefix}:${local}`, prefix: entry.prefix, local, namespace: entry.namespace }
     },

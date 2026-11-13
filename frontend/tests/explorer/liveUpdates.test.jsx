@@ -70,4 +70,35 @@ describe('live-update indicator', () => {
     expect(handlers).toHaveLength(2)
     expect(onResync).toHaveBeenCalledTimes(1)
   })
+
+  test('a recovery through connecting also reconnects and reads again; the back-off starts afresh', async () => {
+    vi.useFakeTimers()
+    const answers = [{ status: 'ok', state: 'active' }]
+    const health = vi.spyOn(entities, 'getLiveUpdateHealth').mockImplementation(async () => ({ detail: null, ...answers.at(-1) }))
+    const handlers = []
+    vi.spyOn(entities, 'subscribeEntities').mockImplementation((_params, onEvent) => { handlers.push(onEvent); return () => {} })
+    const onResync = vi.fn()
+    const { result } = renderHook(() => useLiveUpdates({ enabled: true, ids: ['urn:a'], onResync }))
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    expect(handlers).toHaveLength(1)
+
+    answers.push({ status: 'unavailable', state: 'connecting' })
+    act(() => handlers[0]({ type: 'error', error: new Error('lost') }))
+    await act(async () => { await vi.advanceTimersByTimeAsync(RECONNECT_MS[0]) })
+    expect(result.current.status).toBe('connecting')
+    expect(handlers).toHaveLength(1)
+
+    answers.push({ status: 'ok', state: 'active' })
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
+    expect(result.current.status).toBe('ok')
+    expect(handlers).toHaveLength(2)
+    expect(onResync).toHaveBeenCalledTimes(1)
+
+    // No update arrived since; a later outage still gets the fast first retry.
+    const before = health.mock.calls.length
+    act(() => handlers[1]({ type: 'error', error: new Error('lost again') }))
+    await act(async () => { await vi.advanceTimersByTimeAsync(RECONNECT_MS[0]) })
+    expect(health.mock.calls.length).toBe(before + 1)
+    expect(handlers).toHaveLength(3)
+  })
 })

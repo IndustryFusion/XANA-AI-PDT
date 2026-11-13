@@ -55,10 +55,18 @@ export function useLiveUpdates({ enabled, ids = [], onResync }) {
   const listeners = useRef(new Map())
   const checkRef = useRef(null)
   const retry = useRef({ step: 0, timer: null })
+  // Whether the stream ended; it is opened again as soon as live updates work, however they recovered.
+  const ended = useRef(false)
   const idsKey = [...ids].sort().join('\n')
 
   const report = useCallback((next, reason = null) => {
-    if (next === 'ok' && statusRef.current === 'unavailable') setAttempt((a) => a + 1)
+    if (next === 'ok') {
+      retry.current.step = 0
+      if (ended.current) {
+        ended.current = false
+        setAttempt((a) => a + 1)
+      }
+    }
     statusRef.current = next
     setStatus(next)
     setDetail(next === 'ok' ? null : reason)
@@ -101,11 +109,11 @@ export function useLiveUpdates({ enabled, ids = [], onResync }) {
     if (attempt > 0) onResyncRef.current?.()
     return entities.subscribeEntities({ ids: idsKey.split('\n') }, (event) => {
       if (event.type === 'error') {
+        ended.current = true
         report('unavailable', event.error?.message ?? null)
         scheduleRetry()
       } else if (event.type === 'update') {
         listeners.current.get(event.entityId)?.forEach((fn) => fn(event.attributes))
-        retry.current.step = 0
         if (statusRef.current !== 'ok') report('ok')
       }
     })

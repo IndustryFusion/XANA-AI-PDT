@@ -24,3 +24,15 @@ const last = new Map()
 export const rememberPath = (area, path) => { last.set(area, path) }
 export const lastPath = (area, fallback) => last.get(area) ?? fallback
 export const forgetPaths = () => last.clear()
+
+/* What areas keep for the operator: cleared when the session ends, so the next operator in this tab starts afresh. */
+const resets = new Set()
+
+/** Registers what an area clears when the session ends. */
+export const onSessionEnd = (fn) => { resets.add(fn); return () => resets.delete(fn) }
+
+/** The session ended: forget every area's kept place and state. */
+export function endSessionState() {
+  forgetPaths()
+  resets.forEach((fn) => fn())
+}

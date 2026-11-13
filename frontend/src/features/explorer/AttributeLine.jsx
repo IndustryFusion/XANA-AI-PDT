@@ -42,8 +42,10 @@ export function KindBadge({ kind }) {
 
 const Space = () => ' '
 
-/** `name.sub.sub2` for messages and keys. */
+/** `name.sub.sub2`, only to mark lines in the page; IRIs contain dots, so keys use `levelKey`. */
 export const dotted = (name, path = []) => [name, ...path].join('.')
+/** A key for a level that no name can make ambiguous: the levels as a JSON array. */
+export const levelKey = (name, path = []) => JSON.stringify([name, ...path])
 /** The same, with each level as its short name. */
 const shortDotted = (name, path = []) => [name, ...path].map((n) => registry.shorten(n)).join('.')
 
@@ -119,7 +121,7 @@ function valueText(inst) {
  */
 function Line({ name, path, inst, ctx, actions, multi = false }) {
   useRegistry()
-  const key = `${ctx.nodeKey}#${dotted(name, path)}`
+  const key = `${ctx.nodeKey}#${levelKey(name, path)}`
   const [editing, setEditing] = useState(false)
   const [subsOpen, setSubsOpen] = useKept(`${key}|subs`, false)
   const [nested, setNested] = useKept(`${key}|nested`, [])
@@ -135,7 +137,7 @@ function Line({ name, path, inst, ctx, actions, multi = false }) {
   const editable = actions && !readOnly && editableValue(inst)
   const subs = subAttributesOf(inst)
   const changed = path.length === 0 && ctx.changed
-  const pathKey = dotted(name, path)
+  const pathKey = levelKey(name, path)
   const historyOpen = ctx.historyOf === pathKey
   const iriMember = editable && (editable[0] === 'object' || editable[0] === 'vocab' || (editable[0] === 'value' && kind === 'iri'))
 
@@ -151,7 +153,7 @@ function Line({ name, path, inst, ctx, actions, multi = false }) {
     if (path.length) await entities.updateAttributes(ctx.entityId, { [name]: { [member]: value } }, { path })
     else await entities.updateAttributes(ctx.entityId, { [name]: { [member]: value } })
     setEditing(false)
-    ctx.onSaved(pathKey)
+    ctx.onSaved([name, ...path])
   }
 
   const toggleNested = (target) => setNested((list) => (list.includes(target) ? list.filter((t) => t !== target) : [...list, target]))
@@ -235,7 +237,7 @@ function Line({ name, path, inst, ctx, actions, multi = false }) {
         <AddAttributeForm
           entityId={ctx.entityId} parent={name} path={path} label={`Add a sub-attribute to ${label}`}
           onCancel={() => setAddingSub(false)}
-          onAdded={() => { setAddingSub(false); setSubsOpen(true); ctx.onSaved(pathKey) }}
+          onAdded={() => { setAddingSub(false); setSubsOpen(true); ctx.onSaved([name, ...path]) }}
         />
       )}
       {historyOpen && actions && (
@@ -248,7 +250,8 @@ function Line({ name, path, inst, ctx, actions, multi = false }) {
         <ul id={subsId} className="attr-subs" aria-label={`Sub-attributes of ${label}`}>
           {subs.map(([subName, subAttr]) => (
             <li key={subName} data-attribute={dotted(name, [...path, subName])}>
-              <Line name={name} path={[...path, subName]} inst={subAttr} ctx={ctx} actions multi={multi} />
+              {/* Sub-attributes of a multi-attribute are read-only, as its instances are: they are edited in the raw JSON. */}
+              <Line name={name} path={[...path, subName]} inst={subAttr} ctx={ctx} actions={!multi} multi={multi} />
             </li>
           ))}
         </ul>

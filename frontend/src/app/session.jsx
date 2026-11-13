@@ -18,6 +18,7 @@ import { createContext, useCallback, useContext, useEffect, useState } from 'rea
 import { session as sessionApi } from '../data'
 import { ErrorState, LoadingState } from '../ui/components'
 import SignInScreen from './SignInScreen'
+import { endSessionState } from './lastPath'
 
 export const SESSION_CHECK_MS = 60_000
 /** How often to look for a backend that could not be reached when the UI loaded. */
@@ -52,6 +53,11 @@ export function SessionGate({ children, checkIntervalMs = SESSION_CHECK_MS }) {
     load()
     return () => { cancelled = true }
   }, [attempt])
+
+  // A session that ended (signed out or expired) takes what the areas kept for it along.
+  useEffect(() => {
+    if (state.phase === 'signin') endSessionState()
+  }, [state.phase])
 
   const authEnabled = state.authConfig?.enabled ?? false
   const backendUnreachable = state.authConfig?.backendUnreachable ?? false

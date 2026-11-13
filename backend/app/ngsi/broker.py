@@ -538,11 +538,9 @@ class ContextBroker:
             raise invalid("Name at least one sub-attribute.")
         self._refuse_contexts(fragment)
         for sub, attribute in fragment.items():
-            if (
-                not _sub_attribute_name(sub)
-                or not isinstance(attribute, dict)
-                or not isinstance(attribute.get("type"), str)
-            ):
+            if not _sub_attribute_name(sub):
+                raise invalid(f"{sub} is a member of the attribute itself, not a name for a sub-attribute.")
+            if not isinstance(attribute, dict) or not isinstance(attribute.get("type"), str):
                 raise invalid(f"Sub-attribute {sub} needs a type and a value.")
 
         def add(level: dict[str, Any]) -> None:
@@ -829,8 +827,28 @@ def _merge_fragment(name: str, existing: Any, fragment: dict[str, Any]) -> dict[
     return {"type": existing.get("type"), **kept, **_stamped(existing, fragment)}
 
 
+# Members an attribute holds about itself (NGSI-LD core); they are never sub-attributes.
+RESERVED_MEMBERS = (
+    "type",
+    "datasetId",
+    "observedAt",
+    "unitCode",
+    "createdAt",
+    "modifiedAt",
+    "deletedAt",
+    "instanceId",
+    "lang",
+    "objectType",
+    "previousValue",
+    "previousObject",
+    "@context",
+    "@id",
+    "@type",
+)
+
+
 def _sub_attribute_name(name: str) -> bool:
-    return name not in ("type", "datasetId", *VALUE_MEMBERS)
+    return name not in (*RESERVED_MEMBERS, *VALUE_MEMBERS)
 
 
 def _walk(instance: dict[str, Any], path: list[str]) -> tuple[dict[str, Any] | None, int]:

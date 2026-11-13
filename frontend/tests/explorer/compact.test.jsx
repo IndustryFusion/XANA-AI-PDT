@@ -326,13 +326,13 @@ describe('short names as input', () => {
     await waitFor(() => expect(new URLSearchParams(window.location.search).get('q')).toBe(`${F('Mode')}=="10:30"`))
   })
 
-  test('the start of the ID pattern', async () => {
+  test('the start of the ID pattern, its namespace matched literally', async () => {
     const user = userEvent.setup()
     openWith(withPumps(), paths.explorer())
     await moreFilters(user)
     await user.type(screen.getByLabelText('ID pattern'), 'pumps:P.*')
     await user.click(screen.getByRole('button', { name: 'Search' }))
-    await waitFor(() => expect(new URLSearchParams(window.location.search).get('idPattern')).toBe(`${F('P')}.*`))
+    await waitFor(() => expect(new URLSearchParams(window.location.search).get('idPattern')).toBe('http://opcfoundation\\.org/UA/Pumps/P.*'))
   })
 })
 
@@ -435,6 +435,43 @@ describe('the same row at every depth', () => {
     await user.type(within(form).getByLabelText('Name'), 'nope:X')
     await user.click(within(form).getByRole('button', { name: 'Add' }))
     expect(await within(form).findByRole('alert')).toHaveTextContent('The prefix nope: is unknown')
+  })
+})
+
+describe('review fixes', () => {
+  test('the message after saving names a full-IRI attribute by its short name', async () => {
+    const user = userEvent.setup()
+    await openPump(user)
+    await user.click(screen.getByRole('button', { name: 'Edit pumps:FlowRate' }))
+    await user.keyboard('{Control>}a{/Control}13{Enter}')
+    expect(await screen.findByText('pumps:FlowRate saved.')).toBeVisible()
+    expect(fullIrisShown()).toEqual([])
+  })
+
+  test('sub-attributes of a multi-attribute are read-only, and their history opens once', async () => {
+    const multi = { ...pump(), [F('Temp')]: [
+      { type: 'Property', value: 1, datasetId: 'urn:ngsi-ld:Dataset:a', [F('Acc')]: { type: 'Property', value: 0.1, observedAt: now } },
+      { type: 'Property', value: 2, datasetId: 'urn:ngsi-ld:Dataset:b', [F('Acc')]: { type: 'Property', value: 0.2, observedAt: now } },
+    ] }
+    const user = userEvent.setup()
+    openWith(withPumps(multi), `${paths.entity(PUMP)}`)
+    await waitFor(() => expect(attr(F('Temp'))).not.toBeNull())
+    // The instances share their expansion: one toggle opens both.
+    await user.click(within(attr(F('Temp'))).getAllByRole('button', { name: /^1 sub-attribute/ })[0])
+    const subs = attr(F('Temp')).querySelectorAll('.attr-subs .attr-line')
+    expect(subs).toHaveLength(2)
+    for (const line of subs) expect(within(line).queryAllByRole('button', { name: /^(History|Edit|Delete|Add sub-attribute)/ })).toHaveLength(0)
+  })
+
+  test('removing the conditions chip with an unknown prefix in another field says why nothing was applied', async () => {
+    const user = userEvent.setup()
+    openWith(withPumps(), `${paths.explorer()}?type=Machine&q=${encodeURIComponent('status=="idle"')}`)
+    const type = await screen.findByLabelText('Entity type')
+    await user.clear(type)
+    await user.type(type, 'nope:Pump')
+    await user.click(screen.getByRole('button', { name: /^Remove filter where / }))
+    expect(await screen.findByText(/The prefix nope: is unknown/)).toBeVisible()
+    expect(new URLSearchParams(window.location.search).get('q')).toBe('status=="idle"')
   })
 })
 

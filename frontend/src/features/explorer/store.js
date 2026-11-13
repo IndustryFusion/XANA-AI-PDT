@@ -15,6 +15,8 @@
 //
 
 import { useCallback, useSyncExternalStore } from 'react'
+import { onSessionEnd } from '../../app/lastPath'
+import { registry } from './prefixes'
 
 /**
  * The Data explorer's view state, kept outside the components so it outlives
@@ -68,6 +70,13 @@ export function resetExplorerState() {
   state = fresh()
   listeners.forEach((fn) => fn())
 }
+
+// Kept results, expansions and names belong to the operator who saw them. Pins are kept per
+// browser, as the spec says, so they stay.
+onSessionEnd(() => {
+  resetExplorerState()
+  registry.reset()
+})
 
 /* ── Kept values ─────────────────────────────────────────────────────── */
 

@@ -614,6 +614,20 @@ def test_adding_an_existing_sub_attribute_at_depth_is_a_conflict_and_changes_not
     assert all(r.method == "GET" for r in broker.requests)
 
 
+@pytest.mark.parametrize(
+    "member", ["observedAt", "unitCode", "createdAt", "modifiedAt", "instanceId", "lang", "object"]
+)
+def test_a_member_of_the_attribute_is_no_sub_attribute_name(client, broker, member):
+    stored = deep(broker)
+    before = json.dumps(stored, sort_keys=True)
+    body = {attrs("deep"): {member: {"type": "Property", "value": 1}}}
+    answer = client.post(f"{ENTITY}/attrs", params=at("limit", dataset_id="urn:d:1"), json=body)
+    assert answer.status_code == 422
+    assert answer.json()["error"]["kind"] == "invalid"
+    assert json.dumps(stored, sort_keys=True) == before
+    assert all(r.method == "GET" for r in broker.requests)
+
+
 def test_deleting_at_depth_two_removes_it_from_each_dataset(client, broker):
     stored = deep(broker)
     del stored[1][attrs("limit")][attrs("min")]  # only one dataset has it now

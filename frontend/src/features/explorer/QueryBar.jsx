@@ -23,6 +23,9 @@ import { isHttpIri, UnknownPrefixError } from './prefixes'
 import { buildExpression, DEFAULT_LIMIT, emptyCondition, OPERATORS, parseExpression, takesValue } from './query'
 import { useKept } from './store'
 
+/** Text for a regular expression that matches it literally. */
+export const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
 /** Options of a list of IRIs: the short name shown, the full IRI as tooltip. */
 function NameOptions({ id, names, reg }) {
   return (
@@ -137,7 +140,8 @@ export default function QueryBar({ query, types, attributes, entities = [], erro
       idPattern: take('idPattern', () => {
         const m = /^([A-Za-z][\w.-]*):/.exec(pattern)
         if (!m || /^(https?|urn)$/i.test(m[1]) || !reg.lookup(m[1])) return pattern
-        return reg.expand(m[0]) + pattern.slice(m[0].length)
+        // The namespace is matched literally: its dots are not "any character".
+        return escapeRegExp(reg.expand(m[0])) + pattern.slice(m[0].length)
       }),
       hasAttr: take('hasAttr', () => reg.expand(f.hasAttr)),
       limit: f.limit,
@@ -152,9 +156,9 @@ export default function QueryBar({ query, types, attributes, entities = [], erro
     return { ...out, q, attrs: attrs.join(','), offset: '0' }
   }
 
-  function apply(f, list, attrs) {
+  function apply(f, list, attrs, override = {}) {
     try {
-      const next = expanded(f, list, attrs)
+      const next = { ...expanded(f, list, attrs), ...override }
       setProblems({})
       onApply(next)
     } catch (found) {
@@ -202,8 +206,7 @@ export default function QueryBar({ query, types, attributes, entities = [], erro
     setForm(f)
     setConditions(list)
     setSelected(attrs)
-    if (next.q) { try { onApply({ ...expanded(f, list, attrs), q: '' }) } catch { /* reported by apply */ } return }
-    apply(f, list, attrs)
+    apply(f, list, attrs, next.q ? { q: '' } : {})
   }
 
   const fieldError = (key) => problems[key] && <span id={`${ids.error}-${key}`} className="field__error" role="alert">{problems[key]}</span>

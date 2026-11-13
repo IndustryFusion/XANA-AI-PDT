@@ -173,8 +173,9 @@ export default function EntityNode({
     onChanged?.()
   }
 
-  function saved(name) {
-    notify(`${name.split('.').map((n) => registry.shorten(n)).join('.')} saved.`, 'success')
+  /** `levels`: the attribute and the sub-attributes below it down to what was saved. */
+  function saved(levels) {
+    notify(`${[].concat(levels).map((n) => registry.shorten(n)).join('.')} saved.`, 'success')
     refresh()
   }
 
@@ -204,8 +205,10 @@ export default function EntityNode({
     const { name, path } = deleting
     await entities.deleteAttribute(id, name, path.length ? { path } : {})
     notify(path.length ? `Sub-attribute ${short(path.at(-1))} of ${shortPath(name, path.slice(0, -1))} deleted.` : `${short(name)} deleted.`, 'success')
-    const key = [name, ...path].join('.')
-    if (historyOf && (historyOf === key || historyOf.startsWith(`${key}.`))) setHistoryOf(null)
+    // The history of what was deleted, or of anything below it, closes.
+    const gone = [name, ...path]
+    const open = historyOf ? JSON.parse(historyOf) : null
+    if (open && gone.every((level, i) => open[i] === level)) setHistoryOf(null)
     refresh()
   }
 

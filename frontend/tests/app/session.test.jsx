@@ -91,6 +91,24 @@ test('signing out ends the session and shows the sign-in screen', async () => {
   expect(await screen.findByLabelText('Username')).toBeVisible()
 })
 
+test('signing out forgets what the data explorer kept, so the next operator starts afresh', async () => {
+  const user = userEvent.setup()
+  renderApp({ path: '/explorer?type=Machine' })
+  await screen.findByLabelText('Username')
+  await signIn(user)
+  expect(await screen.findByRole('button', { name: 'Press brake 01' })).toBeVisible()
+  await user.click(screen.getByRole('link', { name: 'Alerts' }))
+  expect(screen.getByRole('link', { name: 'Data explorer' })).toHaveAttribute('href', '/explorer?type=Machine')
+  await user.click(await screen.findByRole('button', { name: /account and factory details/ }))
+  await user.click(screen.getByRole('button', { name: 'Sign out' }))
+  await screen.findByLabelText('Username')
+  await signIn(user)
+  expect(await screen.findByRole('link', { name: 'Data explorer' })).toHaveAttribute('href', '/explorer')
+  await user.click(screen.getByRole('link', { name: 'Data explorer' }))
+  expect(await screen.findByText('No query yet.')).toBeVisible()
+  expect(screen.queryByRole('button', { name: 'Press brake 01' })).not.toBeInTheDocument()
+})
+
 test('a session service that cannot be reached at start offers retry', async () => {
   const user = userEvent.setup()
   renderApp({ controls: { failure: { session: 'unavailable' } } })
