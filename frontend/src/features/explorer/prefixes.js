@@ -57,15 +57,17 @@ const SPECIAL = '.*+?^${}()|[]\\'
 /**
  * The start of a regular expression that matches only itself, unescaped:
  * up to the first special character that isn't escaped, or the first
- * escape that isn't of a special character (such as `\\d`).
+ * escape of a letter or digit (a class such as `\\d`, or a back-reference).
+ * Other escapes (`\\.`, `\\/`, `\\-`) match their character.
  */
 export function leadingLiteral(pattern) {
   let out = ''
   for (let i = 0; i < pattern.length; i++) {
     const ch = pattern[i]
     if (ch === '\\') {
-      if (!SPECIAL.includes(pattern[i + 1] ?? '')) break
-      out += pattern[i + 1]
+      const next = pattern[i + 1]
+      if (next === undefined || /[A-Za-z0-9]/.test(next)) break
+      out += next
       i++
     } else if (SPECIAL.includes(ch)) {
       break
@@ -74,6 +76,20 @@ export function leadingLiteral(pattern) {
     }
   }
   return out
+}
+
+/**
+ * Where `literal` ends in a pattern that starts with it, however its
+ * characters are escaped there; -1 when the pattern doesn't start with it.
+ */
+function literalEnd(pattern, literal) {
+  let i = 0
+  for (const ch of literal) {
+    if (pattern[i] === ch && !SPECIAL.includes(ch)) i += 1
+    else if (pattern[i] === '\\' && pattern[i + 1] === ch) i += 2
+    else return -1
+  }
+  return i
 }
 
 /** Whether a string is an http(s) IRI, the only kind that is shortened. */
@@ -230,12 +246,14 @@ export function createRegistry() {
       const text = String(pattern ?? '')
       const literal = leadingLiteral(text)
       if (!isHttpIri(literal)) return text
-      // Registered as `shorten()` would, so a namespace not shown yet also gets its prefix.
+      // A namespace not shown yet gets its prefix as `shorten()` would give it, but only when the
+      // pattern holds all of it: a partly typed host is no namespace.
+      const namespace = match(literal)?.namespace ?? namespaceOf(literal)
+      const end = literal.startsWith(namespace) ? literalEnd(text, namespace) : -1
+      if (end < 0) return text
       const entry = ensure(literal)
-      const escaped = escapeRegExp(entry.namespace)
-      if (!text.startsWith(escaped)) return text
       entry.used = true
-      return `${entry.prefix}:${text.slice(escaped.length)}`
+      return `${entry.prefix}:${text.slice(end)}`
     },
 
     /**
@@ -246,7 +264,7 @@ export function createRegistry() {
     expandPattern(pattern) {
       const text = String(pattern ?? '').trim()
       const colon = text.indexOf(':')
-      if (colon <= 0 || /^(https?|urn)$/i.test(text.slice(0, colon))) return text
+      if (colon <= 0 || RESERVED.includes(text.slice(0, colon).toLowerCase())) return text
       const entry = this.lookup(text.slice(0, colon))
       return entry ? escapeRegExp(entry.namespace) + text.slice(colon + 1) : text
     },

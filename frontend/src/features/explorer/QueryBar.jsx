@@ -98,9 +98,10 @@ export default function QueryBar({ query, types, attributes, entities = [], erro
   const reg = useRegistry()
   const parsed = parseExpression(query.q)
   const short = (v) => (v ? reg.shorten(v) : '')
-  const [form, setForm] = useState({
+  // Read once, as the bar mounts: shortening registers names, which must not happen on every render.
+  const [form, setForm] = useState(() => ({
     type: short(query.type), id: short(query.id), idPattern: reg.shortenPattern(query.idPattern), limit: query.limit, hasAttr: short(query.hasAttr ?? ''),
-  })
+  }))
   const [selected, setSelected] = useState(() => (query.attrs ? query.attrs.split(',').filter(Boolean) : []))
   const [adding, setAdding] = useState('')
   const iriNames = iriAttributes(entities)

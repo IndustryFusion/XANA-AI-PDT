@@ -104,6 +104,7 @@ export function useLiveUpdates({ enabled, ids = [], onResync }) {
     failures.current = 0
     statusRef.current = 'connecting'
     setStatus('connecting')
+    setDetail(null)
     const check = () => entities.getLiveUpdateHealth().then(
       (health) => { if (!cancelled) reportHealth(healthState(health), health?.detail ?? null) },
       (error) => { if (!cancelled) reportHealth('unavailable', error?.message ?? null) },

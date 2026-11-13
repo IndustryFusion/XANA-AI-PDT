@@ -153,4 +153,20 @@ describe('ID patterns', () => {
     expect(reg.shorten('https://example.com/plant/v1/Valve')).toBe('plant:Valve')
     expect(reg.shortenPattern('.*Pump')).toBe('.*Pump')
   })
+
+  test('escapes of other characters match them; a trailing backslash ends the literal', () => {
+    expect(leadingLiteral('http:\\/\\/ex\\.org\\/a\\-b\\/P.*')).toBe('http://ex.org/a-b/P')
+    expect(leadingLiteral('http://ex\\.org/P\\')).toBe('http://ex.org/P')
+  })
+
+  test('a pattern that does not hold a whole namespace registers nothing', () => {
+    const reg = createRegistry()
+    const before = reg.entries().length
+    expect(reg.shortenPattern('http://opcfoundation.org/UA/Pumps/P.*')).toBe('http://opcfoundation.org/UA/Pumps/P.*')
+    expect(reg.shortenPattern('https://exam.*')).toBe('https://exam.*')
+    expect(reg.entries()).toHaveLength(before)
+    expect(reg.entries()).toHaveLength(before)
+    // Written with escaped slashes, the namespace is still all there.
+    expect(reg.shortenPattern('http:\\/\\/opcfoundation\\.org\\/UA\\/Pumps\\/P.*')).toBe('pumps:P.*')
+  })
 })

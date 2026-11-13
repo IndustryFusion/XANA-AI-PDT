@@ -193,6 +193,8 @@ describe('live-update indicator', () => {
     rerender({ enabled: false })
     expect(result.current.status).toBe('off')
     rerender({ enabled: true })
+    expect(result.current.status).toBe('connecting')
+    expect(result.current.detail).toBeNull()
     await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
     expect(result.current.status).toBe('ok')
     expect(result.current.detail).toBeNull()
