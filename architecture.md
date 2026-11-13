@@ -446,6 +446,14 @@ entities   ("id" TEXT, "observedAt" TIMESTAMPTZ, "modifiedAt" TIMESTAMPTZ, "type
 ```
 The local environment creates this table and fills it with 24 hours of sample history ending at load time.
 
+**Declared values.** A property value in the context broker may be a JSON-LD value object -- `@value` with a datatype. The IFF Digital Twin platform writes doubles that way, because JSON-LD makes a plain whole number such as `80.0` an integer:
+
+- **What the broker returns.** It returns such a value, also in notifications, as `{"type": "http://www.w3.org/2001/XMLSchema#double", "@value": 80}`.
+- **Merges.** Its merge keeps the stored type, so live values of that attribute come back typed too, sometimes as a number string inside the object.
+- **How XANA reads it.** XANA reads every form as the plain value -- a number string under a numeric datatype as that number -- in the agent's signals and facts, in the query conditions it evaluates itself, in its edit checks and in the Data explorer. It does not depend on which form the broker returns.
+- **Edits.** An edit of a declared value is sent declared with the stored datatype.
+- **History.** The time-series layout keeps a value's text and type separately (`value`, `valueType`), so attribute history is plain values either way.
+
 ---
 
 ## Configuration

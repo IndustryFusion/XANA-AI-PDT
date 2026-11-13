@@ -21,6 +21,7 @@ rotation against EMQX with the platform's kind of check (the `platform-mqtt` pro
 and TEST_MQTT_PLATFORM_CONTAINER name the containers for the tests that restart a broker.
 """
 
+
 import asyncio
 import json
 import os
@@ -45,6 +46,7 @@ from app.errors import Refused
 from app.ngsi.broker import ContextBroker
 from app.ngsi.live import SUBSCRIPTION_NAME, LiveUpdates, Refusal, mqtt_messages
 from tests.conftest import make_settings
+from xana_agent.literals import literal
 
 BROKER = os.environ.get("TEST_BROKER_URL")
 MQTT = os.environ.get("TEST_MQTT_URL")
@@ -549,3 +551,40 @@ async def test_an_upsert_rejecting_everything_expects_no_delivery_on_a_real_brok
         assert seen == [1]
     finally:
         await broker.send("DELETE", f"/entities/{good['id']}")
+
+
+
+async def test_a_declared_value_arrives_as_its_value(clean):
+    """A declared double in a notification reads as its value (gh-84-read-declared-values)."""
+    double = "http://www.w3.org/2001/XMLSchema#double"
+    entity_id = f"urn:test:live:{uuid.uuid4().hex[:10]}"
+    async with httpx.AsyncClient() as client:
+        start = {"type": "Property", "value": {"@value": 0.0, "@type": double}}
+        body = {"id": entity_id, "type": "LiveTest", "n": start}
+        assert (await client.post(ENTITIES, json=body, headers=JSON)).status_code == 201
+    live, _ = live_updates()
+    live.start()
+    try:
+        await state_is(live, "active")
+        watcher = live.watch(ids=[entity_id])
+        try:
+            deadline = time.monotonic() + 20
+            got = None
+            while time.monotonic() < deadline and got is None:
+                async with httpx.AsyncClient() as client:
+                    change = {"n": {"type": "Property", "value": {"@value": 7.0, "@type": double}}}
+                    answer = await client.post(f"{ENTITIES}/{entity_id}/attrs", json=change, headers=JSON)
+                    assert answer.status_code == 204
+                try:
+                    message = await asyncio.wait_for(watcher.queue.get(), 2)
+                except TimeoutError:
+                    continue
+                if literal(message["attributes"]["n"]["value"]) == 7.0:
+                    got = message
+            assert got is not None, f"the declared 7.0 never arrived: {live.health()}"
+        finally:
+            live.unwatch(watcher)
+    finally:
+        await live.stop()
+        async with httpx.AsyncClient() as client:
+            await client.delete(f"{ENTITIES}/{entity_id}")

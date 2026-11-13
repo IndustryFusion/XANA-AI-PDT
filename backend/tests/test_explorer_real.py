@@ -17,6 +17,7 @@
 the time-series database (TEST_TSDB_URL). Rows are written in the platform's table layout, with
 the columns it has, and full IRIs as attribute names."""
 
+
 import asyncio
 import os
 import time
@@ -29,6 +30,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from tests.explorer_support import app_with
+from xana_agent.literals import datatype, literal
 
 pytestmark = pytest.mark.services
 BROKER = os.environ.get("TEST_BROKER_URL")
@@ -697,3 +699,47 @@ def test_real_has_attribute_with_the_largest_page(api):
         assert [e["id"] for e in answer.json()] == [e["id"] for e in theirs] and len(theirs) == 1000
     finally:
         api.post("/api/ngsi/delete-by-types", json={"types": [kind]})
+
+
+# ── Declared values (gh-84-read-declared-values) ─────────────────────────────
+
+DOUBLE = "http://www.w3.org/2001/XMLSchema#double"
+
+
+@pytest.fixture
+def declared_entity(api):
+    """An entity whose temperature is a declared double, as the platform writes one."""
+    entity_id = unique()
+    body = {
+        "id": entity_id,
+        "type": f"{IRI}cutter_{uuid.uuid4().hex[:8]}",
+        f"{IRI}temp": {"type": "Property", "value": {"@value": 42.5, "@type": DOUBLE}, "unitCode": "CEL"},
+    }
+    assert api.post("/api/ngsi/import", json=[body]).json()[0]["result"] == "created"
+    yield body
+    api.delete(f"/api/ngsi/entities/{entity_id}")
+
+
+@needs_broker
+def test_a_declared_double_round_trips(api, declared_entity):
+    stored = api.get(path(declared_entity)).json()[f"{IRI}temp"]
+    assert literal(stored["value"]) == 42.5
+    assert datatype(stored["value"]) == DOUBLE, "the broker returns it declared"
+
+    found = api.get("/api/ngsi/entities", params={"type": declared_entity["type"], "q": f"{IRI}temp==40..50"})
+    assert [e["id"] for e in found.json()] == [declared_entity["id"]], "a range is evaluated on the plain value"
+
+    assert api.patch(f"{path(declared_entity)}/attrs", json={f"{IRI}temp": {"value": "hot"}}).status_code == 422
+    assert api.patch(f"{path(declared_entity)}/attrs", json={f"{IRI}temp": {"value": 80}}).status_code == 204
+    stored = api.get(path(declared_entity)).json()[f"{IRI}temp"]
+    assert literal(stored["value"]) == 80
+    assert datatype(stored["value"]) == DOUBLE, "the edit keeps the datatype"
+    assert stored["unitCode"] == "CEL"
+
+
+@needs_broker
+def test_the_brokers_own_query_on_a_declared_number_is_recorded(api, declared_entity):
+    """What the broker's own `q` does with a declared value (gh-84 design, Risks): recorded, not asserted."""
+    found = api.get("/api/ngsi/entities", params={"type": declared_entity["type"], "q": f"{IRI}temp>40"})
+    matched = [e["id"] for e in found.json()] == [declared_entity["id"]] if found.status_code == 200 else None
+    print(f"GH84-BROKER-Q temp>40 on a declared 42.5: status={found.status_code} matched={matched}")

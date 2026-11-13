@@ -1449,3 +1449,20 @@ async def test_without_a_service_client_a_triggered_run_uses_the_operator(url, p
         await finished_round(client, listed["run_id"])
         assert entity_reads()
         assert all(token and token != "Bearer service-token" for token in entity_reads())
+
+
+_DOUBLE = "http://www.w3.org/2001/XMLSchema#double"
+
+
+@pytest.mark.parametrize(
+    ("value", "shown"),
+    [
+        ({"type": _DOUBLE, "@value": 3}, "3"),  # compacted, as the broker sends it (gh-84)
+        ({"type": _DOUBLE, "@value": "3"}, "3.0"),  # a live string merged onto a declared double
+        ({"@type": _DOUBLE, "@value": 3}, "3"),  # expanded
+    ],
+)
+def test_a_declared_value_in_a_notification(value, shown):
+    [event], _ = ngsi_events(
+        notification({"id": "urn:m:1", "alarmLevel": {"type": "Property", "value": value}}), WATCHED)
+    assert event.issue == f"Machine event: alarmLevel={shown}"

@@ -29,6 +29,7 @@ from langchain_core.messages import HumanMessage
 from pydantic import BaseModel, ValidationError
 
 from xana_agent import prompts
+from xana_agent.literals import literal
 from xana_agent.schemas import StepEvent
 from xana_agent.sources.base import AlertSource, ContextSource, HistorySource, IncidentMemory, SourceUnavailable
 from xana_agent.structured import structured_model
@@ -113,7 +114,8 @@ def attribute_value(attribute: Any) -> Any:
         return attribute
     for key in ("value", "object", "json", "valueList", "vocab", "objectList"):
         if key in attribute:
-            return attribute[key]
+            # A declared value -- {"type": "…#double", "@value": 42.5} -- is read as its value.
+            return literal(attribute[key]) if key == "value" else attribute[key]
     if isinstance(attribute.get("languageMap"), dict):
         languages = attribute["languageMap"]
         return languages.get("en") or next(iter(languages.values()), None)
@@ -147,7 +149,7 @@ def numeric_attributes(entity: dict[str, Any]) -> list[tuple[str, float, str | N
     found = []
     for key, attribute in entity.items():
         if isinstance(attribute, dict) and attribute.get("type") == "Property":
-            value = attribute.get("value")
+            value = literal(attribute.get("value"))
             if isinstance(value, int | float) and not isinstance(value, bool):
                 found.append((key, float(value), attribute.get("unitCode")))
     return found

@@ -50,6 +50,43 @@ const VALUE_MEMBERS = ['type', 'value', 'object', 'objectList', 'json', 'languag
 
 const IRI = /^(urn:|https?:\/\/)\S+$/i
 
+const XSD = 'http://www.w3.org/2001/XMLSchema#'
+const INTEGERS = new Set(['integer', 'int', 'long', 'short', 'byte', 'nonNegativeInteger', 'positiveInteger',
+  'nonPositiveInteger', 'negativeInteger', 'unsignedLong', 'unsignedInt', 'unsignedShort', 'unsignedByte'])
+const DECIMALS = new Set(['double', 'float', 'decimal'])
+const VALUE_OBJECT_KEYS = new Set(['@value', '@type', 'type', '@language'])
+
+const localDatatype = (datatype) => {
+  if (typeof datatype !== 'string') return null
+  if (datatype.startsWith(XSD)) return datatype.slice(XSD.length)
+  if (datatype.startsWith('xsd:')) return datatype.slice(4)
+  return null
+}
+
+/** Whether a value is a JSON-LD value object: `@value`, with at most a datatype or a language. */
+export const isValueObject = (value) =>
+  !!value && typeof value === 'object' && !Array.isArray(value) && '@value' in value &&
+  Object.keys(value).every((key) => VALUE_OBJECT_KEYS.has(key))
+
+/**
+ * A property value as its plain value (gh-84-read-declared-values). The platform declares its
+ * doubles, and the broker returns one as `{"type": "…#double", "@value": 42.5}`; its merge keeps
+ * the type, so a live value can come as `{"type": "…#double", "@value": "42.5"}`. A value object
+ * is read as its `@value`, a number string under a numeric datatype as that number; anything
+ * else -- plain values, IRI references -- as it is.
+ */
+export function literalOf(value) {
+  if (!isValueObject(value)) return value
+  const inner = value['@value']
+  if (typeof inner !== 'string') return inner
+  const local = localDatatype(value['@type'] ?? value.type)
+  const text = inner.trim()
+  if (INTEGERS.has(local) && /^[+-]?\d+$/.test(text)) return Number(text)
+  if (DECIMALS.has(local) && text !== '' && !Number.isNaN(Number(text))) return Number(text)
+  if (local === 'boolean' && (text === 'true' || text === 'false')) return text === 'true'
+  return inner
+}
+
 /** The IRI an IRI-valued property points to, or null. */
 export function iriOf(value) {
   if (value && typeof value === 'object' && !Array.isArray(value) && typeof value['@id'] === 'string') return value['@id']
@@ -92,7 +129,11 @@ export function displayName(entity) {
 export function editableValue(attr) {
   if (Array.isArray(attr)) return null
   const kind = attributeKind(attr)
-  if (kind === 'property' && (attr.value === null || ['string', 'number', 'boolean'].includes(typeof attr.value))) return ['value', attr.value]
+  if (kind === 'property') {
+    // A declared value is edited as its plain value; the backend keeps its datatype.
+    const value = literalOf(attr.value)
+    if (value === null || ['string', 'number', 'boolean'].includes(typeof value)) return ['value', value]
+  }
   if (kind === 'vocabulary') return ['vocab', attr.vocab]
   if (kind === 'relationship' && typeof attr.object === 'string') return ['object', attr.object]
   if (kind === 'iri') return ['value', iriOf(attr.value)]
@@ -125,6 +166,8 @@ export function statusOf(states, name) {
 /** Whether two attribute values are the same, whatever the order of their members. */
 export function sameValue(a, b) {
   if (a === b) return true
+  // `42.5` and `{"type": "…#double", "@value": "42.5"}` are the same value in two forms.
+  if (isValueObject(a) || isValueObject(b)) return sameValue(literalOf(a), literalOf(b))
   if (!a || !b || typeof a !== 'object' || typeof b !== 'object') return false
   if (Array.isArray(a) !== Array.isArray(b)) return false
   const keys = Object.keys(a)

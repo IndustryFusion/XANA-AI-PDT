@@ -727,3 +727,25 @@ async def test_the_alert_source_only_reads():
     first = list(requests[0].url.params.multi_items())
     assert ("resource", MACHINE_ID) in first
     assert ("status", "open") in first and ("status", "ack") in first
+
+
+# ── Declared values (gh-84-read-declared-values) ─────────────────────────────
+
+_DOUBLE = "http://www.w3.org/2001/XMLSchema#double"
+
+
+@pytest.mark.parametrize("declared_value", [{"type": _DOUBLE, "@value": 42.5}, {"type": _DOUBLE, "@value": "42.5"}])
+async def test_a_declared_double_is_a_signal_with_its_unit(declared_value):
+    at = datetime.now(UTC)
+    entity = {
+        "id": MACHINE_ID, "type": "Machine",
+        "temperature": {"type": "Property", "value": declared_value, "unitCode": "CEL"},
+        "speed": {"type": "Property", "value": 3.0},
+    }
+    series = {(MACHINE_ID, "temperature"): [(at - timedelta(hours=2), 10.0), (at - timedelta(hours=1), 42.5)]}
+    output = await _observe(FakeHistorySource(series), FakeContextSource([entity]))
+    by_attribute = {s["attribute"]: s for s in output["signals"]}
+    assert set(by_attribute) == {"temperature", "speed"}, "plain and declared, each once"
+    assert by_attribute["temperature"]["value"] == 42.5
+    assert by_attribute["temperature"]["unit"] == "CEL"
+    assert by_attribute["temperature"]["assessment"] == "rising"

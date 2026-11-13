@@ -28,6 +28,7 @@ from app.runs.conversation import clean
 from app.runs.machines import MachineResolver
 from app.runs.manager import MAX_ISSUE, RunManager
 from app.runs.model import ALERT, NGSI
+from xana_agent.literals import is_value_object, literal
 
 log = logging.getLogger(__name__)
 
@@ -62,6 +63,9 @@ def _attribute_value(attribute: Any) -> Any:
     if isinstance(attribute, list):
         values = [_attribute_value(item) for item in attribute]
         return values[0] if len(values) == 1 else values
+    if is_value_object(attribute):
+        # A declared value, compacted or expanded, read the way the rest of XANA reads it.
+        return literal(attribute)
     if isinstance(attribute, dict):
         members = {_local_name(key): value for key, value in attribute.items()}
         for key in _VALUE_KEYS:

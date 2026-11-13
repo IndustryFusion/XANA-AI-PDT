@@ -1083,3 +1083,62 @@ def test_has_attribute_reads_a_large_page_in_chunks_in_order(client, broker):
     assert [e["id"] for e in found] == [f"urn:q:{n:03d}" for n in range(250)]
     reads = [r for r in broker.requests if r.url.params.get("type") == "*" and "id" in r.url.params]
     assert [len(r.url.params["id"].split(",")) for r in reads] == [100, 100, 50]
+
+
+# ── Declared values (gh-84-read-declared-values) ─────────────────────────────
+
+DOUBLE = "http://www.w3.org/2001/XMLSchema#double"
+
+
+@pytest.mark.parametrize(
+    ("expression", "value", "found"),
+    [
+        ("temp==40..50", {"type": DOUBLE, "@value": 42.5}, True),
+        ("temp>40", {"type": DOUBLE, "@value": 42.5}, True),
+        ("temp>40", {"type": DOUBLE, "@value": "42.5"}, True),
+        ("temp<40", {"type": DOUBLE, "@value": "42.5"}, False),
+        ("temp==42.5", {"@type": DOUBLE, "@value": 42.5}, True),
+        ('temp~="^42"', {"type": DOUBLE, "@value": 42.5}, True),
+        ("temp~=double", {"type": DOUBLE, "@value": 42.5}, False),
+        ("temp==40..50", 42.5, True),
+    ],
+)
+def test_declared_values_are_compared_as_their_values(expression, value, found):
+    entity = {"id": "urn:e", "type": "T", "temp": {"type": "Property", "value": value}}
+    assert q.matches(entity, q.parse(expression)) is found
+
+
+def _declare_temp(broker, value=42.5):
+    broker.entities[MACHINE][attrs()]["value"] = {"type": DOUBLE, "@value": value}
+
+
+def _sent_value(broker):
+    """The value of the temperature in the last write the backend sent to the broker."""
+    for request in reversed(broker.requests):
+        if request.method in ("PATCH", "POST") and request.content:
+            body = json.loads(request.content)
+            for item in body if isinstance(body, list) else [body]:
+                if isinstance(item, dict) and attrs() in item:
+                    return item[attrs()]["value"]
+    raise AssertionError("no write of the temperature was sent")
+
+
+def test_text_for_a_declared_number_is_invalid(client, broker):
+    _declare_temp(broker)
+    before = len(broker.requests)
+    answer = client.patch(f"{ENTITY}/attrs", json={attrs(): {"value": "hot"}})
+    assert answer.status_code == 422
+    assert "must be a number" in answer.json()["error"]["message"]
+    assert broker.entities[MACHINE][attrs()]["value"] == {"type": DOUBLE, "@value": 42.5}
+    assert not [r for r in broker.requests[before:] if r.method in ("PATCH", "POST")], "the broker is not called"
+
+
+def test_a_number_for_a_declared_number_is_sent_declared(client, broker):
+    _declare_temp(broker)
+    assert client.patch(f"{ENTITY}/attrs", json={attrs(): {"value": 80}}).status_code == 204
+    assert _sent_value(broker) == {"@value": 80, "@type": DOUBLE}
+
+
+def test_a_plain_number_is_edited_as_before(client, broker):
+    assert client.patch(f"{ENTITY}/attrs", json={attrs(): {"value": 80}}).status_code == 204
+    assert _sent_value(broker) == 80

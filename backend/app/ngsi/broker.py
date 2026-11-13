@@ -40,6 +40,7 @@ from app.config import Settings
 from app.errors import Refused, bad_gateway, conflict, invalid, not_found
 from app.ngsi.failures import refusal, scrubbed, unreachable
 from app.ngsi.query import broker_can_evaluate, compile_pattern, matches, parse
+from xana_agent.literals import declared, literal
 from xana_agent.sources.ngsi import context_link
 
 SERVICE = "The context broker"
@@ -808,8 +809,19 @@ def _check_value(name: str, existing: dict[str, Any], fragment: dict[str, Any]) 
         return
     if fragment["value"] in ("", None):
         raise invalid(f"{name} cannot be empty.")
-    if _is_number(existing.get("value")) and not _is_number(fragment["value"]):
+    # Plain values compared: a declared number -- {"type": "…#double", "@value": 42.5} -- is a number.
+    if _is_number(literal(existing.get("value"))) and not _is_number(literal(fragment["value"])):
         raise invalid(f"{name} must be a number.")
+
+
+def _keep_datatype(existing: dict[str, Any], fragment: dict[str, Any]) -> dict[str, Any]:
+    """The fragment with a plain number declared like the stored value, when that was declared.
+
+    Scorpio's merge happens to keep a stored type today, but a replacing update drops it,
+    so the datatype is sent rather than left to the broker (gh-84, design D3)."""
+    if "value" not in fragment:
+        return fragment
+    return {**fragment, "value": declared(fragment["value"], existing.get("value"))}
 
 
 def _stamped(existing: dict[str, Any], fragment: dict[str, Any]) -> dict[str, Any]:
@@ -823,6 +835,7 @@ def _merge_fragment(name: str, existing: Any, fragment: dict[str, Any]) -> dict[
     if not isinstance(existing, dict):
         raise invalid(f"{name} cannot be changed this way.")
     _check_value(name, existing, fragment)
+    fragment = _keep_datatype(existing, fragment)
     # The broker's merge needs the type, and keeps the value only if it is there.
     kept = {m: existing[m] for m in VALUE_MEMBERS if m in existing and m not in fragment}
     return {"type": existing.get("type"), **kept, **_stamped(existing, fragment)}
@@ -872,5 +885,5 @@ def _merged_instance(name: str, instances: list[Any], fragment: dict[str, Any]) 
     for instance in instances:
         if isinstance(instance, dict) and instance.get("datasetId") == wanted:
             _check_value(name, instance, fragment)
-            return {**instance, **_stamped(instance, fragment)}
+            return {**instance, **_stamped(instance, _keep_datatype(instance, fragment))}
     raise not_found(f"{name} has no instance with that dataset.")

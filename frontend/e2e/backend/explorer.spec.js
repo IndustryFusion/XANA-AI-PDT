@@ -149,3 +149,34 @@ test('statuses of PostgREST and the broker are told apart in errors', async ({ p
   await attribute(node(page, SENSOR), 'value').getByRole('button', { name: /history/i }).click()
   await expect(page.getByRole('alert').filter({ hasText: 'Could not load the history' })).toContainText('PostgREST')
 })
+
+
+test('a declared double is shown as its value and keeps its datatype when edited', async ({ page }) => {
+  // gh-84-read-declared-values: the platform writes doubles as {"@value": …, "@type": "…#double"}.
+  const DOUBLE = 'http://www.w3.org/2001/XMLSchema#double'
+  const id = `urn:ngsi-ld:E2e:${tag()}`
+  await create(page, { id, type: 'E2e', temp: { type: 'Property', value: { '@value': 42.5, '@type': DOUBLE }, unitCode: 'CEL' } })
+  try {
+    await open(page, id)
+    await expect(attribute(node(page, id), 'temp')).toContainText('42.5')
+    await expect(attribute(node(page, id), 'temp')).not.toContainText('XMLSchema')
+
+    await attribute(node(page, id), 'temp').getByRole('button', { name: /42\.5/ }).first().click()
+    await page.getByLabel('New value of temp').fill('80')
+    await page.getByLabel('New value of temp').press('Enter')
+    await expect(page.getByLabel('New value of temp')).toHaveCount(0)
+    await page.reload()
+    await expect(attribute(node(page, id), 'temp')).toContainText('80')
+
+    const stored = await (await page.request.get(`/api/ngsi/entities/${encodeURIComponent(id)}`)).json()
+    expect(stored.temp.value['@value']).toBe(80)
+    expect(stored.temp.value.type ?? stored.temp.value['@type']).toBe(DOUBLE)
+
+    await attribute(node(page, id), 'temp').getByRole('button', { name: /80/ }).first().click()
+    await page.getByLabel('New value of temp').fill('hot')
+    await page.getByLabel('New value of temp').press('Enter')
+    await expect(page.getByRole('alert').filter({ hasText: 'Not saved' })).toContainText('must be a number')
+  } finally {
+    await page.request.delete(`/api/ngsi/entities/${encodeURIComponent(id)}`)
+  }
+})

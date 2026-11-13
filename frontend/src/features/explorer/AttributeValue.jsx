@@ -14,7 +14,7 @@
 // limitations under the License.
 //
 
-import { attributeKind, iriOf } from './attributes'
+import { attributeKind, iriOf, literalOf } from './attributes'
 import { Iri } from './Iri'
 import { isHttpIri } from './prefixes'
 
@@ -103,7 +103,8 @@ export default function AttributeValue({ attr, refTo }) {
   if (kind === 'language') return <LanguageMap map={attr.languageMap} />
   if (kind === 'list') return <JsonValue value={attr.valueList ?? []} />
   if (kind === 'vocabulary') return <span className="tok tok--vocab">{[].concat(attr.vocab).map((v, i) => <span key={i}>{i > 0 && ', '}<Iri value={String(v)} /></span>)}</span>
-  if (kind === 'property') return <JsonValue value={attr.value} />
+  // A declared value -- {"type": "…#double", "@value": 42.5} -- is shown as its value.
+  if (kind === 'property') return <JsonValue value={literalOf(attr.value)} />
   const { type: _type, ...rest } = attr
   return <JsonValue value={rest} />
 }

@@ -31,6 +31,7 @@ from typing import Any
 import re2
 
 from app.errors import invalid
+from xana_agent.literals import literal
 
 _COMPARISONS = ("==", "!=", ">=", "<=", "!~=", "~=", ">", "<")
 _TOKEN = re.compile(r"[A-Za-z_@][\w@:/#%+.\-]*")
@@ -284,6 +285,8 @@ def _plain(instance: Any) -> list[Any]:
         value = list(languages.values())
     if isinstance(value, dict) and "@id" in value:
         value = value["@id"]
+    # A declared value -- {"type": "…#double", "@value": "42.5"} -- compares as its value.
+    value = literal(value)
     return value if isinstance(value, list) else [value]
 
 
