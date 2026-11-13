@@ -55,11 +55,14 @@ export function useLiveUpdates({ enabled, ids = [], onResync }) {
   const listeners = useRef(new Map())
   const checkRef = useRef(null)
   const retry = useRef({ step: 0, timer: null })
-  // Whether the stream ended; it is opened again as soon as live updates work, however they recovered.
+  // Whether changes may have been missed: the stream ended, or the backend reported live updates
+  // unavailable while it stayed open. Once they work again, however they recovered, the stream is
+  // opened again and what is shown is read again.
   const ended = useRef(false)
   const idsKey = [...ids].sort().join('\n')
 
   const report = useCallback((next, reason = null) => {
+    if (next === 'unavailable') ended.current = true
     if (next === 'ok') {
       retry.current.step = 0
       if (ended.current) {

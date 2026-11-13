@@ -101,4 +101,23 @@ describe('live-update indicator', () => {
     expect(health.mock.calls.length).toBe(before + 1)
     expect(handlers).toHaveLength(3)
   })
+
+  test('an outage reported only by the health check, with the stream still open, also reads again', async () => {
+    vi.useFakeTimers()
+    const answers = [{ status: 'ok', state: 'active' }]
+    vi.spyOn(entities, 'getLiveUpdateHealth').mockImplementation(async () => ({ detail: null, ...answers.at(-1) }))
+    const handlers = []
+    vi.spyOn(entities, 'subscribeEntities').mockImplementation((_params, onEvent) => { handlers.push(onEvent); return () => {} })
+    const onResync = vi.fn()
+    const { result } = renderHook(() => useLiveUpdates({ enabled: true, ids: ['urn:a'], onResync }))
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    answers.push({ status: 'unavailable', state: 'broker_unavailable' })
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
+    expect(result.current.status).toBe('unavailable')
+    answers.push({ status: 'ok', state: 'active' })
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
+    expect(result.current.status).toBe('ok')
+    expect(onResync).toHaveBeenCalledTimes(1)
+    expect(handlers).toHaveLength(2)
+  })
 })
