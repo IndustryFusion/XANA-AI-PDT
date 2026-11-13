@@ -18,12 +18,15 @@ On the platform's data the Data explorer is hard to read and slow to work with:
 - **Compact type scale.** The base text is 14 px, attribute rows 13 px, meta information 12 px, and controls 32 px. This is set in the design tokens, so every area follows.
 - **Compact query bar.** One row holds type, entity ID and Search. A collapsible "More filters" section holds the ID pattern, has-attribute, attributes to return, limit and conditions. While it is collapsed, the filters that are set show as removable chips.
 - **Short names for IRIs.**
-  - **Where.** Types, attribute names, entity IDs, relationship targets and IRI values are shown as `prefix:local`.
+  - **The rule.** The Data explorer never shows an http(s) IRI in full. Every one is shown as `prefix:local`, or `prefix:` for a namespace, including IRIs whose namespace is only scheme and host. URNs such as `urn:ngsi-ld:…` are identifiers without a namespace and are shown as they are.
+  - **Where.** Everywhere in the explorer: the entity tree (types, attribute names, entity IDs, relationship targets, IRI values, and IRIs inside JSON, List and Vocabulary values), the query bar and its chips, the add form, value suggestions, the history pane, the time-shift banner, the import preview and results, the delete-by-type dialog, the entity title when it falls back to the ID, and messages.
+  - **The one exception.** The raw JSON view shows the entity as stored, with full IRIs, because saving it has to be exact.
   - **Where the prefixes come from.** In order: the prefixes of the configured JSON-LD context, which the backend now offers; a fixed list of well-known vocabularies; and a short name derived per namespace, which stays the same until the page is reloaded.
-  - **Seeing the full IRI.** Hovering shows it. Clicking switches one name between short and full, and a switch shows every name in full.
-  - **Legend.** A legend lists the prefixes in use.
-- **Icon actions.** History, edit, add sub-attribute, delete, raw JSON, pin, unnest and re-nest are icon buttons from one SVG set. Each has a tooltip and an accessible name, and stays visible, muted, without hovering.
-- **One context menu.** Right-click, Shift+F10 or the Menu key on an entity, attribute or IRI opens one menu: copy the short name, copy the full IRI, copy the value, open in the Data explorer, start a new incident, show active incidents, show incident history. The "▾" button next to identifiers in the explorer goes.
+  - **Seeing the full IRI.** Only in the tooltip on hover, and through the context menu's "Show full IRI" (a popover) and "Copy full IRI".
+  - **Legend.** A legend lists the prefixes in use and where each comes from. Namespaces show only in their tooltip and context menu.
+  - **Short names as input.** Wherever an IRI is typed, `prefix:local` with a known prefix is expanded before the request, a full IRI still works, and an unknown prefix is refused with a reason.
+- **Icon actions.** History, edit, add sub-attribute, delete, raw JSON, pin, unnest and re-nest, and also add attribute, delete entity, the relationship expand, close history and the raw JSON editor's copy, save and cancel, are icon buttons from one SVG set. Confirm dialogs keep text buttons. Each has a tooltip and an accessible name, and stays visible, muted, without hovering.
+- **One context menu.** Right-click, Shift+F10 or the Menu key on an entity, attribute or IRI opens one menu: copy the short name, show the full IRI, copy the full IRI, copy the value, open in the Data explorer, start a new incident, show active incidents, show incident history. The "▾" button next to identifiers in the explorer goes.
 - **The same row at every depth.**
   - **Any depth.** Sub-attributes can be shown, edited, extended and deleted at any depth.
   - **History.** It can be opened wherever an attribute has an observation time.
@@ -49,15 +52,15 @@ None.
   - The context menu replacing row controls.
   - Editing and history at every depth.
   - The live-update indicator.
-  - New: short names for IRIs, icon actions, unnest and re-nest, pinning, kept state.
+  - New: short names for IRIs, short names in every part of the explorer, short names as input, icon actions, unnest and re-nest, pinning, kept state.
 - `operator-ui/visual-system`: a compact type and control scale.
 - `backend/explorer-api`: the prefixes of the configured JSON-LD context; changing, adding and deleting sub-attributes at any depth, and their history.
 
 ## Impact
 
 - **`frontend/`:**
-  - `src/ui/` (tokens, an icon set, the context menu).
-  - `src/features/explorer/` (query bar, entity node, attribute line, add form, live updates, a store for the explorer's state).
+  - `src/ui/` (tokens, an icon set, a popover, the context menu).
+  - `src/features/explorer/` (query bar, entity node, attribute line, add form, value editor, history pane, import and delete-by-type dialogs, raw JSON editor, live updates, a store for the explorer's state).
   - `src/app/EntityRef.jsx`.
   - Both data sources (the prefixes operation).
   - `docs/data-interface.md`.

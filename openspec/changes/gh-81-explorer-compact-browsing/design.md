@@ -24,7 +24,8 @@ There is no conflict with `architecture.md`. Its Frontend section ("design token
 
 **Goals:**
 - One attribute line component, recursive, used at every depth.
-- One place that decides how an IRI is shown, used by every part of the explorer.
+- One place that decides how an IRI is shown and how a typed short name is expanded, used by every part of the explorer.
+- No full http(s) IRI on screen outside the raw JSON view, the tooltip and the "Show full IRI" popover.
 - The explorer's view state outlives the area being unmounted.
 
 **Non-Goals:**
@@ -65,7 +66,8 @@ The query bar is laid out like this:
 
 `features/explorer/prefixes.js` holds one registry per page load, kept in the explorer store (below):
 - **Lookup.** Asked for an IRI, it finds the longest registered namespace that is a prefix of it, and returns `prefix:local`.
-- **Unknown namespaces.** For an http(s) IRI with no registered namespace, it registers one. The namespace is the IRI up to and including its last `#`, or else its last `/`.
+- **Unknown namespaces.** For an http(s) IRI with no registered namespace, it registers one. The namespace is the IRI up to and including its last `#`, or else its last `/` after the host. An IRI with nothing after the host (`http://example.org`, `http://example.org/`) has the namespace `scheme://host/` and an empty local name.
+- **Namespaces themselves.** An IRI that ends in `/` or `#`, or has an empty local name, is shown as `prefix:`.
 - **Registered names.** A registered name never changes until the page is reloaded.
 
 Namespaces are registered in this order of precedence:
@@ -77,15 +79,35 @@ Namespaces are registered in this order of precedence:
    - `schema`, `saref`;
    - the OPC UA base namespace and its companion specifications used on the platform, such as `http://opcfoundation.org/UA/Pumps/` → `pumps` and `…/UA/DI/` → `di`;
    - IndustryFusion's base and knowledge ontologies (`iffb`, `iffk`).
-3. **A derived name.** It is the last path segment of the namespace that isn't a version (`v1`, `v0.1`) or a generic word (`www`, `ontology`, `contexts`), lower camel case, cut to 12 characters. A clash gets a numeric suffix (`pumps2`). Without a usable segment the name is `ns1`, `ns2` and so on.
+3. **A derived name.** It is the last path segment of the namespace that isn't a version (`v1`, `v0.1`) or a generic word (`www`, `ontology`, `contexts`). When the namespace has no path, it is the host's first label that isn't `www` (`http://example.org/` → `example`). It is lower camel case, cut to 12 characters. A clash gets a numeric suffix (`pumps2`). Without a usable segment the name is `ns1`, `ns2` and so on.
 
-A name that is not an http(s) IRI is shown unchanged. That includes URNs and terms the broker already compacted through a configured context.
+`http`, `https` and `urn` are never used as prefixes, so a typed full IRI or URN can't be mistaken for a short name.
 
-Display components get a `<Iri value kind>` element from the registry:
-- **The element.** It shows the short name, with the full IRI as `title`. Clicking toggles it between short and full.
-- **Context menu.** It handles the context menu.
-- **Global switch.** A switch in the explorer's header ("Full IRIs") is kept in `localStorage`, read and written inside try/catch.
-- **Legend.** The legend lists the registry's entries with their source: context, well-known or derived.
+**Not shortened.** Identifiers that aren't http(s) IRIs, such as URNs (`urn:ngsi-ld:…`), and terms the broker already compacted through a configured context, are shown as they are. They are identifiers without a namespace, so the rule doesn't apply to them.
+
+**The registry's functions:**
+- `shorten(iri)` returns the short name, or the input unchanged when it isn't an http(s) IRI.
+- `expand(text)` returns the full IRI for `prefix:local` with a known prefix; returns text starting with `http:`, `https:` or `urn:`, and text without a colon, unchanged; and throws `UnknownPrefix` naming the prefix otherwise.
+
+**Display.** Display components get a `<Iri value kind>` element from the registry:
+- **The element.** It shows the short name, with the full IRI as `title`. Clicking it does only what the surrounding element does, such as following a relationship. There is no toggle and no setting that shows names in full.
+- **Context menu.** It handles the context menu, which offers "Show full IRI" and "Copy full IRI" besides the target's other items.
+- **"Show full IRI".** It opens a small popover anchored to the element (a new small `Popover` in `src/ui/`), with the IRI as selectable text in a read-only field. Escape or a click outside closes it, and focus returns to the element.
+- **Legend.** The legend lists the registry's prefixes with their source: context, well-known or derived. Each prefix is an `<Iri kind="namespace">`, so its namespace is only in the tooltip and the context menu.
+
+**Where it's used.** Every place in the explorer that shows an IRI goes through `<Iri>` or, where only text is possible, `shorten()` with the full IRI as `title`:
+- `QueryBar.jsx`: the type select's options, has-attribute, attributes to return, the condition builder, and the chips;
+- `AddAttributeForm.jsx`: the relationship target;
+- `ValueEditor.jsx`: suggested values;
+- `HistoryPane.jsx`: the title, and relationship targets and IRI values in its table;
+- `DataExplorer.jsx`: the time-shift banner and its types, the entity title when it falls back to the ID, and messages naming an entity or attribute;
+- `ImportDialog.jsx`: the preview and the result list;
+- `DeleteByTypeDialog.jsx`: the type;
+- `AttributeValue.jsx`: http(s) strings inside JSON, List and Vocabulary values, found by walking the value.
+
+`RawJsonEditor.jsx` alone keeps the stored text, because a save has to be exact. It is reached only through the raw JSON action.
+
+**Input.** The same inputs, and the add form's name, call `expand()` before building the request. An `UnknownPrefix` is shown at the input, and no request is sent. The add form's prefix picker stays as a shortcut that fills in `prefix:`.
 
 **Alternatives:**
 - **Derive prefixes from each result set.** This is how the earlier browser did it. The same `ns0` then names a different namespace after the next search, so short names can't be trusted.
@@ -131,8 +153,9 @@ Without `path`, the answer is unchanged.
 ### Icons
 
 The icons are a small in-house SVG set in `src/ui/icons.jsx`:
-- **Glyphs.** History, edit, add, delete, raw JSON, pin, pinned, unnest, re-nest, chevron, copy, link and more. Each is 16 px, drawn with `currentColor` strokes, so both themes and the contrast rules apply.
+- **Glyphs.** History, edit, add, delete, raw JSON, pin, pinned, unnest, re-nest, chevron, expand, close, copy, save, cancel, link and more. Each is 16 px, drawn with `currentColor` strokes, so both themes and the contrast rules apply.
 - **`IconButton`.** It renders an icon inside a 28 px button, with `aria-label` and a tooltip. Row actions are muted (`--text-muted`) and turn to full contrast on hover and focus. They are never hidden.
+- **Where.** Besides the row actions, the entity's "Add attribute" and "Delete entity", the relationship target's "▸ expand", the history pane's "Close", and the raw JSON editor's Copy, Save and Cancel become icon buttons. Confirm dialogs keep their text buttons, since the words there are the decision.
 
 **Alternatives:**
 - **An icon library** such as Lucide: a new runtime dependency the specs don't call for.
@@ -196,7 +219,8 @@ The `detail` is shown in the indicator's tooltip and as visible text next to it 
 ## Risks / Trade-offs
 
 - **[Smaller text everywhere can break layouts or contrast in other areas]** → Run the axe and Playwright suites on every area in both themes, and check the 900 px breakpoint. Areas with hard-coded sizes are moved onto tokens in the same change.
-- **[Derived prefixes can mislead, e.g. `pumps` for a namespace that isn't OPC UA's]** → Every short name shows its full IRI on hover, the legend states where each prefix came from, and the global switch shows full IRIs.
+- **[Derived prefixes can mislead, e.g. `pumps` for a namespace that isn't OPC UA's]** → Every short name shows its full IRI on hover and through "Show full IRI", and the legend states where each prefix came from.
+- **[An operator who needs many full IRIs at once has no bulk view]** → The raw JSON view shows an entity as stored, and "Copy full IRI" works on every name.
 - **[A context with many remote imports makes the prefix route slow]** → The limits on depth and documents, the existing health timeout per fetch, and the ten-minute cache. The UI doesn't wait for it before showing results: names are re-rendered when the prefixes arrive.
 - **[Read-merge-write for deep sub-attributes can overwrite a concurrent change made outside this backend]** → It's the same window the existing sub-attribute delete has. A live update arriving during an edit shows the newer value.
 - **[Results kept in memory can be stale]** → They are always read again on return, and live updates keep them current while shown.
@@ -204,4 +228,4 @@ The `detail` is shown in the indicator's tooltip and as visible text next to it 
 
 ## Migration Plan
 
-Frontend and backend deploy together through the chart, as usual. The new route and the `path` parameter are additions: `sub_attribute` still works, so an older frontend keeps working against the new backend. Pins and the full-IRI switch start empty. Rolling back drops them harmlessly.
+Frontend and backend deploy together through the chart, as usual. The new route and the `path` parameter are additions: `sub_attribute` still works, so an older frontend keeps working against the new backend. Pins start empty. Rolling back drops them harmlessly.
