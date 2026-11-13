@@ -34,7 +34,7 @@
 
 ## 5. Verification on the platform
 
-- [ ] 5.1 Against the local environment's Scorpio with the platform's sample data, check in a browser that:
+- [x] 5.1 Against the local environment's Scorpio with the platform's sample data, check in a browser that:
   - no http(s) IRI shows in full anywhere in the explorer outside the raw JSON view, the tooltip and the "Show full IRI" popover;
   - typing a short name in the query bar finds the same entities as the full IRI;
   - a namespace keeps its prefix across two queries;
@@ -42,8 +42,8 @@
   - the incident actions are only in the context menu.
 
   Verify with the Playwright backend suite and a manual check.
-- [ ] 5.2 On a sub-attribute three levels deep, check change, add, delete and history, and that the rest of the attribute is unchanged. Verify by reading the entity back from the broker.
-- [ ] 5.3 Unnest and pin a relationship target, run a new query, switch areas and come back, and reload. Verify that the view, then the query and pins, are as specified.
+- [x] 5.2 On a sub-attribute three levels deep, check change, add, delete and history, and that the rest of the attribute is unchanged. Verify by reading the entity back from the broker.
+- [x] 5.3 Unnest and pin a relationship target, run a new query, switch areas and come back, and reload. Verify that the view, then the query and pins, are as specified.
 - [ ] 5.4 After signing in, check that the indicator shows connecting, then working, and never unavailable while the backend reports `active`. Verify in a browser against the backend.
 
 ## Workflow follow-up
