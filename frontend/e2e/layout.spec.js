@@ -102,7 +102,10 @@ test('buttons next to inputs and selects are level with them', async ({ page }) 
 })
 
 for (const [name, path, open] of [
-  ['explorer toolbar and query conditions', '/explorer?type=Machine', async (page) => page.getByRole('button', { name: 'Add condition' }).click()],
+  ['explorer toolbar and query conditions', '/explorer?type=Machine', async (page) => {
+    await page.getByRole('button', { name: 'More filters' }).click()
+    await page.getByRole('button', { name: 'Add condition' }).click()
+  }],
   ['explorer value editor', '/explorer/urn%3Angsi-ld%3AMachine%3Apress-brake-01?type=Machine', async (page) => page.getByRole('button', { name: /^Edit status/ }).first().click()],
   ['import from a URL', '/explorer', async (page) => {
     await page.getByRole('button', { name: 'Import…' }).click()

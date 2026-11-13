@@ -97,3 +97,57 @@ export function menuPointFor(element) {
 
 /** The keys that open a context menu from the keyboard: the menu key and Shift+F10. */
 export const isMenuKey = (e) => e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')
+
+/** How long a touch must be held to open the menu. */
+export const LONG_PRESS_MS = 550
+
+/**
+ * Opens a context menu from an element: on right-click, Shift+F10 or the
+ * menu key, and on a long press for touch. `items` is a list or a function
+ * returning it, read when the menu opens. Spread `triggerProps` on the
+ * element and render `menu` anywhere. A menu opened on an inner element
+ * doesn't also open its container's.
+ */
+export function useContextMenu({ label, items }) {
+  const [at, setAt] = useState(null)
+  const [list, setList] = useState([])
+  const timer = useRef(null)
+
+  const open = (point) => {
+    const next = typeof items === 'function' ? items() : items
+    if (!next?.length) return false
+    setList(next)
+    setAt(point)
+    return true
+  }
+  const cancel = () => { clearTimeout(timer.current); timer.current = null }
+
+  const triggerProps = {
+    onContextMenu(e) {
+      if (e.nativeEvent?.explorerMenuOpened) return
+      if (open({ x: e.clientX, y: e.clientY })) {
+        e.preventDefault()
+        e.nativeEvent.explorerMenuOpened = true
+      }
+    },
+    onKeyDown(e) {
+      if (!isMenuKey(e) || e.nativeEvent?.explorerMenuOpened) return
+      if (open(menuPointFor(e.currentTarget))) {
+        e.preventDefault()
+        e.nativeEvent.explorerMenuOpened = true
+      }
+    },
+    onPointerDown(e) {
+      if (e.pointerType !== 'touch') return
+      const point = { x: e.clientX, y: e.clientY }
+      cancel()
+      timer.current = setTimeout(() => open(point), LONG_PRESS_MS)
+    },
+    onPointerUp: cancel,
+    onPointerCancel: cancel,
+    onPointerMove: cancel,
+  }
+
+  const menu = at ? <ContextMenu at={at} label={label} items={list} onClose={() => setAt(null)} /> : null
+  return { triggerProps, menu, isOpen: !!at }
+}

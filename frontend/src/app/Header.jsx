@@ -20,6 +20,7 @@ import { useData } from '../data/useData'
 import { Button, StatusBadge } from '../ui/components'
 import { ThemeSelect } from '../ui/theme'
 import { Brand } from './Brand'
+import { lastPath } from './lastPath'
 import { Link, NAV_ITEMS, paths, useRoute } from './router'
 import { useSession } from './session'
 
@@ -36,7 +37,7 @@ export default function Header() {
         <ul>
           {NAV_ITEMS.map((item) => (
             <li key={item.area}>
-              <Link to={item.path} className="app-nav__link" aria-current={area === item.area ? 'page' : undefined}>
+              <Link to={lastPath(item.area, item.path)} className="app-nav__link" aria-current={area === item.area ? 'page' : undefined}>
                 {item.label}
               </Link>
             </li>

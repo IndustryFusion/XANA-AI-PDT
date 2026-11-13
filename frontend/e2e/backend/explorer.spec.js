@@ -42,11 +42,12 @@ async function open(page, id) {
 
 test('types and attributes come from the broker, and a query lists its machines', async ({ page }) => {
   await page.goto('/explorer')
-  await page.getByLabel('Entity type').selectOption('Machine')
+  await page.getByLabel('Entity type').fill('Machine')
+  await page.getByRole('button', { name: 'More filters' }).click()
   await page.getByRole('button', { name: 'Add condition' }).click()
   await page.getByLabel('Attribute of condition 1').selectOption('machineType')
   await page.getByLabel('Value of condition 1').fill('LaserCutter')
-  await page.getByRole('button', { name: 'Apply query' }).click()
+  await page.getByRole('button', { name: 'Search' }).click()
   await expect(node(page, MACHINE)).toBeVisible()
   await expect(entities(page).locator('[data-entity="urn:ngsi-ld:Machine:press-brake-01"]')).toHaveCount(0)
 })

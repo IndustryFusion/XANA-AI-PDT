@@ -32,7 +32,7 @@ Served by the backend. It doesn't use the mock source, and `tests/data/backendSo
 | runs | `listActiveRuns`, `startRun`, `getRun`, `subscribeRun`, `clarify`, `confirmResolution`, `escalationPreflight`, `escalate`, `getOutboxStatus`, `sendConversationAct`, `askAgent`, `approveDataRequest`, `replyToRecommendation`, `refreshConversationStatus`, `recordMachineBuilderClose`, `reopenRun`, `stopRun`, `archiveRun` | `/api/agent/…`, `/ws/run/{runId}` |
 | incidents | `listIncidents`, `getIncident`, `reopenIncident` | `/api/incidents` |
 | session | `getAuthConfig`, `getSession`, `signIn`, `signOut`, `getFactory` | `/api/auth/config`, `status`, `connect`, `logout`, `/api/ifric/factory` |
-| entities | `getStats`, `listTypes`, `listAttributes`, `queryEntities`, `getEntity`, `updateAttributes`, `appendAttributes`, `deleteAttribute`, `deleteEntity`, `importEntities`, `fetchImportDocument`, `deleteByTypes`, `getAttributeHistory`, `getAttributeStatus`, `listTypesAt`, `queryEntitiesAt`, `subscribeEntities`, `getLiveUpdateHealth`, `getValueHints` | `/api/ngsi/…`, `/api/ngsi/ws`, `/api/shacl/hints` |
+| entities | `getStats`, `listTypes`, `listAttributes`, `queryEntities`, `getEntity`, `updateAttributes`, `appendAttributes`, `deleteAttribute`, `deleteEntity`, `importEntities`, `fetchImportDocument`, `deleteByTypes`, `getAttributeHistory`, `getAttributeStatus`, `listTypesAt`, `queryEntitiesAt`, `subscribeEntities`, `getLiveUpdateHealth`, `getValueHints`, `getPrefixes` | `/api/ngsi/…`, `/api/ngsi/ws`, `/api/shacl/hints` |
 | alerts | `listAlerts`, `countAlerts`, `getAlert`, `applyAlertAction`, `listEnvironments`, `listServices`, `getAlertSettings` | `/api/alerta/…` |
 | dataspace | `getConnection`, `connect`, `disconnect`, `listPeers`, `getPeerCapabilities`, `listCapabilityRequests`, `decideCapabilityRequest`, `setCapabilityPolicy`, `resolveNames`, `resolveBuilders` | `/api/gateway/…`, `/api/ifric/…` |
 | system | `getHealth`, `getServiceSettings`, `saveServiceSettings` | `/api/diagnostics`, `/api/config`; saving is refused here as `conflict` |
@@ -148,24 +148,27 @@ Entities are NGSI-LD entities in compacted form: `id`, `type` and one member per
 | `listAttributes()` | — | attribute names, sorted | `unavailable` |
 | `queryEntities({ type, id, idPattern, q, limit, offset, attrs, hasAttr })` | type(s) and ID(s) (comma-separated), ID regular expression, NGSI-LD query expression `q`, result limit 1–1000 (default 100), `offset` (matches to skip, default 0), `attrs` (comma-separated attributes to return, as the broker's `attrs`: only those, and only entities with one of them), `hasAttr` (one attribute: only entities that have it, whole unless `attrs` is given) | entities in ID order; the list has `total`, the number of matches, when it is known (not past the last match); if a search stopped early, it also has `limited: { scanned, total }` and screens say so | `invalid` (with the reason, also for a negative offset or more than one `hasAttr`), `unavailable` |
 | `getEntity(id)` | entity ID | entity | `not_found` |
-| `updateAttributes(id, attrs)` | `{ [name]: fragment }`; each fragment is merged into the existing attribute (`{ value }` changes the value and, unless the fragment sets `observedAt`, stamps the observation time; an attribute-valued member adds or replaces a sub-attribute) | nothing | `not_found` (entity or attribute), `invalid` (with the reason, e.g. text for a numeric value) |
-| `appendAttributes(id, attrs)` | `{ [name]: attribute }` new attributes | nothing | `not_found`, `conflict` (name exists), `invalid` |
-| `deleteAttribute(id, name, { subAttribute })` | attribute, or one of its sub-attributes | nothing | `not_found` |
+| `updateAttributes(id, attrs, { path })` | `{ [name]: fragment }`; each fragment is merged into the existing attribute (`{ value }` changes the value and, unless the fragment sets `observedAt`, stamps the observation time; an attribute-valued member adds or replaces a sub-attribute). With `path` (sub-attribute names, one per level below `name`), `attrs` holds one attribute and its fragment is merged into the sub-attribute at that path; the rest stays at every level | nothing | `not_found` (entity, attribute, or the first missing level of `path`, named), `invalid` (with the reason, e.g. text for a numeric value) |
+| `appendAttributes(id, attrs, { path })` | `{ [name]: attribute }` new attributes. With `path`, `{ [name]: { [sub]: attribute } }` adds sub-attributes to the sub-attribute at that path | nothing | `not_found` (also a missing level of `path`), `conflict` (name exists), `invalid` |
+| `deleteAttribute(id, name, { subAttribute, path })` | attribute, one of its sub-attributes (`subAttribute`), or the sub-attribute at `path` at any depth; with several datasets it is removed from each that has it | nothing | `not_found` (also a missing level of `path`, named) |
 | `deleteEntity(id)` | entity ID | nothing | `not_found` |
 | `importEntities(entities)` | list of entities; an existing ID is replaced, so its attributes that are not in the list are removed | `[{ id, result: created \| updated \| failed, reason }]` per entity | `invalid` (not a list) |
 | `fetchImportDocument(url)` | http(s) URL | `{ url, document }`: the parsed JSON document | `invalid` (not a URL, an internal address, a URL with credentials, too large, or not JSON), `unavailable` (cannot be fetched) |
 | `deleteByTypes(types)` | type names | `[{ type, count }]` deleted per type | `unavailable` |
-| `getAttributeHistory(id, name, { from, to })` | entity, attribute, ISO range (default: all) | `[{ at, value }]` oldest first; empty if nothing was recorded in the range. If only the newest values fit, the list also has `limited: { newest }` | `not_found`, `invalid` |
+| `getAttributeHistory(id, name, { from, to, path })` | entity, attribute, ISO range (default: all); with `path`, the sub-attribute at that path below the attribute (only its values under that parent) | `[{ at, value }]` oldest first; empty if nothing was recorded in the range. If only the newest values fit, the list also has `limited: { newest }` | `not_found`, `invalid` |
 | `getAttributeStatus(id)` | entity ID | `{ [name]: { deleted, observedAt } }`: the latest recorded state per attribute, also of attributes that no longer exist; `{}` if nothing was recorded | `unavailable` |
 | `listTypesAt(at)` | past ISO timestamp | type names at that moment | `invalid` (not in the past), `unavailable` |
 | `queryEntitiesAt(at, query)` | past ISO timestamp, query as `queryEntities` without `offset`, `attrs` and `hasAttr`, which are ignored | entities as they were at that moment | `invalid`, `unavailable` |
 | `subscribeEntities({ type, ids }, onEvent)` | optional type or entity IDs, callback | `unsubscribe()`; events `{ type: 'update', entityId, attributes: { [name]: attribute } }` with the changed attributes, and perhaps others that didn't change | via `{ type: 'error', error }`; after an error no further events arrive |
-| `getLiveUpdateHealth()` | — | `{ status: ok \| unavailable, detail }`: whether live updates can be delivered | `unavailable` |
+| `getLiveUpdateHealth()` | — | `{ status: ok \| unavailable, state, detail }`: whether live updates can be delivered; `state` is the backend's state (`active`, `connecting`, `waiting_for_sign_in`, `subscription_failed`, …) and `detail` its reason | `unavailable` |
+| `getPrefixes()` | — | `{ prefixes: [{ prefix, namespace }], detail }`: the prefixes the configured JSON-LD context defines (terms whose IRI ends in `/` or `#`); an empty list without a configured context, and with `detail` saying why when it can't be read | `unavailable` |
 | `getValueHints({ entityType, attribute })` | entity type and attribute | `{ hintType: enum \| range \| datatype \| none, values, minimum, maximum, minimumExclusive, maximumExclusive, datatype, detail }`: allowed values and range from the data model. `none` when nothing is known or it can't be read, and then `detail` says why | `unavailable` |
 
 **Query expression (`q`).** The operators `==`, `!=`, `>`, `>=`, `<`, `<=`, `~=` (regular expression), `!~=`, `attr` (exists) and `!attr` (does not exist), combined with `;` (and, binds tighter) and `|` (or) and parentheses. Paths: `attr`, `attr.subAttribute`, `attr[key]` (member of an object value). Values: `"text"`, numbers, `true`/`false`, ranges `1..5`, lists `"a","b"`, unquoted identifiers or dates. Relationships compare their `object`, list and language attributes match if any element matches. A pattern for `~=` and `!~=` is the text as written, also unquoted: `serial~=20` finds `M20-A`, and `serial~="M","Z"` matches either. A syntax error rejects the query as `invalid` with the position.
 
-**Live updates.** A screen subscribes while it shows live data and polls `getLiveUpdateHealth()` to show whether updates work; after an `error` event it resubscribes once the health is `ok` again.
+**Live updates.** A screen subscribes while it shows live data and polls `getLiveUpdateHealth()` to show whether updates work: `active` is working, `connecting` and `waiting_for_sign_in` (for a signed-in UI) are connecting, anything else is unavailable with `detail` as the reason. After an `error` event it checks again after 1, 2, 5 and 10 s and resubscribes once live updates work again.
+
+**Short names.** The UI shows http(s) IRIs as `prefix:local`, with prefixes from `getPrefixes()`, a fixed list of well-known vocabularies and names it derives per namespace; it expands typed short names before calling the data source. The data source itself always takes and returns full IRIs.
 
 **Mock specifics.**
 
@@ -178,6 +181,8 @@ Entities are NGSI-LD entities in compacted form: `id`, `type` and one member per
   - `https://samples.example.org/ngsi-ld/machine-names.json`: new names for two laser cutters (updated);
   - `https://samples.example.org/ngsi-ld/incomplete.json`: an entity without a type (the preview reports it).
 - *Value hints:* machine `status`, `operatingMode` and `machineType`, and line `shifts`; a range for sensor `value`, and a data type for machine `manufacturer`.
+- *Prefixes:* the configured context defines `samples` for `https://samples.example.org/ngsi-ld/`.
+- *Sub-attribute history:* a sub-attribute's history is its current value at its observation time, if that falls in the range.
 
 ## alerts — implemented
 

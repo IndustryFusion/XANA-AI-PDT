@@ -143,6 +143,47 @@ describe('edit', () => {
   })
 })
 
+describe('sub-attributes at any depth (as the backend serves them)', () => {
+  const deep = () => store.update((s) => {
+    s.entities.find((e) => e.id === MACHINE).status.check = {
+      type: 'Property', value: 'ok', observedAt: ago(HOUR), source: { type: 'Property', value: 'plc', observedAt: ago(HOUR) },
+    }
+    return s
+  })
+  const status = async () => (await entities.getEntity(MACHINE)).status
+
+  test('changes, adds and deletes at depth 2, keeping the rest', async () => {
+    deep()
+    await entities.updateAttributes(MACHINE, { status: { value: 'manual' } }, { path: ['check', 'source'] })
+    expect((await status()).check.source.value).toBe('manual')
+    expect((await status()).check.value).toBe('ok')
+    await entities.appendAttributes(MACHINE, { status: { note: { type: 'Property', value: 'x' } } }, { path: ['check', 'source'] })
+    expect((await status()).check.source.note.value).toBe('x')
+    await expect(entities.appendAttributes(MACHINE, { status: { note: { type: 'Property', value: 'y' } } }, { path: ['check', 'source'] })).rejects.toMatchObject({ kind: 'conflict' })
+    await entities.deleteAttribute(MACHINE, 'status', { path: ['check', 'source'] })
+    expect((await status()).check.source).toBeUndefined()
+    expect((await status()).check.value).toBe('ok')
+  })
+
+  test('a missing level is not found, naming it, and nothing changes', async () => {
+    deep()
+    const before = await status()
+    await expect(entities.updateAttributes(MACHINE, { status: { value: 1 } }, { path: ['check', 'nope'] })).rejects.toMatchObject({ kind: 'not_found', message: expect.stringContaining('nope') })
+    expect(await status()).toEqual(before)
+  })
+
+  test('history of a sub-attribute; the old sub-attribute parameter still deletes', async () => {
+    deep()
+    expect(await entities.getAttributeHistory(MACHINE, 'status', { path: ['check', 'source'] })).toEqual([{ at: expect.any(String), value: 'plc' }])
+    await entities.deleteAttribute(MACHINE, 'status', { subAttribute: 'check' })
+    expect((await status()).check).toBeUndefined()
+  })
+
+  test('the configured context\'s prefixes', async () => {
+    expect(await entities.getPrefixes()).toEqual({ prefixes: [{ prefix: 'samples', namespace: 'https://samples.example.org/ngsi-ld/' }], detail: null })
+  })
+})
+
 describe('import and bulk delete', () => {
   test('creates, updates and reports failures per entity', async () => {
     const results = await entities.importEntities([

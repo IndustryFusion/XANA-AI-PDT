@@ -17,6 +17,7 @@ import asyncio
 import json
 import logging
 import time
+from urllib.parse import quote
 
 import httpx
 import pytest
@@ -540,6 +541,174 @@ def test_delete_missing_or_value_member_as_sub_attribute(client, broker):
     params = {"name": attrs(), "sub_attribute": "value"}
     assert client.delete(f"{ENTITY}/attrs", params=params).status_code == 404
     assert broker.entities[MACHINE][attrs()]["value"] == 42
+
+
+# Sub-attributes at a path ---------------------------------------------------------------------
+
+
+def deep(broker: Broker) -> list[dict]:
+    """An attribute with two datasets, each with sub-attributes two levels deep."""
+
+    def instance(dataset: str, value: int) -> dict:
+        return {
+            "type": "Property",
+            "value": value,
+            "datasetId": dataset,
+            attrs("limit"): {
+                "type": "Property",
+                "value": 99,
+                attrs("max"): {"type": "Property", "value": value * 10, "unitCode": "CEL"},
+                attrs("min"): {"type": "Property", "value": 0},
+            },
+            attrs("note"): {"type": "Property", "value": "kept"},
+        }
+
+    broker.entities[MACHINE][attrs("deep")] = [instance("urn:d:1", 1), instance("urn:d:2", 2)]
+    return broker.entities[MACHINE][attrs("deep")]
+
+
+def at(*path: str, **extra: str) -> dict:
+    return {"name": attrs("deep"), "path": [attrs(p) for p in path], **extra}
+
+
+def test_changing_at_depth_two_keeps_everything_else(client, broker):
+    stored = deep(broker)
+    body = {attrs("deep"): {"value": 25}}
+    answer = client.patch(f"{ENTITY}/attrs", params=at("limit", "max", dataset_id="urn:d:2"), json=body)
+    assert answer.status_code == 204
+    one, two = stored
+    assert two[attrs("limit")][attrs("max")]["value"] == 25
+    assert two[attrs("limit")][attrs("max")]["unitCode"] == "CEL"
+    assert two[attrs("limit")][attrs("max")]["observedAt"].endswith("Z")
+    assert two[attrs("limit")][attrs("min")] == {"type": "Property", "value": 0}
+    assert two[attrs("limit")]["value"] == 99
+    assert two["value"] == 2
+    assert two[attrs("note")]["value"] == "kept"
+    assert one[attrs("limit")][attrs("max")]["value"] == 10
+    written = broker.requests[-1]
+    assert written.method == "PATCH"
+    assert written.url.raw_path.decode().endswith(f"/attrs/{quote(attrs('deep'), safe='')}")
+    assert json.loads(written.content)["datasetId"] == "urn:d:2"
+
+
+def test_adding_at_depth_two(client, broker):
+    stored = deep(broker)
+    body = {attrs("deep"): {attrs("step"): {"type": "Property", "value": 5}}}
+    answer = client.post(f"{ENTITY}/attrs", params=at("limit", "max", dataset_id="urn:d:1"), json=body)
+    assert answer.status_code == 204
+    one, two = stored
+    assert one[attrs("limit")][attrs("max")][attrs("step")]["value"] == 5
+    assert one[attrs("limit")][attrs("max")]["value"] == 10
+    assert one[attrs("limit")][attrs("min")]["value"] == 0
+    assert attrs("step") not in two[attrs("limit")][attrs("max")]
+
+
+def test_adding_an_existing_sub_attribute_at_depth_is_a_conflict_and_changes_nothing(client, broker):
+    stored = deep(broker)
+    before = json.dumps(stored, sort_keys=True)
+    body = {attrs("deep"): {attrs("min"): {"type": "Property", "value": 5}}}
+    answer = client.post(f"{ENTITY}/attrs", params=at("limit", dataset_id="urn:d:1"), json=body)
+    assert answer.status_code == 409
+    assert answer.json()["error"]["kind"] == "conflict"
+    assert json.dumps(stored, sort_keys=True) == before
+    assert all(r.method == "GET" for r in broker.requests)
+
+
+def test_deleting_at_depth_two_removes_it_from_each_dataset(client, broker):
+    stored = deep(broker)
+    del stored[1][attrs("limit")][attrs("min")]  # only one dataset has it now
+    stored.append({"type": "Property", "value": 3, "datasetId": "urn:d:3"})
+    answer = client.delete(f"{ENTITY}/attrs", params=at("limit", "min"))
+    assert answer.status_code == 204
+    one, two, three = broker.entities[MACHINE][attrs("deep")]
+    assert attrs("min") not in one[attrs("limit")]
+    assert one[attrs("limit")][attrs("max")]["value"] == 10
+    assert two[attrs("limit")][attrs("max")]["value"] == 20
+    assert three == {"type": "Property", "value": 3, "datasetId": "urn:d:3"}
+    assert [r.method for r in broker.requests].count("PATCH") == 1
+
+
+def test_deleting_at_depth_two_from_every_dataset(client, broker):
+    deep(broker)
+    assert client.delete(f"{ENTITY}/attrs", params=at("limit", "max")).status_code == 204
+    for instance in broker.entities[MACHINE][attrs("deep")]:
+        assert attrs("max") not in instance[attrs("limit")]
+        assert instance[attrs("limit")][attrs("min")]["value"] == 0
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "missing"),
+    [
+        ("patch", ("nope", "max"), "nope"),
+        ("patch", ("limit", "nope"), "nope"),
+        ("post", ("limit", "nope"), "nope"),
+        ("delete", ("nope", "max"), "nope"),
+        ("delete", ("limit", "nope"), "nope"),
+        ("patch", ("limit", "value"), "value"),
+    ],
+)
+def test_a_missing_level_is_not_found_with_its_name_and_nothing_changes(client, broker, method, path, missing):
+    stored = deep(broker)
+    before = json.dumps(stored, sort_keys=True)
+    body = {attrs("deep"): {"value": 1} if method == "patch" else {attrs("x"): {"type": "Property", "value": 1}}}
+    params = at(*path, dataset_id="urn:d:1") if method != "delete" else at(*path)
+    kwargs = {} if method == "delete" else {"json": body}
+    answer = getattr(client, method)(f"{ENTITY}/attrs", params=params, **kwargs)
+    assert answer.status_code == 404
+    assert answer.json()["error"]["kind"] == "not_found"
+    assert f"sub-attribute {attrs(missing)}" in answer.json()["error"]["message"]
+    assert json.dumps(stored, sort_keys=True) == before
+    assert all(r.method == "GET" for r in broker.requests)
+
+
+def test_a_path_below_a_missing_attribute_is_not_found(client, broker):
+    answer = client.delete(f"{ENTITY}/attrs", params={"name": attrs("nope"), "path": attrs("limit")})
+    assert answer.status_code == 404
+    assert attrs("nope") in answer.json()["error"]["message"]
+
+
+def test_one_path_entry_is_the_old_sub_attribute_parameter(client, broker):
+    answer = client.delete(f"{ENTITY}/attrs", params={"name": attrs(), "path": attrs("low")})
+    assert answer.status_code == 204
+    stored = broker.entities[MACHINE][attrs()]
+    assert attrs("low") not in stored
+    assert stored[attrs("limit")]["value"] == 99
+    old = Broker()
+    TestClient(app_with(old)).delete(f"{ENTITY}/attrs", params={"name": attrs(), "sub_attribute": attrs("low")})
+    assert old.entities == broker.entities
+    assert [(r.method, r.url.path) for r in old.requests] == [(r.method, r.url.path) for r in broker.requests]
+
+
+def test_changing_at_depth_one_on_a_single_instance(client, broker):
+    body = {attrs(): {"value": 100}}
+    assert (
+        client.patch(f"{ENTITY}/attrs", params={"name": attrs(), "path": attrs("limit")}, json=body).status_code == 204
+    )
+    stored = broker.entities[MACHINE][attrs()]
+    assert stored[attrs("limit")]["value"] == 100
+    assert stored[attrs("low")]["value"] == 1
+    assert stored["value"] == 42
+
+
+def test_several_datasets_without_naming_one_is_not_found(client, broker):
+    deep(broker)
+    answer = client.patch(f"{ENTITY}/attrs", params=at("limit"), json={attrs("deep"): {"value": 1}})
+    assert answer.status_code == 404
+    assert "dataset" in answer.json()["error"]["message"]
+
+
+@pytest.mark.parametrize(
+    ("params", "body"),
+    [
+        ({"path": "x"}, {"x": {"value": 1}}),  # no name
+        ({"name": "a", "path": "x"}, {"b": {"value": 1}}),  # another attribute
+        ({"name": "a", "path": "x"}, {"a": {"value": 1}, "b": {"value": 1}}),
+    ],
+)
+def test_a_path_body_holds_the_named_attribute_only(client, broker, params, body):
+    assert client.patch(f"{ENTITY}/attrs", params=params, json=body).status_code == 422
+    assert client.post(f"{ENTITY}/attrs", params=params, json=body).status_code == 422
+    assert broker.requests == []
 
 
 # Import and bulk delete -----------------------------------------------------------------------

@@ -14,12 +14,18 @@
 // limitations under the License.
 //
 
-import { EntityRef } from '../../app/EntityRef'
 import { attributeKind, iriOf } from './attributes'
+import { Iri } from './Iri'
+import { isHttpIri } from './prefixes'
 
-/** A JSON value written inline with syntax colouring: strings, numbers, booleans and null differ. */
+/**
+ * A JSON value written inline with syntax colouring: strings, numbers,
+ * booleans and null differ. Strings and keys that are http(s) IRIs are
+ * shown as short names, like any other IRI.
+ */
 export function JsonValue({ value, lang }) {
   if (value === null || value === undefined) return <span className="tok tok--null">null</span>
+  if (typeof value === 'string' && isHttpIri(value)) return <span className="tok tok--string">&quot;<Iri value={value} />&quot;</span>
   if (typeof value === 'string') return <span className="tok tok--string" lang={lang}>&quot;{value}&quot;</span>
   if (typeof value === 'number') return <span className="tok tok--number">{String(value)}</span>
   if (typeof value === 'boolean') return <span className="tok tok--boolean">{String(value)}</span>
@@ -40,7 +46,7 @@ export function JsonValue({ value, lang }) {
       <span className="tok tok--punct">{entries.length ? '{ ' : '{'}</span>
       {entries.map(([k, v], i) => (
         <span key={k}>
-          <span className="tok tok--key">{k}</span><span className="tok tok--punct">: </span><JsonValue value={v} />
+          <span className="tok tok--key">{isHttpIri(k) ? <Iri value={k} /> : k}</span><span className="tok tok--punct">: </span><JsonValue value={v} />
           {i < entries.length - 1 && <span className="tok tok--punct">, </span>}
         </span>
       ))}
@@ -90,13 +96,13 @@ export default function AttributeValue({ attr, refTo }) {
   const kind = attributeKind(attr)
   if (kind === 'iri') {
     const target = iriOf(attr.value)
-    return <EntityRef id={target} label={target} to={refTo?.(target)} />
+    return <Iri value={target} to={refTo?.(target)} />
   }
   if (kind === 'geo') return <Geo value={attr.value} />
   if (kind === 'json') return <JsonValue value={attr.json} />
   if (kind === 'language') return <LanguageMap map={attr.languageMap} />
   if (kind === 'list') return <JsonValue value={attr.valueList ?? []} />
-  if (kind === 'vocabulary') return <span className="tok tok--vocab">{String(attr.vocab)}</span>
+  if (kind === 'vocabulary') return <span className="tok tok--vocab">{[].concat(attr.vocab).map((v, i) => <span key={i}>{i > 0 && ', '}<Iri value={String(v)} /></span>)}</span>
   if (kind === 'property') return <JsonValue value={attr.value} />
   const { type: _type, ...rest } = attr
   return <JsonValue value={rest} />

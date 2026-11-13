@@ -17,6 +17,9 @@
 import '@testing-library/jest-dom/vitest'
 import { afterEach } from 'vitest'
 import { cleanup } from '@testing-library/react'
+import { forgetPaths } from '../src/app/lastPath'
+import { registry } from '../src/features/explorer/prefixes'
+import { resetExplorerState } from '../src/features/explorer/store'
 
 // jsdom does not implement scrolling.
 window.scrollTo = () => {}
@@ -25,4 +28,7 @@ afterEach(() => {
   cleanup()
   localStorage.clear()
   sessionStorage.clear()
+  forgetPaths()
+  resetExplorerState()
+  registry.reset()
 })

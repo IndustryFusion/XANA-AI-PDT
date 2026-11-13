@@ -15,14 +15,16 @@
 //
 
 import { useEffect, useId, useState } from 'react'
-import { Button, useToast } from '../../ui/components'
+import { useToast } from '../../ui/components'
+import { IconButton } from '../../ui/icons'
 import { copyText } from '../../ui/clipboard'
 import { entityText, parseEntityText, planChanges } from './rawEdit'
 
 /**
  * The entity as editable JSON. Save applies the difference to the entity as
  * it was when editing started; invalid JSON and changes of ID or type are
- * reported and not saved. Read-only in a historical view (copy only).
+ * reported and not saved. Read-only in a historical view (copy only). It
+ * shows the entity as stored, with full IRIs, since a save has to be exact.
  */
 export default function RawJsonEditor({ entity, readOnly, onApply, onClose }) {
   const [base, setBase] = useState(entity)
@@ -84,12 +86,13 @@ export default function RawJsonEditor({ entity, readOnly, onApply, onClose }) {
         onChange={(e) => { setText(e.target.value); setError(null) }}
       />
       {error && <p id={ids.error} className="form-error" role="alert">{error}</p>}
-      <div className="row">
-        <Button size="sm" onClick={copy}>Copy JSON</Button>
+      <div className="row raw-editor__actions">
+        <IconButton icon="copy" label="Copy JSON" onClick={copy} />
         {!readOnly && (
           <>
-            <Button size="sm" variant="primary" onClick={save} disabled={!dirty || busy}>{busy ? 'Saving…' : 'Save JSON'}</Button>
-            <Button size="sm" onClick={cancel} disabled={busy}>Cancel</Button>
+            <IconButton icon="save" tone="primary" label="Save JSON" onClick={save} disabled={!dirty || busy} />
+            <IconButton icon="cancel" label="Cancel editing the JSON" onClick={cancel} disabled={busy} />
+            {busy && <span className="muted" role="status">Saving…</span>}
           </>
         )}
       </div>

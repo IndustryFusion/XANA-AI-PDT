@@ -17,6 +17,7 @@
 import { useEffect, useId, useState } from 'react'
 import { entities } from '../../data'
 import { Button, Dialog, StatusBadge } from '../../ui/components'
+import { Iri, shortenText } from './Iri'
 
 const URI = /^[a-z][\w+.-]*:\S+$/i
 const PREVIEW_ROWS = 50
@@ -32,7 +33,7 @@ export function checkDocument(document) {
   if (list.length === 0) return { entities: [], problems: ['The document contains no entities.'] }
   const problems = []
   list.forEach((e, i) => {
-    const label = `Entry ${i + 1}${typeof e?.id === 'string' ? ` (${e.id})` : ''}`
+    const label = `Entry ${i + 1}${typeof e?.id === 'string' ? ` (${shortenText(e.id)})` : ''}`
     if (!e || typeof e !== 'object' || Array.isArray(e)) problems.push(`${label} is not an entity object.`)
     else if (typeof e.id !== 'string' || !URI.test(e.id)) problems.push(`${label} has no ID; an entity ID must be a URI such as urn:ngsi-ld:Machine:m-01.`)
     else if (typeof e.type !== 'string' || !e.type) problems.push(`${label} has no type.`)
@@ -157,7 +158,7 @@ export default function ImportDialog({ open, onClose, onImported }) {
           </>
         )}
 
-        {error && <p className="form-error" role="alert">{error.message}</p>}
+        {error && <p className="form-error" role="alert">{shortenText(error.message)}</p>}
 
         {preview && !results && (
           <section className="stack" aria-label="Preview">
@@ -165,7 +166,7 @@ export default function ImportDialog({ open, onClose, onImported }) {
             {preview.problems.length > 0 ? (
               <div role="alert" className="stack">
                 <p className="form-error">This document cannot be imported:</p>
-                <ul className="import__problems">{preview.problems.map((p) => <li key={p}>{p}</li>)}</ul>
+                <ul className="import__problems">{preview.problems.map((p) => <li key={p}>{shortenText(p)}</li>)}</ul>
               </div>
             ) : (
               <>
@@ -176,7 +177,7 @@ export default function ImportDialog({ open, onClose, onImported }) {
                     <thead><tr><th scope="col">ID</th><th scope="col">Type</th><th scope="col">Attributes</th></tr></thead>
                     <tbody>
                       {preview.entities.slice(0, PREVIEW_ROWS).map((e, i) => (
-                        <tr key={`${e.id}-${i}`}><td className="mono">{e.id}</td><td>{e.type}</td><td>{attributeCount(e)}</td></tr>
+                        <tr key={`${e.id}-${i}`}><td className="mono"><Iri value={String(e.id)} /></td><td><Iri value={String(e.type)} /></td><td>{attributeCount(e)}</td></tr>
                       ))}
                     </tbody>
                   </table>
@@ -197,9 +198,9 @@ export default function ImportDialog({ open, onClose, onImported }) {
                 <tbody>
                   {results.map((r, i) => (
                     <tr key={`${r.id}-${i}`}>
-                      <td className="mono">{r.id ?? `Entry ${i + 1}`}</td>
+                      <td className="mono">{r.id ? <Iri value={r.id} /> : `Entry ${i + 1}`}</td>
                       <td><StatusBadge kind="import" value={r.result} /></td>
-                      <td>{r.reason ?? ''}</td>
+                      <td>{shortenText(r.reason ?? '')}</td>
                     </tr>
                   ))}
                 </tbody>

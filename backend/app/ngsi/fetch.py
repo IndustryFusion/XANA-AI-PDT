@@ -101,14 +101,18 @@ async def fetch_document(
     url: str,
     resolver: Resolver = resolve,
     transport: httpx.AsyncBaseTransport | None = None,
+    public_only: bool = True,
 ) -> dict[str, Any]:
-    """`{url, document}`. Refuses internal addresses as `invalid`; other failures are 502."""
+    """`{url, document}`. Refuses internal addresses as `invalid`; other failures are 502.
+
+    `public_only=False` is for an address from the configuration, which may be an internal one.
+    """
     current = url
     # Environment proxies would make the connection somewhere other than the checked address.
     async with httpx.AsyncClient(timeout=TIMEOUT_S, transport=transport, trust_env=False) as client:
         for _ in range(MAX_REDIRECTS + 1):
             host, port, target = _checked_url(current)
-            address = await _public_address(host, port, resolver)
+            address = await _public_address(host, port, resolver) if public_only else host
             headers = {"Host": target.netloc.decode("ascii"), "Accept": "application/json, application/ld+json"}
             try:
                 request = client.build_request(

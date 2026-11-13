@@ -56,6 +56,9 @@ function subscribeEntities({ type, ids } = {}, onEvent) {
   }
 }
 
+/** `name` and `path` for an edit at a path of sub-attributes; none without one. */
+const pathParams = (attrs, path) => (path?.length ? { name: Object.keys(attrs)[0], path } : undefined)
+
 const queryParams = ({ type, id, idPattern, q, limit } = {}) => ({ type, id, id_pattern: idPattern, q, limit })
 const pagedParams = ({ offset, attrs, hasAttr, ...query } = {}) => ({ ...queryParams(query), offset, attrs, has_attr: hasAttr })
 
@@ -65,22 +68,26 @@ export const entities = {
   listAttributes: () => request(AREA, 'GET', '/api/ngsi/attributes', raw),
   queryEntities: (query) => request(AREA, 'GET', '/api/ngsi/entities', { ...raw, params: pagedParams(query) }),
   getEntity: (id) => request(AREA, 'GET', `/api/ngsi/entities/${seg(id)}`, raw),
-  updateAttributes: (id, attrs) => request(AREA, 'PATCH', `/api/ngsi/entities/${seg(id)}/attrs`, { ...raw, body: attrs }),
-  appendAttributes: (id, attrs) => request(AREA, 'POST', `/api/ngsi/entities/${seg(id)}/attrs`, { ...raw, body: attrs }),
-  deleteAttribute: (id, name, { subAttribute } = {}) =>
-    request(AREA, 'DELETE', `/api/ngsi/entities/${seg(id)}/attrs`, { params: { name, sub_attribute: subAttribute } }),
+  // With `path`, `attrs` holds one attribute whose fragment applies at that path of sub-attributes below it.
+  updateAttributes: (id, attrs, { path } = {}) =>
+    request(AREA, 'PATCH', `/api/ngsi/entities/${seg(id)}/attrs`, { ...raw, body: attrs, params: pathParams(attrs, path) }),
+  appendAttributes: (id, attrs, { path } = {}) =>
+    request(AREA, 'POST', `/api/ngsi/entities/${seg(id)}/attrs`, { ...raw, body: attrs, params: pathParams(attrs, path) }),
+  deleteAttribute: (id, name, { subAttribute, path } = {}) =>
+    request(AREA, 'DELETE', `/api/ngsi/entities/${seg(id)}/attrs`, { params: { name, ...(path?.length ? { path } : { sub_attribute: subAttribute }) } }),
   deleteEntity: (id) => request(AREA, 'DELETE', `/api/ngsi/entities/${seg(id)}`),
   importEntities: (list) => request(AREA, 'POST', '/api/ngsi/import', { ...raw, body: list }),
   fetchImportDocument: (url) => request(AREA, 'POST', '/api/ngsi/import/fetch', { ...raw, body: { url } }),
   deleteByTypes: (types) => request(AREA, 'POST', '/api/ngsi/delete-by-types', { ...raw, body: { types: [].concat(types) } }),
-  getAttributeHistory: (id, name, { from, to } = {}) =>
-    request(AREA, 'GET', '/api/ngsi/history', { ...raw, params: { entity_id: id, attribute: name, from, to } }),
+  getAttributeHistory: (id, name, { from, to, path } = {}) =>
+    request(AREA, 'GET', '/api/ngsi/history', { ...raw, params: { entity_id: id, attribute: name, from, to, path } }),
   getAttributeStatus: (id) => request(AREA, 'GET', '/api/ngsi/attr-status', { ...raw, params: { entity_id: id } }),
   listTypesAt: (at) => request(AREA, 'GET', '/api/ngsi/timeshift/types', { ...raw, params: { at } }),
   queryEntitiesAt: (at, query) =>
     request(AREA, 'GET', '/api/ngsi/timeshift/entities', { ...raw, params: { at, ...queryParams(query) } }),
   subscribeEntities,
   getLiveUpdateHealth: () => request(AREA, 'GET', '/api/ngsi/subscription-health'),
+  getPrefixes: () => request(AREA, 'GET', '/api/ngsi/prefixes', raw),
   getValueHints: ({ entityType, attribute } = {}) =>
     request(AREA, 'GET', '/api/shacl/hints', { params: { entity_type: entityType, attribute } }),
 }

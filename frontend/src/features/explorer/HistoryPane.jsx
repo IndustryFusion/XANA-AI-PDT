@@ -18,7 +18,10 @@ import { lazy, Suspense, useId, useMemo, useState } from 'react'
 import { useData } from '../../data/useData'
 import { Button, DataView, EmptyState, LoadingState } from '../../ui/components'
 import { formatTime } from '../../ui/format'
+import { IconButton } from '../../ui/icons'
 import { statusOf } from './attributes'
+import { Iri } from './Iri'
+import { isHttpIri, registry } from './prefixes'
 
 // The chart library is loaded only when a history chart is shown.
 const HistoryChart = lazy(() => import('./HistoryChart'))
@@ -37,8 +40,18 @@ const toLocalInput = (ms) => {
   return d.toISOString().slice(0, 16)
 }
 
-/** History of one attribute over a selectable time range: chart (numeric values) and table. */
-export default function HistoryPane({ entityId, name, unit, headingLevel = 3, onClose }) {
+/** A recorded value in the table: an IRI as its short name, anything else as text. */
+function Recorded({ value }) {
+  if (isHttpIri(value)) return <Iri value={value} />
+  if (value && typeof value === 'object' && isHttpIri(value['@id'])) return <Iri value={value['@id']} />
+  return String(value)
+}
+
+/**
+ * History of one attribute, or of a sub-attribute at `path` below it, over a
+ * selectable time range: chart (numeric values) and table.
+ */
+export default function HistoryPane({ entityId, name, path = [], unit, headingLevel = 3, onClose }) {
   const Heading = `h${Math.min(headingLevel, 6)}`
   const [range, setRange] = useState('24h')
   const [custom, setCustom] = useState(() => ({ from: toLocalInput(Date.now() - 24 * HOUR), to: toLocalInput(Date.now()) }))
@@ -51,15 +64,16 @@ export default function HistoryPane({ entityId, name, unit, headingLevel = 3, on
     return { from: new Date(now - RANGES.find((r) => r.id === range).ms).toISOString(), to: new Date(now).toISOString() }
   }, [range, applied])
   const validCustom = range !== 'custom' || (!Number.isNaN(Date.parse(custom.from)) && !Number.isNaN(Date.parse(custom.to)) && Date.parse(custom.from) < Date.parse(custom.to))
-  const result = useData('entities', 'getAttributeHistory', [entityId, name, span])
+  const result = useData('entities', 'getAttributeHistory', [entityId, name, path.length ? { ...span, path } : span])
   const states = useData('entities', 'getAttributeStatus', [entityId])
-  const state = statusOf(states.data, name)
+  const state = path.length ? null : statusOf(states.data, name)
+  const title = [name, ...path].map((n) => registry.shorten(n)).join('.')
 
   return (
     <section className="card history" aria-labelledby={ids.title}>
       <header className="card__header">
-        <Heading id={ids.title} className="card__title">History of {name}</Heading>
-        <Button size="sm" variant="ghost" onClick={onClose}>Close history</Button>
+        <Heading id={ids.title} className="card__title">History of {title}</Heading>
+        <IconButton icon="close" label={`Close history of ${title}`} onClick={onClose} />
       </header>
       <div className="card__body stack">
         <div className="field-row">
@@ -97,11 +111,11 @@ export default function HistoryPane({ entityId, name, unit, headingLevel = 3, on
               <>
                 {numeric && (
                   <Suspense fallback={<LoadingState label="Loading chart…" />}>
-                    <HistoryChart points={points} name={name} unit={unit} />
+                    <HistoryChart points={points} name={title} unit={unit} />
                   </Suspense>
                 )}
                 {points.limited?.newest && <p className="muted" role="status">Only the newest {points.limited.newest} values are shown. Choose a shorter time range to see older ones.</p>}
-                <div className="table-wrap history__table" tabIndex={0} role="region" aria-label={`Values of ${name}`}>
+                <div className="table-wrap history__table" tabIndex={0} role="region" aria-label={`Values of ${title}`}>
                   <table className="table">
                     <caption>
                       {points.length} values from {formatTime(points[0].at)} to {formatTime(points.at(-1).at)}, newest first
@@ -110,7 +124,7 @@ export default function HistoryPane({ entityId, name, unit, headingLevel = 3, on
                     <thead><tr><th scope="col">Time</th><th scope="col">Value{unit ? ` (${unit})` : ''}</th></tr></thead>
                     <tbody>
                       {[...points].reverse().map((p, i) => (
-                        <tr key={`${p.at}-${i}`}><td><time dateTime={p.at}>{formatTime(p.at)}</time></td><td>{String(p.value)}</td></tr>
+                        <tr key={`${p.at}-${i}`}><td><time dateTime={p.at}>{formatTime(p.at)}</time></td><td><Recorded value={p.value} /></td></tr>
                       ))}
                     </tbody>
                   </table>

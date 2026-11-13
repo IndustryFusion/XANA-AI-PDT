@@ -60,10 +60,31 @@ export const SAMPLE_DOCUMENTS = {
 
 const ATTRIBUTE_TYPES = ['Property', 'Relationship', 'GeoProperty', 'JsonProperty', 'LanguageProperty', 'ListProperty', 'VocabularyProperty']
 const RESERVED = ['id', 'type', '@context', 'scope', 'createdAt', 'modifiedAt']
-const NAME = /^[A-Za-z_][\w-]*$/
+// A term, or a full IRI as the broker gives names without a context.
+const NAME = /^(?:[A-Za-z_][\w-]*|[a-z][\w+.-]*:\S+)$/i
 
 const err = (kind, message) => new DataError('entities', kind, message)
 const isAttribute = (v) => v && typeof v === 'object' && !Array.isArray(v) && typeof v.type === 'string'
+
+/**
+ * The sub-attribute at `path` below an attribute instance: each entry names
+ * one level. A missing level is `not_found`, naming it.
+ */
+function walk(attr, name, path) {
+  let node = attr
+  const seen = [name]
+  for (const level of path) {
+    if (!isAttribute(node?.[level])) throw err('not_found', `${seen.join('.')} has no sub-attribute ${level}.`)
+    node = node[level]
+    seen.push(level)
+  }
+  return node
+}
+
+/** Configured-context prefixes the mock serves, as a deployment's context would define them. */
+const CONTEXT_PREFIXES = [
+  { prefix: 'samples', namespace: 'https://samples.example.org/ngsi-ld/' },
+]
 const attributeNames = (e) => Object.keys(e).filter((k) => !RESERVED.includes(k))
 
 function parseMoment(at) {
@@ -216,8 +237,21 @@ export function createEntitiesArea(store) {
     queryEntities: withControls((params = {}) => query(store.get().entities, params)),
     getEntity: withControls((id) => structuredClone(requireEntity(id))),
 
-    updateAttributes: withControls((id, attrs = {}) => {
+    updateAttributes: withControls((id, attrs = {}, { path } = {}) => {
       const entity = requireEntity(id)
+      if (path?.length) {
+        const [[name, fragment]] = Object.entries(attrs)
+        if (!entity[name] || Array.isArray(entity[name])) throw err('not_found', `${id} has no attribute ${name}.`)
+        const target = walk(entity[name], name, path)
+        validateAttribute(path.at(-1), fragment, target)
+        store.update((state) => {
+          const node = walk(state.entities.find((x) => x.id === id)[name], name, path)
+          Object.assign(node, structuredClone(fragment))
+          if (node.observedAt && ('value' in fragment || 'vocab' in fragment) && !('observedAt' in fragment)) node.observedAt = now()
+          return state
+        })
+        return
+      }
       for (const [name, fragment] of Object.entries(attrs)) {
         if (!entity[name]) throw err('not_found', `${id} has no attribute ${name}.`)
         if (!fragment || typeof fragment !== 'object') throw err('invalid', `Attribute ${name} needs a value.`)
@@ -237,8 +271,22 @@ export function createEntitiesArea(store) {
       })
     }),
 
-    appendAttributes: withControls((id, attrs = {}) => {
+    appendAttributes: withControls((id, attrs = {}, { path } = {}) => {
       const entity = requireEntity(id)
+      if (path?.length) {
+        const [[name, fragment]] = Object.entries(attrs)
+        if (!entity[name] || Array.isArray(entity[name])) throw err('not_found', `${id} has no attribute ${name}.`)
+        const target = walk(entity[name], name, path)
+        for (const [sub, attr] of Object.entries(fragment)) {
+          if (target[sub] !== undefined) throw err('conflict', `${[name, ...path].join('.')} already has a sub-attribute ${sub}.`)
+          validateAttribute(sub, attr, null)
+        }
+        store.update((state) => {
+          Object.assign(walk(state.entities.find((x) => x.id === id)[name], name, path), structuredClone(fragment))
+          return state
+        })
+        return
+      }
       for (const [name, attr] of Object.entries(attrs)) {
         if (entity[name]) throw err('conflict', `${id} already has an attribute ${name}.`)
         validateAttribute(name, attr, null)
@@ -249,9 +297,24 @@ export function createEntitiesArea(store) {
       })
     }),
 
-    deleteAttribute: withControls((id, name, { subAttribute } = {}) => {
+    deleteAttribute: withControls((id, name, { subAttribute: sub, path: given } = {}) => {
       const entity = requireEntity(id)
       if (!entity[name] || RESERVED.includes(name)) throw err('not_found', `${id} has no attribute ${name}.`)
+      const path = given?.length ? given : sub ? [sub] : []
+      const subAttribute = path.length === 1 ? path[0] : sub
+      if (path.length > 1 || (path.length === 1 && Array.isArray(entity[name]))) {
+        // Removed from each dataset that has it.
+        const instances = [].concat(entity[name])
+        const holders = instances.filter((inst) => { try { walk(inst, name, path); return true } catch { return false } })
+        if (!holders.length) walk(instances[0], name, path)
+        store.update((state) => {
+          for (const inst of [].concat(state.entities.find((x) => x.id === id)[name])) {
+            try { delete walk(inst, name, path.slice(0, -1))[path.at(-1)] } catch { /* this dataset doesn't have it */ }
+          }
+          return state
+        })
+        return
+      }
       if (subAttribute && !isAttribute(entity[name][subAttribute])) throw err('not_found', `${name} has no sub-attribute ${subAttribute}.`)
       store.update((state) => {
         const e = state.entities.find((x) => x.id === id)
@@ -334,9 +397,17 @@ export function createEntitiesArea(store) {
       return wanted.map((type) => ({ type, count: counts[type] }))
     }),
 
-    getAttributeHistory: withControls((id, name, { from, to } = {}) => {
+    getAttributeHistory: withControls((id, name, { from, to, path } = {}) => {
       const entity = requireEntity(id)
       if (!entity[name]) throw err('not_found', `${id} has no attribute ${name}.`)
+      if (path?.length) {
+        // The mock records a sub-attribute's current value at its observation time.
+        const sub = walk([].concat(entity[name])[0], name, path)
+        const t = Date.parse(sub.observedAt ?? '')
+        const lo = from ? Date.parse(from) : -Infinity
+        const hi = to ? Date.parse(to) : Date.now()
+        return Number.isNaN(t) || t < lo || t > hi ? [] : [{ at: sub.observedAt, value: sub.value ?? sub.object ?? sub.vocab ?? null }]
+      }
       const start = Math.max(historyStart(store.get().createdAt), Date.parse(store.get().entityLog.created[id] ?? 0) || 0)
       const lo = Math.max(from ? Date.parse(from) : start, start)
       const hi = Math.min(to ? Date.parse(to) : Date.now(), Date.now())
@@ -380,8 +451,10 @@ export function createEntitiesArea(store) {
     },
 
     getLiveUpdateHealth: withControls(() => (live()
-      ? { status: 'ok', detail: null }
-      : { status: 'unavailable', detail: 'The context broker does not deliver notifications (simulated).' })),
+      ? { status: 'ok', state: 'active', detail: null }
+      : { status: 'unavailable', state: 'subscription_failed', detail: 'The context broker does not deliver notifications (simulated).' })),
+
+    getPrefixes: withControls(() => ({ prefixes: structuredClone(CONTEXT_PREFIXES), detail: null })),
 
     getValueHints: withControls(({ entityType, attribute } = {}) => {
       const values = [...(VALUE_HINTS[entityType]?.[attribute] ?? [])]

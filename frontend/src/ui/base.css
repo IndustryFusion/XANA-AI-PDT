@@ -26,9 +26,11 @@ body {
   background: var(--bg);
   color: var(--text);
   font-family: var(--font-sans);
-  font-size: var(--text-md);
   line-height: 1.5;
 }
+
+/* The root keeps the browser's font size, so `rem` follows the operator's setting. */
+body { font-size: var(--text-md); }
 
 h1,
 h2,

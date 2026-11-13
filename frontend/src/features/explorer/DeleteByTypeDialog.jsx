@@ -17,6 +17,7 @@
 import { useEffect, useId, useState } from 'react'
 import { entities } from '../../data'
 import { Button, Dialog } from '../../ui/components'
+import { Iri, shortenText } from './Iri'
 
 /**
  * Deletes all entities of the selected types: choose types, confirm, then
@@ -70,22 +71,22 @@ export default function DeleteByTypeDialog({ open, types, onClose, onDeleted }) 
             <legend id={legendId} className="field__label">Entity types to delete</legend>
             {types.length === 0 && <p className="muted">There are no entity types.</p>}
             {types.map((t) => (
-              <label key={t} className="row"><input type="checkbox" checked={selected.includes(t)} onChange={() => toggle(t)} /> {t}</label>
+              <label key={t} className="row"><input type="checkbox" checked={selected.includes(t)} onChange={() => toggle(t)} /> <Iri value={t} /></label>
             ))}
           </fieldset>
         )}
         {step === 'confirm' && (
-          <p>All entities of the types <strong>{selected.join(', ')}</strong> are deleted. This cannot be undone.</p>
+          <p>All entities of the types <strong>{selected.map((t, i) => <span key={t}>{i > 0 && ', '}<Iri value={t} /></span>)}</strong> are deleted. This cannot be undone.</p>
         )}
         {step === 'done' && results && (
           <section className="stack" aria-label="Deleted entities">
             <p role="status">Deletion finished.</p>
             <ul className="plain-list">
-              {results.map((r) => <li key={r.type}><strong>{r.type}</strong>: {r.count} {r.count === 1 ? 'entity' : 'entities'} deleted</li>)}
+              {results.map((r) => <li key={r.type}><strong><Iri value={r.type} /></strong>: {r.count} {r.count === 1 ? 'entity' : 'entities'} deleted</li>)}
             </ul>
           </section>
         )}
-        {error && <p className="form-error" role="alert">{error.message}</p>}
+        {error && <p className="form-error" role="alert">{shortenText(error.message)}</p>}
       </div>
     </Dialog>
   )

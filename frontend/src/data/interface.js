@@ -46,7 +46,7 @@ export const OPERATIONS = {
     'getStats', 'listTypes', 'listAttributes', 'queryEntities', 'getEntity', 'updateAttributes',
     'appendAttributes', 'deleteAttribute', 'deleteEntity', 'importEntities', 'fetchImportDocument',
     'deleteByTypes', 'getAttributeHistory', 'getAttributeStatus', 'listTypesAt', 'queryEntitiesAt', 'subscribeEntities',
-    'getLiveUpdateHealth', 'getValueHints',
+    'getLiveUpdateHealth', 'getValueHints', 'getPrefixes',
   ],
   alerts: ['listAlerts', 'countAlerts', 'getAlert', 'applyAlertAction', 'listEnvironments', 'listServices', 'getAlertSettings'],
   dataspace: [
@@ -381,7 +381,8 @@ export const SHAPES = {
     getAttributeStatus: { $record: { deleted: 'boolean', observedAt: '?date' } },
     listTypesAt: ['string'],
     queryEntitiesAt: [entity],
-    getLiveUpdateHealth: { status: { $enum: LIVE_UPDATE_STATES }, detail: '?string' },
+    getLiveUpdateHealth: { status: { $enum: LIVE_UPDATE_STATES }, state: '?string', detail: '?string' },
+    getPrefixes: { prefixes: [{ prefix: 'string', namespace: 'string' }], detail: '?string' },
     getValueHints: {
       hintType: { $enum: ['enum', 'range', 'datatype', 'none'] }, values: ['string'], minimum: '?number', maximum: '?number',
       minimumExclusive: 'boolean', maximumExclusive: 'boolean', datatype: '?string', detail: '?string',

@@ -135,10 +135,10 @@ export function parseExpression(q) {
   for (const part of parts) {
     const text = part.trim()
     if (/[()]/.test(text.replace(/"(?:[^"\\]|\\.)*"/g, ''))) return null
-    const m = /^([A-Za-z_@][\w@:.[\]-]*?)(==|!=|>=|<=|~=|>|<)(.+)$/.exec(text)
+    const m = /^([A-Za-z_@][\w@:./#[\]-]*?)(==|!=|>=|<=|~=|>|<)(.+)$/.exec(text)
     if (m) conditions.push({ attribute: m[1], op: m[2], value: unquote(m[3].trim()) })
-    else if (/^![A-Za-z_@][\w@:.[\]-]*$/.test(text)) conditions.push({ attribute: text.slice(1), op: 'missing', value: '' })
-    else if (/^[A-Za-z_@][\w@:.[\]-]*$/.test(text)) conditions.push({ attribute: text, op: 'exists', value: '' })
+    else if (/^![A-Za-z_@][\w@:./#[\]-]*$/.test(text)) conditions.push({ attribute: text.slice(1), op: 'missing', value: '' })
+    else if (/^[A-Za-z_@][\w@:./#[\]-]*$/.test(text)) conditions.push({ attribute: text, op: 'exists', value: '' })
     else return null
   }
   return { conditions, combine: separators[0] === '|' ? 'or' : 'and' }

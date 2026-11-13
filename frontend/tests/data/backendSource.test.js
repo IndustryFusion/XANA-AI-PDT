@@ -222,7 +222,7 @@ describe('without the mock', () => {
       entities: [
         'getStats', 'listTypes', 'listAttributes', 'queryEntities', 'getEntity', 'updateAttributes', 'appendAttributes',
         'deleteAttribute', 'deleteEntity', 'importEntities', 'fetchImportDocument', 'deleteByTypes',
-        'getAttributeHistory', 'getAttributeStatus', 'listTypesAt', 'queryEntitiesAt', 'subscribeEntities', 'getLiveUpdateHealth', 'getValueHints',
+        'getAttributeHistory', 'getAttributeStatus', 'listTypesAt', 'queryEntitiesAt', 'subscribeEntities', 'getLiveUpdateHealth', 'getPrefixes', 'getValueHints',
       ],
       alerts: ['listAlerts', 'countAlerts', 'getAlert', 'applyAlertAction', 'listEnvironments', 'listServices', 'getAlertSettings'],
       dataspace: ['getConnection', 'getConnectionConfig', 'getAccessLevels', 'connect', 'disconnect', 'listPeers', 'getPeerCapabilities', 'listCapabilityRequests', 'decideCapabilityRequest', 'setCapabilityPolicy', 'resolveNames', 'resolveBuilders', 'resolveMachines'],
@@ -380,6 +380,36 @@ describe('entities', () => {
     const params = new URLSearchParams(fn.calls[0].search)
     expect(params.get('name')).toBe('https://x.example/a')
     expect(params.get('sub_attribute')).toBe('https://x.example/b')
+  })
+
+  test('edits at a path of sub-attributes send name and one path parameter per level, with the fragment as body', async () => {
+    const fn = fakeFetch({
+      'PATCH /api/ngsi/entities/urn%3Am/attrs': { status: 204 },
+      'POST /api/ngsi/entities/urn%3Am/attrs': { status: 204 },
+      'DELETE /api/ngsi/entities/urn%3Am/attrs': { status: 204 },
+      'GET /api/ngsi/history': { body: [] },
+    })
+    await entities.updateAttributes('urn:m', { 'https://x.example/a': { value: 1 } }, { path: ['b', 'c'] })
+    await entities.appendAttributes('urn:m', { 'https://x.example/a': { d: { type: 'Property', value: 2 } } }, { path: ['b'] })
+    await entities.deleteAttribute('urn:m', 'https://x.example/a', { path: ['b', 'c'] })
+    await entities.getAttributeHistory('urn:m', 'https://x.example/a', { path: ['b', 'c'] })
+    const params = fn.calls.map((c) => new URLSearchParams(c.search))
+    expect(params.map((p) => [p.get('name') ?? p.get('attribute'), p.getAll('path')])).toEqual([
+      ['https://x.example/a', ['b', 'c']], ['https://x.example/a', ['b']], ['https://x.example/a', ['b', 'c']], ['https://x.example/a', ['b', 'c']],
+    ])
+    expect(fn.calls[0].body).toEqual({ 'https://x.example/a': { value: 1 } })
+    expect(params[2].get('sub_attribute')).toBeNull()
+  })
+
+  test('without a path, edits send no path parameter', async () => {
+    const fn = fakeFetch({ 'PATCH /api/ngsi/entities/urn%3Am/attrs': { status: 204 } })
+    await entities.updateAttributes('urn:m', { a: { value: 1 } })
+    expect(fn.calls[0].search).toBe('')
+  })
+
+  test('the configured context\'s prefixes', async () => {
+    fakeFetch({ 'GET /api/ngsi/prefixes': { body: { prefixes: [{ prefix: 'pumps', namespace: 'http://opcfoundation.org/UA/Pumps/' }], detail: null } } })
+    expect(await entities.getPrefixes()).toEqual({ prefixes: [{ prefix: 'pumps', namespace: 'http://opcfoundation.org/UA/Pumps/' }], detail: null })
   })
 
   test('a partial import (207) is a result, not an error', async () => {

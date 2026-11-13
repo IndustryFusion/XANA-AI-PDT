@@ -321,3 +321,91 @@
   margin: 0;
   font-size: var(--text-sm, 0.85em);
 }
+
+/* ── Compact query bar ──────────────────────────────────────────────────── */
+
+.query-bar { padding: var(--space-2) var(--space-3); }
+.query-bar__form { display: flex; flex-direction: column; gap: var(--space-2); }
+.query-bar__main { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--space-2) var(--space-3); }
+.query-bar__main .field { min-width: 0; }
+.query-bar__type input { width: 16rem; max-width: 100%; }
+.query-bar__id input { width: 20rem; max-width: 100%; }
+.query-bar__more {
+  height: var(--control-height);
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+  padding: 0 var(--space-2);
+}
+.query-bar__more[aria-expanded='true'] { color: var(--text); }
+.query-bar__more-filters { padding-top: var(--space-2); border-top: 1px solid var(--border); }
+.query-bar__attrs { gap: var(--space-1); flex-wrap: nowrap; }
+.condition__iri { gap: var(--space-1); font-size: var(--text-xs); }
+
+.chips { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--space-1); align-self: center; }
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding-left: var(--space-2);
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--surface-2);
+  font-size: var(--text-xs);
+  max-width: 28rem;
+}
+.chip > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chip__remove.icon-button { width: 1.5rem; height: 1.5rem; }
+
+/* ── Tree, icons, pins ──────────────────────────────────────────────────── */
+
+.expand-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 1.5rem;
+  padding: 0 var(--space-1);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+.expand-control:hover, .expand-control:focus-visible { color: var(--text); border-color: var(--border-strong); }
+.attr-subs { margin-left: var(--space-4); padding-left: var(--space-3); border-left: 1px solid var(--border-strong); }
+.entity-node__caret.icon { color: var(--text-muted); width: 0.875rem; height: 0.875rem; align-self: center; }
+.entity-node__badge { font-size: var(--text-xs); color: var(--accent); font-weight: 600; }
+.entity-node--pinned { border-color: color-mix(in srgb, var(--accent) 50%, var(--border)); }
+.entity-node__select { align-self: center; }
+.attr-line__actions .icon-button, .entity-node__actions .icon-button { width: 1.75rem; height: 1.75rem; }
+.icon-button--danger-hover:hover, .icon-button--danger-hover:focus-visible { color: var(--tone-danger); }
+.entity-list__section { justify-content: space-between; }
+.entity-list__separator {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-xs);
+}
+.entity-list__separator::before, .entity-list__separator::after { content: ''; flex: 1; border-top: 1px dashed var(--border-strong); }
+.iri { overflow-wrap: anywhere; }
+.iri[tabindex]:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; border-radius: 2px; }
+.explorer__live { gap: var(--space-2); }
+.explorer__live-detail { font-size: var(--text-xs); max-width: 24rem; }
+.raw-editor__actions { gap: var(--space-1); }
+.prefix-legend { font-size: var(--text-sm); }
+.prefix-legend caption { text-align: left; font-weight: 600; padding-bottom: var(--space-1); }
+
+/* Icon buttons next to inputs are as high as the inputs. */
+.condition .icon-button, .query-bar__attrs .icon-button { width: var(--control-height); height: var(--control-height); }
+
+/* The main query row keeps its labels beside the inputs, so the results start right below it. */
+.query-bar__main { align-items: center; }
+.query-bar__main > .field { flex-direction: row; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+.query-bar__main > .field .field__label { white-space: nowrap; }
+.entity-list > .card__header { padding: var(--space-2) var(--space-3); }
+.entity-list > .card__body { padding: var(--space-2) var(--space-3) var(--space-3); }
+.entity-list > .card__body > .stack { gap: var(--space-2); }

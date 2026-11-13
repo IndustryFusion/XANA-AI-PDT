@@ -514,6 +514,113 @@ class ContextBroker:
         changed = [{k: v for k, v in item.items() if k != sub_attribute} for item in holders]
         await self.send("POST", path, body={name: changed[0] if len(changed) == 1 else changed})
 
+    # Sub-attributes at a path ---------------------------------------------------
+
+    async def update_at_path(
+        self, entity_id: str, name: str, path: list[str], fragment: Any, dataset_id: str | None = None
+    ) -> None:
+        """Merges the fragment into the sub-attribute at the path below the attribute."""
+        if not isinstance(fragment, dict) or not fragment:
+            raise invalid(f"Attribute {_level_name(name, path)} needs a value.")
+        self._refuse_contexts(fragment)
+
+        def change(level: dict[str, Any]) -> None:
+            _check_value(path[-1], level, fragment)
+            level.update(_stamped(level, fragment))
+
+        await self._edit_at_path(entity_id, name, path, dataset_id, change)
+
+    async def append_at_path(
+        self, entity_id: str, name: str, path: list[str], fragment: Any, dataset_id: str | None = None
+    ) -> None:
+        """Adds the fragment's sub-attributes to the sub-attribute at the path below the attribute."""
+        if not isinstance(fragment, dict) or not fragment:
+            raise invalid("Name at least one sub-attribute.")
+        self._refuse_contexts(fragment)
+        for sub, attribute in fragment.items():
+            if (
+                not _sub_attribute_name(sub)
+                or not isinstance(attribute, dict)
+                or not isinstance(attribute.get("type"), str)
+            ):
+                raise invalid(f"Sub-attribute {sub} needs a type and a value.")
+
+        def add(level: dict[str, Any]) -> None:
+            for sub in fragment:
+                if sub in level:
+                    raise conflict(f"{_level_name(name, path)} already has a sub-attribute {sub}.")
+            level.update(fragment)
+
+        await self._edit_at_path(entity_id, name, path, dataset_id, add)
+
+    async def delete_at_path(self, entity_id: str, name: str, path: list[str], dataset_id: str | None = None) -> None:
+        """Removes the sub-attribute at the path from each dataset that has it, or from the one named."""
+        if len(path) == 1 and dataset_id is None:
+            await self.delete_attribute(entity_id, name, path[0])
+            return
+        async with self._editing(entity_id):
+            instances = await self._instances(entity_id, name, dataset_id)
+            holders = []
+            reached = 0
+            for instance in instances:
+                found, depth = _walk(instance, path[:-1])
+                if found is not None and _sub_attribute_name(path[-1]) and isinstance(found.get(path[-1]), dict):
+                    holders.append((instance, found))
+                else:
+                    reached = max(reached, depth if found is None else len(path) - 1)
+            if not holders:
+                raise not_found(f"{_level_name(name, path[:reached])} has no sub-attribute {path[reached]}.")
+            if len(path) == 1:
+                # The broker's attribute-level PATCH can't take a top-level member away.
+                changed = [{k: v for k, v in instance.items() if k != path[0]} for instance, _ in holders]
+                await self.send(
+                    "POST",
+                    f"/entities/{_segment(entity_id)}/attrs",
+                    body={name: changed[0] if len(changed) == 1 else changed},
+                )
+                return
+            for instance, level in holders:
+                del level[path[-1]]
+                await self._write_attribute(entity_id, name, instance)
+
+    async def _edit_at_path(
+        self,
+        entity_id: str,
+        name: str,
+        path: list[str],
+        dataset_id: str | None,
+        apply: Callable[[dict[str, Any]], None],
+    ) -> None:
+        async with self._editing(entity_id):
+            instances = await self._instances(entity_id, name, dataset_id)
+            if dataset_id is None and len(instances) > 1:
+                instances = [i for i in instances if i.get("datasetId") is None]
+            if len(instances) != 1:
+                raise not_found(f"{name} has no instance with that dataset.")
+            instance = instances[0]
+            level, depth = _walk(instance, path)
+            if level is None:
+                raise not_found(f"{_level_name(name, path[:depth])} has no sub-attribute {path[depth]}.")
+            apply(level)
+            await self._write_attribute(entity_id, name, instance)
+
+    async def _instances(self, entity_id: str, name: str, dataset_id: str | None) -> list[dict[str, Any]]:
+        """The attribute's instances, every dataset, or the one named."""
+        current = await self._existing(entity_id)
+        if name in RESERVED or name not in current:
+            raise not_found(f"{entity_id} has no attribute {name}.")
+        existing = current[name]
+        instances = [i for i in (existing if isinstance(existing, list) else [existing]) if isinstance(i, dict)]
+        if dataset_id is not None:
+            instances = [i for i in instances if i.get("datasetId") == dataset_id]
+            if not instances:
+                raise not_found(f"{name} has no instance with that dataset.")
+        return instances
+
+    async def _write_attribute(self, entity_id: str, name: str, instance: dict[str, Any]) -> None:
+        """The whole instance, written back with an attribute-level PATCH: its `datasetId` says which."""
+        await self.send("PATCH", f"/entities/{_segment(entity_id)}/attrs/{_attribute_segment(name)}", body=instance)
+
     async def delete_entity(self, entity_id: str) -> None:
         try:
             await self.send("DELETE", f"/entities/{_segment(entity_id)}")
@@ -720,6 +827,25 @@ def _merge_fragment(name: str, existing: Any, fragment: dict[str, Any]) -> dict[
     # The broker's merge needs the type, and keeps the value only if it is there.
     kept = {m: existing[m] for m in VALUE_MEMBERS if m in existing and m not in fragment}
     return {"type": existing.get("type"), **kept, **_stamped(existing, fragment)}
+
+
+def _sub_attribute_name(name: str) -> bool:
+    return name not in ("type", "datasetId", *VALUE_MEMBERS)
+
+
+def _walk(instance: dict[str, Any], path: list[str]) -> tuple[dict[str, Any] | None, int]:
+    """The sub-attribute at the path, or None and the index of the first level that isn't there."""
+    level = instance
+    for depth, sub in enumerate(path):
+        found = level.get(sub) if _sub_attribute_name(sub) else None
+        if not isinstance(found, dict):
+            return None, depth
+        level = found
+    return level, len(path)
+
+
+def _level_name(name: str, path: list[str]) -> str:
+    return ".".join([name, *path])
 
 
 def _merged_instance(name: str, instances: list[Any], fragment: dict[str, Any]) -> dict[str, Any]:

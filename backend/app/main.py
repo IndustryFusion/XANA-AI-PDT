@@ -59,6 +59,7 @@ from app.memory.store import Database, IncidentStore, RunStore
 from app.ngsi.broker import ContextBroker
 from app.ngsi.history import AttributeHistory
 from app.ngsi.live import LiveUpdates
+from app.ngsi.prefixes import ContextPrefixes
 from app.ngsi.stream import ConnectionInScope
 from app.redact import RedactingFilter, Redactor
 from app.runs.conversation import ConversationDesk
@@ -282,6 +283,7 @@ def create_app(
     session.on_sign_in.append(start_live_updates)
     session.on_sign_in.append(gateway_connection.on_sign_in)
     app.state.attribute_history = AttributeHistory(settings, session.token)
+    app.state.prefixes = ContextPrefixes(settings.ngsi_context_url)
     app.state.alerta = AlertaClient(settings)
     app.state.ontology = ontology
     app.state.inbox = inbox

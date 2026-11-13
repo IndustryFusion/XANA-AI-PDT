@@ -81,7 +81,7 @@ Built with React 18 + Vite in JavaScript. Structured views, no chat interface. E
 | Dashboard | Tiles for active incidents, open alerts, data overview, dataspace and system health, each loading and failing independently |
 | Active incidents | Open runs; new-incident form (`machine_id` + issue); run view with live steps, hypotheses, decision, one panel per waiting state, and the machine-builder conversation |
 | Incident history | Past incidents with full agent trace; reopen |
-| Data explorer | NGSI-LD entities, relationships, attribute history, time-shift, edits, import, live updates |
+| Data explorer | NGSI-LD entities, relationships, attribute history, time-shift, edits, import, live updates; IRIs shown and typed as short names (`prefix:local`, full IRI only on hover, in the context menu and in the raw JSON), sub-attributes at any depth, icon row actions and one context menu, unnest and pinning, and the view kept when leaving the area |
 | Alerts | Alert list, filters, actions, detail |
 | Dataspace | Gateway connection, peers and capabilities, capability requests, sharing tier |
 | System | Dependency health, service settings; knowledge-base documents only when the knowledge base is turned on |
@@ -115,7 +115,7 @@ The run stream delivers the run's current state first, then step events (one per
 - `src/data/sources/mock/`: mock data source and development controls
 - `src/data/sources/backend/`: backend data source (HTTP, run stream, key and error mapping, delegation to the mock)
 - `src/app/`: router, session gate, header, entity references
-- `src/ui/`: design tokens (CSS custom properties, dark and light themes, no CSS framework) and shared components
+- `src/ui/`: design tokens (CSS custom properties, dark and light themes, a compact 14 px scale in `rem`, no CSS framework), shared components, the in-house SVG icon set with `IconButton` and `Popover`, and the context menu
 - `src/features/`: one folder per area
 
 **Tests:** Vitest with Testing Library (components, data interface), Playwright with axe (end to end, accessibility), ESLint. The `Frontend` workflow runs them on every pull request that touches `frontend/`. The `Backend` workflow's `integration` job runs `frontend/e2e/backend/` against the local environment with the scripted model.
@@ -173,7 +173,7 @@ Fields are snake_case. A refused request answers `{"error": {"kind", "message"}}
 | `/api/agent/refresh-conversation/{run_id}` | POST | Read the conversation's state at the gateway |
 | `/api/agent/record-close/{run_id}` | POST | Record a close communicated elsewhere |
 | `/api/agent/message-files/{run_id}/{message_id}` | GET | The files of a received message, also after archiving, by the message alone |
-| `/api/ngsi/*` | — | Data Explorer: query (with `offset` and a total in `X-Total-Count`, `attrs`, `has_attr`, in ID order), edit, import (an existing entity is replaced), history and time-shift, on `NGSI_URL` and `PGREST_URL` only, and live updates (`/api/ngsi/ws`) through a broker subscription with an MQTT endpoint. For operators; the workflow has no path to it |
+| `/api/ngsi/*` | — | Data Explorer: query (with `offset` and a total in `X-Total-Count`, `attrs`, `has_attr`, in ID order), edit, import (an existing entity is replaced), history (also of a sub-attribute, by `path`) and time-shift, edits of sub-attributes at any depth (`path`), the configured JSON-LD context's prefixes (`/api/ngsi/prefixes`, read from `NGSI_CONTEXT_URL` only and cached for ten minutes), on `NGSI_URL` and `PGREST_URL` only, and live updates (`/api/ngsi/ws`) through a broker subscription with an MQTT endpoint. For operators; the workflow has no path to it |
 | `/api/alerta/*` | — | Alerts screen: list, count, detail, actions, environments, services, on `ALERTA_URL` only. Actions are for operators; the workflow only reads |
 | `/api/gateway/*` | — | The dataspace connection: `config` (addresses masked, realm, client in use), `status`, `connect`, `disconnect`, `token-claims`, `peers` (with each peer's access level), `peers/{id}/capabilities`, `access-levels` (per peer, `elevated` with a capability approved, else `restricted` with one denied, else `standard`, and counts), `policies`, `capabilities/requests`, `capabilities/policy`. Answers never hold a token or secret |
 | `/api/ifric/*` | — | The IFRIC registry, with the dataspace token: `config`, `status`, `factory`, `resolve` (company details, then the company directory, kept 300 s, then a factory's owner), `resolve-builders`, `resolve-machines` (asset names, where the registry's asset record has one). A lookup of names ends within 3 s; a registry that doesn't answer a request in 2.5 s, can't be reached or fails 3 times in a row isn't asked for names for 30 s, while the kept directory still names companies. For the backend only, and not an agent tool |

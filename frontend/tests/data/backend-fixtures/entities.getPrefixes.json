@@ -1,0 +1,12 @@
+{
+  "method": "GET",
+  "path": "/api/ngsi/prefixes",
+  "status": 200,
+  "body": {
+    "prefixes": [
+      { "prefix": "iffb", "namespace": "https://industry-fusion.org/base/v0.1/" },
+      { "prefix": "pumps", "namespace": "http://opcfoundation.org/UA/Pumps/" }
+    ],
+    "detail": null
+  }
+}

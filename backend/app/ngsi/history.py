@@ -44,6 +44,7 @@ TIMEOUT_S = 15
 MAX_ROWS = 5000
 PAGE = 1000
 MAX_ENTITY_ROWS = 100_000
+MAX_PARENT_IDS = 100
 DEFAULT_VOCAB = "https://uri.etsi.org/ngsi-ld/default-context/"
 NOT_DELETED = "not.is.true"
 ROW_COLUMNS = (
@@ -151,11 +152,20 @@ class AttributeHistory:
         start: str | None = None,
         end: str | None = None,
         dataset_id: str | None = None,
+        path: list[str] | None = None,
     ) -> Limited:
-        """Values oldest first, the newest `MAX_ROWS` of them, saying so if there may be more."""
+        """Values oldest first, the newest `MAX_ROWS` of them, saying so if there may be more.
+
+        With `path`, the values of the sub-attribute at that path of names below the attribute.
+        """
+        parents: list[str] | None = None
+        if path:
+            parents = await self._parent_ids(entity_id, [attribute, *path[:-1]], dataset_id)
+            if not parents:
+                return Limited()
         params: list[tuple[str, str | int]] = [
             ("entityId", f"eq.{entity_id}"),
-            attribute_filter(attribute),
+            attribute_filter(path[-1] if path else attribute),
             ("deleted", NOT_DELETED),
             ("select", "observedAt,value,valueType,attributeType,datasetId"),
             ("order", "observedAt.desc"),
@@ -165,12 +175,16 @@ class AttributeHistory:
             params.append(("observedAt", f"gte.{timestamp(start, 'The start of the range')}"))
         if end:
             params.append(("observedAt", f"lte.{timestamp(end, 'The end of the range')}"))
-        if dataset_id:
-            params.append(("datasetId", f"eq.{dataset_id}"))
-        # A sub-attribute may share its name with an attribute, which then comes first.
-        rows = await self.read(self._attributes, [*params, ("parentId", "is.null")])
-        if not rows:
-            rows = await self.read(self._attributes, params)
+        if parents is not None:
+            # The dataset named is the attribute's, so it was applied at the top level.
+            rows = await self.read(self._attributes, [*params, ("parentId", _any_of(parents))])
+        else:
+            if dataset_id:
+                params.append(("datasetId", f"eq.{dataset_id}"))
+            # A sub-attribute may share its name with an attribute, which then comes first.
+            rows = await self.read(self._attributes, [*params, ("parentId", "is.null")])
+            if not rows:
+                rows = await self.read(self._attributes, params)
         points = Limited()
         if len(rows) >= MAX_ROWS:
             points.limited = {"newest": MAX_ROWS}
@@ -183,6 +197,37 @@ class AttributeHistory:
                 point["datasetId"] = row["datasetId"]
             points.append(point)
         return points
+
+    async def _parent_ids(self, entity_id: str, names: list[str], dataset_id: str | None) -> list[str]:
+        """The row ids of the last of the names, found level by level from the top-level attribute."""
+        ids: list[str] | None = None
+        for name in names:
+            condition = ("parentId", "is.null") if ids is None else ("parentId", _any_of(ids))
+            params: list[tuple[str, str | int]] = [("entityId", f"eq.{entity_id}"), attribute_filter(name), condition]
+            if ids is None and dataset_id:
+                params.append(("datasetId", f"eq.{dataset_id}"))
+            ids = await self._distinct_ids(params)
+            if not ids:
+                return []
+        return ids or []
+
+    async def _distinct_ids(self, params: list[tuple[str, str | int]]) -> list[str]:
+        """Each `id` once. A row per observation shares its `id`, so reading goes on past the last one seen."""
+        found: list[str] = []
+        while True:
+            asked = [*params, ("select", "id"), ("order", "id.asc"), ("limit", PAGE)]
+            if found:
+                asked.append(("id", f"gt.{found[-1]}"))
+            rows = await self.read(self._attributes, asked)
+            for row in rows:
+                if isinstance(row.get("id"), str) and (not found or row["id"] != found[-1]):
+                    found.append(row["id"])
+            if len(found) > MAX_PARENT_IDS:
+                raise bad_gateway(
+                    f"{SERVICE} holds more than {MAX_PARENT_IDS} instances of one sub-attribute's parent."
+                )
+            if len(rows) < PAGE:
+                return found
 
     async def status(self, entity_id: str) -> dict[str, dict[str, Any]]:
         """The latest recorded state per attribute, under the name the store holds."""
@@ -274,6 +319,10 @@ def _refusal(response: httpx.Response) -> Refused:
         return bad_gateway(f"{SERVICE} failed (HTTP {status}).")
     reason = reason_from(response)
     return invalid(f"{SERVICE} refused the request: {reason}" if reason else f"{SERVICE} answered HTTP {status}.")
+
+
+def _any_of(ids: list[str]) -> str:
+    return f"in.({','.join(quoted(i) for i in ids)})"
 
 
 def parsed_json(value: str | None) -> Any:

@@ -14,21 +14,69 @@
 // limitations under the License.
 //
 
-import { useCallback, useEffect, useId, useState } from 'react'
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
+import { rememberPath } from '../../app/lastPath'
 import { useData } from '../../data/useData'
+import { entities } from '../../data'
 import { useRoute } from '../../app/router'
 import { Button, Card, DataView, EmptyState, ErrorState, StatusBadge } from '../../ui/components'
 import { formatTime } from '../../ui/format'
+import { IconButton, Popover } from '../../ui/icons'
 import DeleteByTypeDialog from './DeleteByTypeDialog'
 import EntityNode from './EntityNode'
 import ImportDialog from './ImportDialog'
+import { Iri, shortenText, useRegistry } from './Iri'
+import { registry } from './prefixes'
 import { entityPath, explorerPath, hasCriteria, readQuery, toRequest } from './query'
 import QueryBar from './QueryBar'
+import {
+  keepResults, keepScroll, keptResults, keptScroll, startQuery, unpin, useKept, usePins, useSelection, useUnnested,
+} from './store'
 import { useLiveUpdates } from './useLiveUpdates'
 import './explorer.css'
 
+const SOURCES = { context: 'configured context', 'well-known': 'well-known', derived: 'derived' }
+
+/** The prefixes in use and where each comes from; a namespace is shown only in its tooltip and context menu. */
+function PrefixLegend() {
+  const reg = useRegistry()
+  const [open, setOpen] = useState(false)
+  const button = useRef(null)
+  const entries = open ? reg.entries() : []
+  return (
+    <>
+      <IconButton ref={button} icon="link" label="Prefix legend" aria-expanded={open} onClick={() => setOpen((o) => !o)} />
+      {open && (
+        <Popover anchor={button.current} label="Prefixes" onClose={() => setOpen(false)}>
+          <table className="table prefix-legend" tabIndex={-1}>
+            <caption>Prefixes in use</caption>
+            <thead><tr><th scope="col">Prefix</th><th scope="col">From</th></tr></thead>
+            <tbody>
+              {entries.map((e) => (
+                <tr key={e.prefix}><td className="mono"><Iri value={e.namespace} /></td><td>{SOURCES[e.source]}</td></tr>
+              ))}
+            </tbody>
+          </table>
+        </Popover>
+      )}
+    </>
+  )
+}
+
+/** Reads the configured context's prefixes once per page load. */
+function useContextPrefixes() {
+  useEffect(() => {
+    if (registry.contextLoaded) return
+    let cancelled = false
+    Promise.resolve()
+      .then(() => entities.getPrefixes())
+      .then((answer) => { if (!cancelled) registry.loadContext(answer?.prefixes ?? []) }, () => { if (!cancelled) registry.loadContext([]) })
+    return () => { cancelled = true }
+  }, [])
+}
+
 /** Result list: matching entities as collapsible nodes, and an opened entity that is not among them. */
-function EntityList({ result, query, standalone, renderNode, onPage }) {
+function EntityList({ result, query, standalone, renderNode, onPage, pinned, unnested, hidden }) {
   const invalid = result.status === 'error' && result.error?.kind === 'invalid'
   let content
   if (!hasCriteria(query)) {
@@ -36,7 +84,7 @@ function EntityList({ result, query, standalone, renderNode, onPage }) {
   } else if (invalid && result.data === undefined) {
     content = <EmptyState title="No results.">Correct the query to see entities.</EmptyState>
   } else if (invalid) {
-    content = <EntityNodes list={result.data} query={query} renderNode={renderNode} />
+    content = <EntityNodes list={result.data} query={query} renderNode={renderNode} hidden={hidden} />
   } else {
     content = (
       <DataView
@@ -45,7 +93,7 @@ function EntityList({ result, query, standalone, renderNode, onPage }) {
         isEmpty={(list) => list.length === 0}
         empty={<EmptyState title="No entities matched the query.">Change the type, ID or conditions and apply the query again.</EmptyState>}
       >
-        {(list) => <EntityNodes list={list} query={query} renderNode={renderNode} paged={!!onPage} />}
+        {(list) => <EntityNodes list={list} query={query} renderNode={renderNode} paged={!!onPage} hidden={hidden} />}
       </DataView>
     )
   }
@@ -53,6 +101,7 @@ function EntityList({ result, query, standalone, renderNode, onPage }) {
   return (
     <Card title="Entities" className="entity-list">
       <div className="stack">
+        {pinned}
         {limited && (
           <p className="muted entity-list__count" role="status">
             Only the first {limited.scanned}{limited.total ? ` of ${limited.total}` : ''} entities were searched, so there may be more matches. Narrow the query by type or ID.
@@ -66,6 +115,7 @@ function EntityList({ result, query, standalone, renderNode, onPage }) {
         )}
         {content}
         {onPage && hasCriteria(query) && result.data && <Pager list={result.data} query={query} onPage={onPage} />}
+        {unnested}
       </div>
     </Card>
   )
@@ -85,7 +135,7 @@ function Pager({ list, query, onPage }) {
   )
 }
 
-function EntityNodes({ list, query, renderNode, paged }) {
+function EntityNodes({ list, query, renderNode, paged, hidden = [] }) {
   const limit = Number(query.limit)
   const offset = Number(query.offset) || 0
   const total = list.total
@@ -99,7 +149,7 @@ function EntityNodes({ list, query, renderNode, paged }) {
     <div className="stack">
       <p className="muted entity-list__count" role="status">{count}</p>
       <ul className="entity-nodes" aria-label="Matching entities">
-        {list.map((e) => <li key={e.id}>{renderNode(e.id, e)}</li>)}
+        {list.filter((e) => !hidden.includes(e.id)).map((e) => <li key={e.id}>{renderNode(e.id, e)}</li>)}
       </ul>
     </div>
   )
@@ -138,75 +188,131 @@ function TimeShiftControl({ at, onShift }) {
   )
 }
 
+/** The pinned entities, at the top of the list, with unpinning of a selection. */
+function PinnedList({ pins, renderNode }) {
+  const selection = useSelection()
+  if (!pins.length) return null
+  const chosen = selection.filter((id) => pins.includes(id))
+  return (
+    <section className="entity-list__pinned stack" aria-label="Pinned entities">
+      <div className="row entity-list__section">
+        <p className="muted entity-list__count" role="status">{pins.length} pinned</p>
+        <IconButton icon="pinned" label={`Unpin ${chosen.length} selected`} disabled={!chosen.length} onClick={() => unpin(chosen)} />
+      </div>
+      <ul className="entity-nodes" aria-label="Pinned">
+        {pins.map((id) => <li key={id}>{renderNode(id, null, { place: 'pinned' })}</li>)}
+      </ul>
+    </section>
+  )
+}
+
+/** Entities moved out of the tree, after the results, under a labelled separator. */
+function UnnestedList({ list, renderNode }) {
+  if (!list.length) return null
+  return (
+    <section className="entity-list__unnested stack" aria-label="Unnested entities">
+      <p className="muted entity-list__separator">Unnested entities</p>
+      <ul className="entity-nodes">
+        {list.map((u) => <li key={u.id}>{renderNode(u.id, null, { place: 'unnested', origin: u.origin, nodeKey: `${u.origin.key}>${u.id}` })}</li>)}
+      </ul>
+    </section>
+  )
+}
+
 /**
  * Data explorer area: query bar and the matching entities as a document
  * tree, with time-shift, import, bulk delete and live updates. The query,
- * the time-shift moment and the last expanded entity are part of the URL.
+ * the time-shift moment and the last expanded entity are part of the URL;
+ * the rest of the view (results, expansions, unnested entities, pins,
+ * scroll) is kept in the explorer's store, so it is the same on return.
  */
 export default function DataExplorer() {
-  const { params, query: urlQuery, search, navigate } = useRoute()
+  useRegistry()
+  useContextPrefixes()
+  const { params, query: urlQuery, search, pathname, navigate } = useRoute()
   const query = readQuery(urlQuery)
   const at = query.at || null
   const entityId = params.entityId ?? null
   const [refreshKey, setRefreshKey] = useState(0)
-  const [liveOn, setLiveOn] = useState(true)
+  const [liveOn, setLiveOn] = useKept('liveOn', true)
   const [dialog, setDialog] = useState(null)
-  const [expanded, setExpanded] = useState(() => new Set(entityId ? [entityId] : []))
+  const [expanded, setExpanded] = useKept('expanded', entityId ? [entityId] : [])
+  const pins = usePins()
+  const unnested = useUnnested()
   const refresh = useCallback(() => setRefreshKey((k) => k + 1), [])
+
+  useEffect(() => { rememberPath('explorer', `${pathname}${search}`) }, [pathname, search])
 
   // Opening an entity's URL (link, back, forward) expands its node.
   useEffect(() => {
-    if (entityId) setExpanded((s) => (s.has(entityId) ? s : new Set(s).add(entityId)))
-  }, [entityId])
+    if (entityId) setExpanded((s) => (s.includes(entityId) ? s : [...s, entityId]))
+  }, [entityId, setExpanded])
 
   const types = useData('entities', at ? 'listTypesAt' : 'listTypes', at ? [at] : [], { refreshKey })
   const attributes = useData('entities', 'listAttributes', [], { refreshKey })
   const request = toRequest(query, { past: !!at })
-  const list = useData('entities', at ? 'queryEntitiesAt' : 'queryEntities', at ? [at, request] : [request], { enabled: hasCriteria(query), refreshKey })
+  const resultsKey = JSON.stringify([at, request])
+  const queryKey = JSON.stringify([at, { ...request, offset: undefined }])
+  useEffect(() => { startQuery(queryKey) }, [queryKey])
+  const list = useData('entities', at ? 'queryEntitiesAt' : 'queryEntities', at ? [at, request] : [request], {
+    enabled: hasCriteria(query), refreshKey, initial: keptResults(resultsKey),
+  })
+  useEffect(() => { keepResults(resultsKey, list.data) }, [resultsKey, list.data])
+
+  // The scroll position is kept on leaving and restored after the first paint on return.
+  useLayoutEffect(() => {
+    const y = keptScroll()
+    if (y != null) requestAnimationFrame(() => window.scrollTo?.(0, y))
+    return () => keepScroll(window.scrollY)
+  }, [])
 
   const listed = list.data ?? []
   const settled = !hasCriteria(query) || list.data !== undefined || list.status === 'error'
-  const standalone = entityId && settled && !listed.some((e) => e.id === entityId) ? entityId : null
-  const shownIds = [...listed.map((e) => e.id), ...(standalone ? [standalone] : [])].filter((id) => expanded.has(id))
-  const live = useLiveUpdates({ enabled: liveOn && !at, ids: shownIds, onResync: refresh })
+  const standalone = entityId && settled && !listed.some((e) => e.id === entityId) && !pins.includes(entityId) ? entityId : null
+  const ownIds = [...pins, ...unnested.map((u) => u.id)]
+  const shownIds = [...listed.map((e) => e.id), ...(standalone ? [standalone] : [])].filter((id) => expanded.includes(id))
+  const live = useLiveUpdates({ enabled: liveOn && !at, ids: [...new Set([...shownIds, ...ownIds])], onResync: refresh })
 
   const listError = list.status === 'error' && list.error?.kind === 'invalid' ? list.error : null
   const typesError = types.status === 'error' && types.error?.kind === 'invalid' ? types.error : null
   const go = (next) => navigate(entityId ? entityPath(entityId, next) : explorerPath(next))
 
   function setNodeExpanded(id, open) {
-    setExpanded((s) => {
-      const next = new Set(s)
-      if (open) next.add(id)
-      else next.delete(id)
-      return next
-    })
+    setExpanded((s) => (open ? (s.includes(id) ? s : [...s, id]) : s.filter((x) => x !== id)))
     if (open && id !== entityId) navigate(entityPath(id, query), { scroll: false })
     if (!open && id === entityId) navigate(explorerPath(query), { replace: true, scroll: false })
   }
 
   function deleted(id) {
-    setExpanded((s) => { const next = new Set(s); next.delete(id); return next })
+    setExpanded((s) => s.filter((x) => x !== id))
     refresh()
     if (id === entityId) navigate(explorerPath(query))
   }
 
-  const renderNode = (id, summary) => (
-    <EntityNode
-      key={`${id}|${at ?? ''}`}
-      id={id}
-      summary={summary ?? undefined}
-      standalone={!summary}
-      query={query}
-      expanded={expanded.has(id)}
-      onExpandedChange={(open) => setNodeExpanded(id, open)}
-      current={id === entityId}
-      listen={live.listen}
-      refreshKey={refreshKey}
-      onChanged={refresh}
-      onDeleted={() => deleted(id)}
-    />
-  )
+  const renderNode = (id, summary, { place = 'top', origin = null, nodeKey = id } = {}) => {
+    const top = place === 'top'
+    return (
+      <EntityNode
+        key={`${id}|${at ?? ''}|${place}`}
+        id={id}
+        summary={summary ?? undefined}
+        standalone={!summary}
+        query={query}
+        expanded={top ? expanded.includes(id) : undefined}
+        onExpandedChange={top ? (open) => setNodeExpanded(id, open) : undefined}
+        current={top && id === entityId}
+        listen={live.listen}
+        refreshKey={refreshKey}
+        onChanged={refresh}
+        onDeleted={() => deleted(id)}
+        place={place}
+        origin={origin}
+        nodeKey={top ? id : nodeKey}
+      />
+    )
+  }
+
+  const typeName = query.type ? <> of the type <Iri value={query.type} /></> : null
 
   return (
     <section className="page explorer" aria-labelledby="page-title">
@@ -217,8 +323,12 @@ export default function DataExplorer() {
             <input type="checkbox" checked={liveOn} disabled={!!at} onChange={(e) => setLiveOn(e.target.checked)} />
             Live updates
           </label>
-          <span aria-live="polite"><StatusBadge kind="live" value={at ? 'paused' : live.status} /></span>
+          <span aria-live="polite" className="row explorer__live">
+            <span title={live.detail ? shortenText(live.detail) : undefined}><StatusBadge kind="live" value={at ? 'paused' : live.status} /></span>
+            {!at && live.status === 'unavailable' && live.detail && <span className="muted explorer__live-detail">{shortenText(live.detail)}</span>}
+          </span>
           <TimeShiftControl key={at ?? 'present'} at={at} onShift={(moment) => go({ ...query, at: moment })} />
+          <PrefixLegend />
           <Button onClick={() => setDialog('import')} disabled={!!at}>Import…</Button>
           <Button variant="danger" onClick={() => setDialog('delete')} disabled={!!at}>Delete by type…</Button>
         </div>
@@ -226,7 +336,7 @@ export default function DataExplorer() {
 
       {at && (
         <div className="timeshift-banner" role="region" aria-label="Historical view">
-          <p><strong>Historical view:</strong> entity types and entities as they were on <time dateTime={at}>{formatTime(at)}</time>. Editing is disabled.</p>
+          <p><strong>Historical view:</strong> entity types and entities{typeName} as they were on <time dateTime={at}>{formatTime(at)}</time>. Editing is disabled.</p>
           <Button size="sm" variant="primary" onClick={() => go({ ...query, at: '' })}>Return to the present</Button>
         </div>
       )}
@@ -238,12 +348,18 @@ export default function DataExplorer() {
         query={query}
         types={types.data ?? []}
         attributes={attributes.data ?? []}
+        entities={listed}
         past={!!at}
         error={listError ?? typesError}
         onApply={(next) => navigate(explorerPath({ ...next, at: query.at }))}
       />
 
-      <EntityList result={list} query={query} standalone={standalone} renderNode={renderNode} onPage={at ? null : (offset) => navigate(explorerPath({ ...query, offset: String(offset) }))} />
+      <EntityList
+        result={list} query={query} standalone={standalone} renderNode={renderNode} hidden={pins}
+        onPage={at ? null : (offset) => navigate(explorerPath({ ...query, offset: String(offset) }))}
+        pinned={<PinnedList pins={pins} renderNode={renderNode} />}
+        unnested={<UnnestedList list={unnested.filter((u) => !pins.includes(u.id))} renderNode={renderNode} />}
+      />
 
       <ImportDialog open={dialog === 'import'} onClose={() => setDialog(null)} onImported={refresh} />
       <DeleteByTypeDialog open={dialog === 'delete'} types={types.data ?? []} onClose={() => setDialog(null)} onDeleted={refresh} />

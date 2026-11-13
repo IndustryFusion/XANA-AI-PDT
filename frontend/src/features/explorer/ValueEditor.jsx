@@ -16,6 +16,9 @@
 
 import { useEffect, useId, useRef, useState } from 'react'
 import { useData } from '../../data/useData'
+import { IconButton } from '../../ui/icons'
+import { shortenText } from './Iri'
+import { isHttpIri, registry } from './prefixes'
 
 /** The allowed range in words, saying whether each limit is included; null without one. */
 export function rangeText(hint) {
@@ -32,7 +35,7 @@ export function rangeText(hint) {
  * Enter or ✓ saves, Escape or ✗ cancels. A rejected change keeps the
  * editor open with the entered value and shows the reason.
  */
-export default function ValueEditor({ label, initial, entityType, attribute, onSave, onCancel }) {
+export default function ValueEditor({ label, initial, entityType, attribute, iri = false, onSave, onCancel }) {
   const [text, setText] = useState(initial == null ? '' : String(initial))
   const [active, setActive] = useState(-1)
   const [busy, setBusy] = useState(false)
@@ -40,7 +43,10 @@ export default function ValueEditor({ label, initial, entityType, attribute, onS
   const inputRef = useRef(null)
   const ids = { input: useId(), list: useId(), error: useId() }
   const hints = useData('entities', 'getValueHints', [{ entityType, attribute }])
-  const options = (hints.data?.values ?? []).filter((h) => h !== text)
+  // Suggested IRIs are offered and entered as short names; saving expands them again.
+  const shown = (h) => (iri || isHttpIri(h) ? registry.shorten(h) : h)
+  const options = (hints.data?.values ?? []).map(shown).filter((h) => h !== text)
+  const fullOf = Object.fromEntries((hints.data?.values ?? []).map((h) => [shown(h), h]))
   const range = rangeText(hints.data)
 
   useEffect(() => { inputRef.current?.focus() }, [])
@@ -55,7 +61,7 @@ export default function ValueEditor({ label, initial, entityType, attribute, onS
     setBusy(true)
     setError(null)
     try {
-      await onSave(text)
+      await onSave(!iri && fullOf[text] ? fullOf[text] : text)
     } catch (err) {
       setError(err)
       setBusy(false)
@@ -98,8 +104,8 @@ export default function ValueEditor({ label, initial, entityType, attribute, onS
           onChange={(e) => changeText(e.target.value)}
           onKeyDown={onKeyDown}
         />
-        <button type="button" className="icon-btn icon-btn--ok" onClick={save} disabled={busy} aria-label={`Save ${label}`} title="Save">✓</button>
-        <button type="button" className="icon-btn" onClick={onCancel} disabled={busy} aria-label={`Cancel editing ${label}`} title="Cancel">✗</button>
+        <IconButton icon="save" tone="primary" onClick={save} disabled={busy} label={`Save ${label}`} tooltip="Save" />
+        <IconButton icon="cancel" onClick={onCancel} disabled={busy} label={`Cancel editing ${label}`} tooltip="Cancel" />
         {busy && <span className="muted">Saving…</span>}
       </div>
       {listed && (
@@ -110,6 +116,7 @@ export default function ValueEditor({ label, initial, entityType, attribute, onS
               className="value-editor__option mono"
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => { changeText(h); inputRef.current?.focus() }}
+              title={fullOf[h] !== h ? fullOf[h] : undefined}
             >
               {h}
             </li>
@@ -118,7 +125,7 @@ export default function ValueEditor({ label, initial, entityType, attribute, onS
       )}
       {range && <p className="muted value-editor__range">{range}</p>}
       {hints.data?.hintType === 'none' && hints.data.detail && <p className="muted value-editor__range">No suggestions: {hints.data.detail}</p>}
-      {error && <p id={ids.error} className="form-error value-editor__error" role="alert">Not saved: {error.message}</p>}
+      {error && <p id={ids.error} className="form-error value-editor__error" role="alert">Not saved: {shortenText(error.message)}</p>}
     </div>
   )
 }

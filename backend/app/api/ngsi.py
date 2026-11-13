@@ -85,6 +85,12 @@ async def attributes(request: Request) -> list[str]:
     return await request.app.state.broker.attributes()
 
 
+@router.get("/prefixes")
+async def prefixes(request: Request) -> dict:
+    """The configured context's prefixes. The caller's parameters are ignored: no context is named here."""
+    return await request.app.state.prefixes.prefixes()
+
+
 @router.get("/stats")
 async def stats(request: Request) -> dict:
     return await request.app.state.broker.stats()
@@ -115,23 +121,70 @@ async def query_entities(
     return _answer(found)
 
 
+def _at_path(name: str | None, path: list[str], body: Any) -> Any:
+    """The fragment for the deepest level of a path: the body holds the attribute `name`, and only it."""
+    if not name:
+        raise invalid("Name the attribute that the path is below.")
+    if not isinstance(body, dict) or list(body) != [name]:
+        raise invalid("With a path, the body holds the named attribute and only it.")
+    check_document(body)
+    return body[name]
+
+
 @router.patch("/entities/{entity_id:path}/attrs", status_code=204)
-async def update_attributes(entity_id: str, body: Annotated[Any, Body()], request: Request) -> Response:
-    await request.app.state.broker.update_attributes(entity_id, _attributes(body))
+async def update_attributes(
+    entity_id: str,
+    body: Annotated[Any, Body()],
+    request: Request,
+    name: str | None = None,
+    path: Annotated[list[str] | None, Query()] = None,
+    dataset_id: str | None = None,
+) -> Response:
+    broker = request.app.state.broker
+    if path:
+        await broker.update_at_path(entity_id, name, path, _at_path(name, path, body), dataset_id)
+    else:
+        await broker.update_attributes(entity_id, _attributes(body))
     return Response(status_code=204)
 
 
 @router.post("/entities/{entity_id:path}/attrs", status_code=204)
-async def append_attributes(entity_id: str, body: Annotated[Any, Body()], request: Request) -> Response:
-    await request.app.state.broker.append_attributes(entity_id, _attributes(body))
+async def append_attributes(
+    entity_id: str,
+    body: Annotated[Any, Body()],
+    request: Request,
+    name: str | None = None,
+    path: Annotated[list[str] | None, Query()] = None,
+    dataset_id: str | None = None,
+) -> Response:
+    broker = request.app.state.broker
+    if path:
+        await broker.append_at_path(entity_id, name, path, _at_path(name, path, body), dataset_id)
+    else:
+        await broker.append_attributes(entity_id, _attributes(body))
     return Response(status_code=204)
 
 
 @router.delete("/entities/{entity_id:path}/attrs", status_code=204)
 async def delete_attribute(
-    entity_id: str, request: Request, name: str = Query(...), sub_attribute: str | None = None
+    entity_id: str,
+    request: Request,
+    name: str = Query(...),
+    sub_attribute: str | None = None,
+    path: Annotated[list[str] | None, Query()] = None,
+    dataset_id: str | None = None,
 ) -> Response:
-    await request.app.state.broker.delete_attribute(entity_id, name, sub_attribute)
+    """`sub_attribute=x` is the same as one `path=x`."""
+    broker = request.app.state.broker
+    levels = path or ([sub_attribute] if sub_attribute else [])
+    if path and sub_attribute:
+        raise invalid("Name the sub-attribute either by path or by sub_attribute.")
+    if levels:
+        await broker.delete_at_path(entity_id, name, levels, dataset_id)
+    elif dataset_id is not None:
+        raise invalid("A dataset is named only with a path: an attribute is deleted with every dataset.")
+    else:
+        await broker.delete_attribute(entity_id, name)
     return Response(status_code=204)
 
 
@@ -174,8 +227,11 @@ async def history(
     start: str | None = Query(None, alias="from"),
     end: str | None = Query(None, alias="to"),
     dataset_id: str | None = None,
+    path: Annotated[list[str] | None, Query()] = None,
 ) -> Any:
-    return _answer(await request.app.state.attribute_history.values(entity_id, attribute, start, end, dataset_id))
+    """`path` names a sub-attribute below the attribute, one entry per level."""
+    found = await request.app.state.attribute_history.values(entity_id, attribute, start, end, dataset_id, path)
+    return _answer(found)
 
 
 @router.get("/attr-status")

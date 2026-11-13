@@ -79,6 +79,7 @@ const ARGS = {
   'alerts.listServices': () => [],
   'alerts.getAlertSettings': () => [],
   'entities.getLiveUpdateHealth': () => [],
+  'entities.getPrefixes': () => [],
   'entities.getValueHints': () => [{ entityType: 'Machine', attribute: 'status' }],
   'entities.getStats': () => [],
   'entities.listTypes': () => [],

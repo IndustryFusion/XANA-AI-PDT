@@ -26,6 +26,7 @@ from fastapi import FastAPI
 from app.api import errors, ngsi
 from app.ngsi.broker import ContextBroker
 from app.ngsi.history import AttributeHistory
+from app.ngsi.prefixes import ContextPrefixes
 from tests.conftest import make_settings
 
 IRI = "https://industry-fusion.com/types/v0.9/"
@@ -153,6 +154,17 @@ class Broker:
                 else:
                     entity[name] = attribute
             return httpx.Response(204)
+        if len(parts) == 3 and request.method == "PATCH":  # partial attribute update: members given replace
+            name = unquote(parts[2])
+            fragment = json.loads(request.content)
+            existing = entity.get(name)
+            instances = existing if isinstance(existing, list) else [existing] if isinstance(existing, dict) else []
+            if isinstance(existing, list):
+                instances = [i for i in instances if i.get("datasetId") == fragment.get("datasetId")]
+            if not instances:
+                return httpx.Response(404, json={"detail": "not found"})
+            instances[0].update(fragment)
+            return httpx.Response(204)
         if len(parts) == 3 and request.method == "DELETE":
             name = unquote(parts[2])
             if isinstance(entity.get(name), list) and "deleteAll" not in request.url.params:
@@ -227,18 +239,45 @@ def _test(actual: object, condition: str) -> bool:
     if condition == "is.null":
         return actual is None
     op, _, operand = condition.partition(".")
+    if op == "in":
+        return actual in _quoted_list(operand)
     if op == "eq":
         return actual == operand
     text = str(actual or "")
     return {"lte": text <= operand, "gte": text >= operand, "gt": text > operand}[op]
 
 
-def app_with(broker=None, rows=None, token=lambda: TOKEN, **settings) -> FastAPI:
+def app_with(broker=None, rows=None, token=lambda: TOKEN, contexts=None, resolver=None, **settings) -> FastAPI:
     app = FastAPI()
     values = {"ngsi_url": "http://broker.test:9090", "pgrest_url": "http://pgrest.test:3000", **settings}
     configured = make_settings(**values)
     app.state.broker = ContextBroker(configured, token, transport=httpx.MockTransport(broker or Broker()))
     app.state.attribute_history = AttributeHistory(configured, token, transport=httpx.MockTransport(rows or Rows()))
+    app.state.prefixes = ContextPrefixes(
+        configured.ngsi_context_url,
+        transport=httpx.MockTransport(contexts or (lambda request: httpx.Response(404))),
+        **({"resolver": resolver} if resolver else {}),
+    )
     errors.install(app)
     app.include_router(ngsi.router)
     return app
+
+
+def _quoted_list(operand: str) -> list[str]:
+    """The values of `("a","b")`, as `quoted` writes them."""
+    assert operand.startswith("(") and operand.endswith(")")
+    values, current, inside, escaped = [], [], False, False
+    for char in operand[1:-1]:
+        if escaped:
+            current.append(char)
+            escaped = False
+        elif char == "\\":
+            escaped = True
+        elif char == '"':
+            if inside:
+                values.append("".join(current))
+                current = []
+            inside = not inside
+        elif inside:
+            current.append(char)
+    return values

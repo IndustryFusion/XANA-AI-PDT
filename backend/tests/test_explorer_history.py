@@ -19,6 +19,7 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
+from app.ngsi import history as history_module
 from app.ngsi.history import attribute_filter, typed_value
 from app.ngsi.timeshift import rebuild
 from tests.explorer_support import IRI, MACHINE, TOKEN, Broker, Rows, app_with
@@ -130,6 +131,65 @@ def test_datasets_are_told_apart(client):
 
 def test_sub_attribute_history(client):
     assert [p["value"] for p in history(client, f"{IRI}limit").json()] == [90]
+
+
+def nested():
+    """Two attributes, each with a sub-attribute `limit` that has a sub-attribute `max`, over two datasets."""
+    temp = f"{MACHINE}\\temp\\@none"
+    other = f"{MACHINE}\\other\\@none"
+    return Rows(
+        {
+            "attributes": [
+                row("temp", T0, "40", id=temp),
+                row("other", T0, "7", id=other),
+                row("limit", T0, "90", id="temp-limit", parentId=temp),
+                row("limit", T1, "91", id="temp-limit", parentId=temp),
+                row("limit", T0, "10", id="other-limit", parentId=other),
+                row("max", T0, "1", id="temp-max", parentId="temp-limit"),
+                row("max", T2, "3", id="temp-max", parentId="temp-limit"),
+                row("max", T1, "2", id="temp-max", parentId="temp-limit"),
+                row("max", T1, "500", id="other-max", parentId="other-limit"),
+                row("max", T1, "600", id="loose-max"),
+                row("max", T3, None, id="temp-max", parentId="temp-limit", deleted=True),
+            ],
+            "entities": [],
+        }
+    )
+
+
+def test_a_sub_attributes_values_by_path_oldest_first():
+    client = TestClient(app_with(Broker(), nested()))
+    points = history(client, f"{IRI}temp", path=[f"{IRI}limit", f"{IRI}max"]).json()
+    assert points == [{"at": T0, "value": 1}, {"at": T1, "value": 2}, {"at": T2, "value": 3}]
+    assert [p["value"] for p in history(client, f"{IRI}temp", path=[f"{IRI}limit"]).json()] == [90, 91]
+
+
+def test_the_same_name_under_another_parent_is_left_out():
+    client = TestClient(app_with(Broker(), nested()))
+    assert [p["value"] for p in history(client, "other", path=["limit", "max"]).json()] == [500]
+    assert [p["value"] for p in history(client, "other", path=["limit"]).json()] == [10]
+
+
+def test_a_path_that_isnt_there_gives_no_values():
+    client = TestClient(app_with(Broker(), nested()))
+    assert history(client, f"{IRI}temp", path=[f"{IRI}nope", f"{IRI}max"]).json() == []
+    assert history(client, f"{IRI}nope", path=[f"{IRI}limit"]).json() == []
+
+
+def test_without_a_path_the_answer_is_unchanged():
+    rows = nested()
+    client = TestClient(app_with(Broker(), rows))
+    assert [p["value"] for p in history(client, f"{IRI}temp").json()] == [40]
+    assert [p["value"] for p in history(client, f"{IRI}max").json()] == [600]
+    assert len(rows.requests) == 2
+    assert all("parentId=in." not in str(r.url) for r in rows.requests)
+
+
+def test_parent_ids_are_read_past_a_page_of_one_parents_rows(monkeypatch):
+    monkeypatch.setattr(history_module, "PAGE", 2)
+    client = TestClient(app_with(Broker(), nested()))
+    points = history(client, f"{IRI}temp", path=[f"{IRI}limit", f"{IRI}max"]).json()
+    assert [p["value"] for p in points] == [1, 2, 3]
 
 
 def test_empty_is_an_empty_list(client):

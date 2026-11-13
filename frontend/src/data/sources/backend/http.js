@@ -48,8 +48,11 @@ function limitOf(header) {
   return Object.fromEntries(header.split(',').map((part) => part.trim().split('=')).map(([k, v]) => [k, Number(v)]))
 }
 
+/** The query string; an array value is repeated, one parameter per element. */
 function query(params = {}) {
-  const entries = Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== '')
+  const entries = Object.entries(params)
+    .flatMap(([k, v]) => (Array.isArray(v) ? v.map((x) => [k, x]) : [[k, v]]))
+    .filter(([, v]) => v !== undefined && v !== null && v !== '')
   return entries.length ? `?${new URLSearchParams(entries).toString()}` : ''
 }
 

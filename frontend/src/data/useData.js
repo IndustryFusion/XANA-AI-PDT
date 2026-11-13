@@ -29,10 +29,11 @@ const NO_EVENTS = []
  *   result.retry() / result.refresh()  load again
  *
  * `refreshOn` lists facade events (e.g. CONNECTION_CHANGED) that reload it at once.
+ * `initial` is data to show until the first answer arrives, such as a kept earlier result.
  * Each call is isolated: an error in one area never affects another.
  */
-export function useData(area, op, args = [], { refreshMs = 0, enabled = true, refreshKey = 0, refreshOn = NO_EVENTS } = {}) {
-  const [state, setState] = useState({ status: 'loading', data: undefined, error: null })
+export function useData(area, op, args = [], { refreshMs = 0, enabled = true, refreshKey = 0, refreshOn = NO_EVENTS, initial } = {}) {
+  const [state, setState] = useState(() => ({ status: 'loading', data: initial, error: null }))
   const [tick, setTick] = useState(0)
   const argsKey = JSON.stringify(args)
   const argsRef = useRef(args)

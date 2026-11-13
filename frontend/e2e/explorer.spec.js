@@ -41,13 +41,14 @@ const MACHINE = 'urn:ngsi-ld:Machine:press-brake-01'
 
 test('query → expand an entity → relationship in place and followed → history', async ({ page }) => {
   await page.goto('/explorer')
-  await page.getByLabel('Entity type').selectOption('Sensor')
+  await page.getByLabel('Entity type').fill('Sensor')
+  await page.getByRole('button', { name: 'More filters' }).click()
   await page.getByRole('button', { name: 'Add condition' }).click()
   await page.getByLabel('Attribute of condition 1').selectOption('value')
   await page.getByLabel('Operator of condition 1').selectOption({ label: 'greater than' })
   await page.getByLabel('Value of condition 1').fill('40')
   await expect(page.getByLabel('Query expression')).toHaveText('value>40')
-  await page.getByRole('button', { name: 'Apply query' }).click()
+  await page.getByRole('button', { name: 'Search' }).click()
   await expect(page).toHaveURL(/\/explorer\?type=Sensor&q=value%3E40$/)
 
   const toggle = entities(page).getByRole('button', { name: 'Process chiller 01 flow', exact: true })
@@ -117,12 +118,12 @@ test('edit in place with suggestions, cancel with Escape, then view the past and
   await expect(attribute(node(page, MACHINE), 'status')).toContainText(`"${machineStatusAt(MACHINE, past)}"`)
   await expect(attribute(node(page, MACHINE), 'status')).not.toContainText('fault')
   await expect(page.getByRole('button', { name: 'Edit status' })).toHaveCount(0)
-  await expect(page.getByLabel('Entity type').locator('option', { hasText: 'Camera' })).toHaveCount(1)
+  await expect(page.locator('datalist option[value="Camera"]')).toHaveCount(1)
 
   await banner.getByRole('button', { name: 'Return to the present' }).click()
   await expect(banner).toHaveCount(0)
   await expect(attribute(node(page, MACHINE), 'status')).toContainText('fault')
-  await expect(page.getByLabel('Entity type').locator('option', { hasText: 'Camera' })).toHaveCount(0)
+  await expect(page.locator('datalist option[value="Camera"]')).toHaveCount(0)
 })
 
 test('edit the raw JSON of an entity', async ({ page }) => {
