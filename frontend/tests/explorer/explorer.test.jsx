@@ -408,6 +408,25 @@ describe('relationship and IRI navigation', () => {
 })
 
 describe('edit attributes', () => {
+  test('a declared double is shown as its value and saved as a number when edited in place', async () => {
+    // gh-84-read-declared-values: the broker returns {"type": "…#double", "@value": 42.5}.
+    const user = userEvent.setup()
+    openEntity(MACHINE)
+    store.update((s) => {
+      s.entities.find((e) => e.id === MACHINE).power = { type: 'Property', value: { type: 'http://www.w3.org/2001/XMLSchema#double', '@value': 42.5 } }
+      return s
+    })
+    await waitFor(() => expect(attribute('power')).not.toBeNull())
+    expect(attribute('power')).toHaveTextContent('42.5')
+    expect(attribute('power')).not.toHaveTextContent('XMLSchema')
+    await user.click(within(attribute('power')).getByRole('button', { name: /^Value of power:/ }))
+    const input = within(attribute('power')).getByLabelText('New value of power')
+    await user.clear(input)
+    await user.type(input, '80{Enter}')
+    await waitFor(() => expect(screen.queryByLabelText('New value of power')).not.toBeInTheDocument())
+    expect(entityStored(MACHINE).power.value).toBe(80)
+  })
+
   test('selecting a value edits it in place with suggestions; Enter saves and updates the value shown', async () => {
     const user = userEvent.setup()
     openEntity(MACHINE)

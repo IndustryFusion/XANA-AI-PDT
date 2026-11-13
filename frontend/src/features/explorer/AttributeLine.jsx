@@ -21,7 +21,7 @@ import { formatTime } from '../../ui/format'
 import { useContextMenu } from '../../ui/ContextMenu'
 import { Icon, IconButton } from '../../ui/icons'
 import {
-  attributeKind, editableValue, hasHistory, instancesOf, iriOf, kindInfo, parseInput, subAttributesOf, targetsOf,
+  attributeKind, editableValue, hasHistory, instancesOf, iriOf, kindInfo, literalOf, parseInput, subAttributesOf, targetsOf,
 } from './attributes'
 import AttributeValue from './AttributeValue'
 import AddAttributeForm from './AddAttributeForm'
@@ -149,7 +149,8 @@ function Line({ name, path, inst, ctx, actions, multi = false }) {
   async function save(text) {
     const [member] = editable
     const typed = iriMember ? registry.expand(text, { identifier: true }) : text
-    const value = parseInput(typed, inst[member], member)
+    // Parsed against the plain value: a declared number is edited as a number (gh-84).
+    const value = parseInput(typed, literalOf(inst[member]), member)
     if (path.length) await entities.updateAttributes(ctx.entityId, { [name]: { [member]: value } }, { path })
     else await entities.updateAttributes(ctx.entityId, { [name]: { [member]: value } })
     setEditing(false)
