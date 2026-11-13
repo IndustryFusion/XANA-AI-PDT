@@ -40,7 +40,7 @@ from app.config import Settings
 from app.errors import Refused, bad_gateway, conflict, invalid, not_found
 from app.ngsi.failures import refusal, scrubbed, unreachable
 from app.ngsi.query import broker_can_evaluate, compile_pattern, matches, parse
-from xana_agent.literals import declared, literal
+from xana_agent.literals import declared, is_value_object, literal
 from xana_agent.sources.ngsi import context_link
 
 SERVICE = "The context broker"
@@ -466,6 +466,11 @@ class ContextBroker:
             existing = current[name]
             if isinstance(existing, list):
                 overwrite[name] = _merged_instance(name, existing, fragment)
+            elif is_value_object(_keep_datatype(existing, fragment).get("value")):
+                # The broker's merge fails on a value object (Scorpio: "cannot get array length of a
+                # scalar", 22023), so a declared value is written as the whole attribute (gh-84, D3).
+                _check_value(name, existing, fragment)
+                overwrite[name] = {**existing, **_stamped(existing, _keep_datatype(existing, fragment))}
             else:
                 merge[name] = _merge_fragment(name, existing, fragment)
         if merge:

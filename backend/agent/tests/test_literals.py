@@ -14,6 +14,7 @@
 # limitations under the License.
 #
 """Declared NGSI-LD values read as their values (gh-84-read-declared-values, design D2)."""
+
 import pytest
 
 from xana_agent.literals import XSD, datatype, declared, literal
@@ -63,7 +64,8 @@ def test_an_edit_keeps_the_stored_datatype():
 
 def test_the_agent_reads_declared_values():
     entity = {
-        "id": "urn:m:1", "type": "Machine",
+        "id": "urn:m:1",
+        "type": "Machine",
         "temperature": {"type": "Property", "value": {"type": DOUBLE, "@value": "42.5"}, "unitCode": "CEL"},
         "speed": {"type": "Property", "value": 3.0},
     }

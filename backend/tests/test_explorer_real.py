@@ -17,7 +17,6 @@
 the time-series database (TEST_TSDB_URL). Rows are written in the platform's table layout, with
 the columns it has, and full IRIs as attribute names."""
 
-
 import asyncio
 import os
 import time

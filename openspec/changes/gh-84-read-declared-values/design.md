@@ -68,6 +68,10 @@ How XANA reads values today:
   type. Rejected: that is the merge behaviour the platform's contract says not
   to depend on; with a replacing update the type is lost.
 - The raw JSON editor sends what the operator wrote, as today.
+- **Found in implementation: the broker's merge fails on a value object.**
+  - Merging `{"@value": 80, "@type": …double}` into an attribute makes Scorpio (6.0.2, `java-latest`) answer 500, "cannot get array length of a scalar" (PostgreSQL 22023). Plain values merge fine.
+  - So the backend writes an edit whose value is declared as the whole attribute, through the attribute write it already uses for attributes with several datasets (`POST …/attrs`). That route stores the declared value and keeps the unit and the sub-attributes, measured on the same broker.
+  - Edits of plain values still go through the merge.
 
 ### D4 — The edit check reads the plain value
 

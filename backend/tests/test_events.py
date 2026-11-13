@@ -1464,5 +1464,6 @@ _DOUBLE = "http://www.w3.org/2001/XMLSchema#double"
 )
 def test_a_declared_value_in_a_notification(value, shown):
     [event], _ = ngsi_events(
-        notification({"id": "urn:m:1", "alarmLevel": {"type": "Property", "value": value}}), WATCHED)
+        notification({"id": "urn:m:1", "alarmLevel": {"type": "Property", "value": value}}), WATCHED
+    )
     assert event.issue == f"Machine event: alarmLevel={shown}"

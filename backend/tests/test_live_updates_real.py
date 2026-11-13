@@ -21,7 +21,6 @@ rotation against EMQX with the platform's kind of check (the `platform-mqtt` pro
 and TEST_MQTT_PLATFORM_CONTAINER name the containers for the tests that restart a broker.
 """
 
-
 import asyncio
 import json
 import os
@@ -551,7 +550,6 @@ async def test_an_upsert_rejecting_everything_expects_no_delivery_on_a_real_brok
         assert seen == [1]
     finally:
         await broker.send("DELETE", f"/entities/{good['id']}")
-
 
 
 async def test_a_declared_value_arrives_as_its_value(clean):

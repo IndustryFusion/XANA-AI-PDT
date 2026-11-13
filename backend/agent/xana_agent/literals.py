@@ -24,14 +24,27 @@ update drops the type again. Every form is read the same way here: a value
 object as its `@value`, a number string under a numeric datatype as that number,
 anything else -- plain values, IRI references, language maps -- as it is.
 """
+
 from __future__ import annotations
 
 from typing import Any
 
 XSD = "http://www.w3.org/2001/XMLSchema#"
-_INTEGERS = {"integer", "int", "long", "short", "byte", "nonNegativeInteger", "positiveInteger",
-             "nonPositiveInteger", "negativeInteger", "unsignedLong", "unsignedInt",
-             "unsignedShort", "unsignedByte"}
+_INTEGERS = {
+    "integer",
+    "int",
+    "long",
+    "short",
+    "byte",
+    "nonNegativeInteger",
+    "positiveInteger",
+    "nonPositiveInteger",
+    "negativeInteger",
+    "unsignedLong",
+    "unsignedInt",
+    "unsignedShort",
+    "unsignedByte",
+}
 _DECIMALS = {"double", "float", "decimal"}
 _VALUE_OBJECT_KEYS = {"@value", "@type", "type", "@language"}
 
@@ -41,7 +54,7 @@ def _local(datatype: Any) -> str | None:
     if not isinstance(datatype, str):
         return None
     if datatype.startswith(XSD):
-        return datatype[len(XSD):]
+        return datatype[len(XSD) :]
     if datatype.startswith("xsd:"):
         return datatype[4:]
     return None

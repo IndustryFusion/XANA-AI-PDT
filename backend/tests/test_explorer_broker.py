@@ -1137,6 +1137,11 @@ def test_a_number_for_a_declared_number_is_sent_declared(client, broker):
     _declare_temp(broker)
     assert client.patch(f"{ENTITY}/attrs", json={attrs(): {"value": 80}}).status_code == 204
     assert _sent_value(broker) == {"@value": 80, "@type": DOUBLE}
+    # Not as a merge, which the broker fails on a value object (Scorpio 22023), but as the whole
+    # attribute through the attribute write, so its unit and sub-attributes stay.
+    write = next(r for r in reversed(broker.requests) if r.method in ("PATCH", "POST") and r.content)
+    assert write.method == "POST" and write.url.path.endswith("/attrs")
+    assert json.loads(write.content)[attrs()]["unitCode"] == "CEL"
 
 
 def test_a_plain_number_is_edited_as_before(client, broker):

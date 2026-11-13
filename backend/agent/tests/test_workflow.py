@@ -738,7 +738,8 @@ _DOUBLE = "http://www.w3.org/2001/XMLSchema#double"
 async def test_a_declared_double_is_a_signal_with_its_unit(declared_value):
     at = datetime.now(UTC)
     entity = {
-        "id": MACHINE_ID, "type": "Machine",
+        "id": MACHINE_ID,
+        "type": "Machine",
         "temperature": {"type": "Property", "value": declared_value, "unitCode": "CEL"},
         "speed": {"type": "Property", "value": 3.0},
     }
