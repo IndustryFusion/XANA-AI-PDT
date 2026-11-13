@@ -34,13 +34,15 @@
 
 ## 4. Against a real broker
 
-- [ ] 4.1 Extend the real-broker explorer and live-update tests to round-trip a declared double through GET, an in-place edit and a notification; record what the broker's own `q` gives for `temperature>40` on a declared `"42.5"` (Risks); verify the tests pass in their workflow and report the `q` result in the Pull Request
+- [x] 4.1 Extend the real-broker explorer and live-update tests to round-trip a declared double through GET, an in-place edit and a notification; record what the broker's own `q` gives for `temperature>40` on a declared `"42.5"` (Risks); verify the tests pass in their workflow and report the `q` result in the Pull Request
   - `test_explorer_real.py`: a declared double round-trips (read, local range, text refused, edit keeps the datatype); the broker's own `q` is recorded under the marker `GH84-BROKER-Q`. `test_live_updates_real.py`: a declared value arrives as its value.
-  - Open until the backend workflow has run them.
-- [ ] 4.2 Extend the e2e explorer and live specs with a declared double shown, edited and updated live; verify they pass
+  - Backend workflow, run 43501983887 on `69a407a`: the real-broker step passed, 141 tests. The broker's own `q` `temp>40` matches a declared `42.5` (status 200), measured on `scorpiobroker/all-in-one-runner:java-latest`, the image of that step.
+  - Found here: the broker's merge fails on a value object (500, PostgreSQL 22023), so declared edits are written as the whole attribute (design, D3).
+- [x] 4.2 Extend the e2e explorer and live specs with a declared double shown, edited and updated live; verify they pass
   - `e2e/backend/explorer.spec.js`: a declared double shown, edited, the datatype checked through the API, text refused; collected by the `backend` project.
   - `live.spec.js` is not extended: the live path is covered by `test_live_updates_real.py` (a declared value arriving) and the change-detection unit tests.
-  - Open until the backend workflow has run the spec.
+  - The same run: the backend e2e suite passed, 31 tests, the new one included.
+  - Found here: the in-place editor parsed the input against the raw value object and sent `80` as text; fixed, with a component test in `tests/explorer/explorer.test.jsx`.
 
 ## 5. Documentation
 
@@ -49,4 +51,5 @@
 
 ## 6. Verification
 
-- [ ] 6.1 Check every scenario of the three delta specifications against the implementation and report the result per scenario in the Pull Request
+- [x] 6.1 Check every scenario of the three delta specifications against the implementation and report the result per scenario in the Pull Request
+  - Reported per scenario in the Pull Request.
