@@ -463,6 +463,17 @@ describe('review fixes', () => {
     for (const line of subs) expect(within(line).queryAllByRole('button', { name: /^(History|Edit|Delete|Add sub-attribute)/ })).toHaveLength(0)
   })
 
+  test('an expanded ID pattern is shown as the short name again, in the field and its chip', async () => {
+    const user = userEvent.setup()
+    openWith(withPumps(), `${paths.explorer()}?idPattern=${encodeURIComponent('http://opcfoundation\\.org/UA/Pumps/P.*')}`)
+    expect(await screen.findByRole('list', { name: 'Filters' })).toHaveTextContent('ID pattern pumps:P.*')
+    await moreFilters(user)
+    expect(screen.getByLabelText('ID pattern')).toHaveValue('pumps:P.*')
+    expect(fullIrisShown(document.querySelector('.query-bar'))).toEqual([])
+    await user.click(screen.getByRole('button', { name: 'Search' }))
+    await waitFor(() => expect(new URLSearchParams(window.location.search).get('idPattern')).toBe('http://opcfoundation\\.org/UA/Pumps/P.*'))
+  })
+
   test('removing the conditions chip with an unknown prefix in another field says why nothing was applied', async () => {
     const user = userEvent.setup()
     openWith(withPumps(), `${paths.explorer()}?type=Machine&q=${encodeURIComponent('status=="idle"')}`)

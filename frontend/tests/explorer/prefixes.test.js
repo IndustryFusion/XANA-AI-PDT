@@ -83,6 +83,14 @@ describe('short names', () => {
     expect(reg.shorten('https://schema.org/name')).toBe('schema2:name')
   })
 
+  test('a prefix typed before the context arrives keeps its namespace', () => {
+    const reg = createRegistry()
+    expect(reg.expand('schema:name')).toBe('https://schema.org/name')
+    reg.loadContext([{ prefix: 'schema', namespace: 'http://schema.org/' }])
+    expect(reg.expand('schema:name')).toBe('https://schema.org/name')
+    expect(reg.shorten('http://schema.org/name')).toBe('schema2:name')
+  })
+
   test('http, https and urn are never prefixes', () => {
     const reg = createRegistry()
     expect(reg.shorten('https://http.example/x').startsWith('http:')).toBe(false)

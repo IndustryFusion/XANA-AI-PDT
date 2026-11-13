@@ -628,6 +628,19 @@ def test_a_member_of_the_attribute_is_no_sub_attribute_name(client, broker, memb
     assert all(r.method == "GET" for r in broker.requests)
 
 
+@pytest.mark.parametrize("member", ["datasetId", "observedAt", "unitCode", "createdAt", "value"])
+@pytest.mark.parametrize("params", [{"sub_attribute": "{member}"}, {"path": "{member}"}])
+def test_a_member_of_the_attribute_is_not_deleted_as_a_sub_attribute(client, broker, member, params):
+    stored = deep(broker)
+    before = json.dumps(stored, sort_keys=True)
+    query = {"name": attrs("deep"), **{k: v.format(member=member) for k, v in params.items()}}
+    answer = client.delete(f"{ENTITY}/attrs", params=query)
+    assert answer.status_code == 404
+    assert answer.json()["error"]["kind"] == "not_found"
+    assert json.dumps(stored, sort_keys=True) == before
+    assert all(r.method == "GET" for r in broker.requests)
+
+
 def test_deleting_at_depth_two_removes_it_from_each_dataset(client, broker):
     stored = deep(broker)
     del stored[1][attrs("limit")][attrs("min")]  # only one dataset has it now

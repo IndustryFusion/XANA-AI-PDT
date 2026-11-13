@@ -16,7 +16,7 @@
 
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { entities } from '../../src/data'
-import { healthState, RECONNECT_MS, useLiveUpdates } from '../../src/features/explorer/useLiveUpdates'
+import { GAVE_UP, healthState, RECONNECT_MS, STABLE_MS, useLiveUpdates } from '../../src/features/explorer/useLiveUpdates'
 
 afterEach(() => {
   vi.restoreAllMocks()
@@ -94,7 +94,8 @@ describe('live-update indicator', () => {
     expect(handlers).toHaveLength(2)
     expect(onResync).toHaveBeenCalledTimes(1)
 
-    // No update arrived since; a later outage still gets the fast first retry.
+    // The reopened stream stays open long enough to count as working: a later outage gets the fast first retry again.
+    await act(async () => { await vi.advanceTimersByTimeAsync(STABLE_MS) })
     const before = health.mock.calls.length
     act(() => handlers[1]({ type: 'error', error: new Error('lost again') }))
     await act(async () => { await vi.advanceTimersByTimeAsync(RECONNECT_MS[0]) })
@@ -119,5 +120,55 @@ describe('live-update indicator', () => {
     expect(result.current.status).toBe('ok')
     expect(onResync).toHaveBeenCalledTimes(1)
     expect(handlers).toHaveLength(2)
+  })
+
+  test('a stream that fails at once while the health says working is retried with a thinning back-off, then given up', async () => {
+    vi.useFakeTimers()
+    const health = vi.spyOn(entities, 'getLiveUpdateHealth').mockResolvedValue({ status: 'ok', state: 'active', detail: null })
+    const handlers = []
+    vi.spyOn(entities, 'subscribeEntities').mockImplementation((_params, onEvent) => {
+      handlers.push(onEvent)
+      queueMicrotask(() => onEvent({ type: 'error', error: new Error('refused') }))
+      return () => {}
+    })
+    const onResync = vi.fn()
+    const { result } = renderHook(() => useLiveUpdates({ enabled: true, ids: ['urn:a'], onResync }))
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    const opened = []
+    for (const wait of [...RECONNECT_MS, 10_000, 10_000, 10_000]) {
+      await act(async () => { await vi.advanceTimersByTimeAsync(wait) })
+      opened.push(handlers.length)
+    }
+    // Opened once, then once after each step of the back-off, and then no more.
+    expect(handlers).toHaveLength(1 + RECONNECT_MS.length)
+    expect(opened.at(-1)).toBe(opened.at(-3))
+    expect(result.current.status).toBe('unavailable')
+    expect(result.current.detail).toBe(GAVE_UP)
+    expect(onResync).toHaveBeenCalledTimes(RECONNECT_MS.length)
+    expect(health).toHaveBeenCalled()
+  })
+
+  test('after giving up, an outage the backend reports is tried again once it is over', async () => {
+    vi.useFakeTimers()
+    const answers = [{ status: 'ok', state: 'active' }]
+    vi.spyOn(entities, 'getLiveUpdateHealth').mockImplementation(async () => ({ detail: null, ...answers.at(-1) }))
+    let failing = true
+    const handlers = []
+    vi.spyOn(entities, 'subscribeEntities').mockImplementation((_params, onEvent) => {
+      handlers.push(onEvent)
+      if (failing) queueMicrotask(() => onEvent({ type: 'error', error: new Error('refused') }))
+      return () => {}
+    })
+    const { result } = renderHook(() => useLiveUpdates({ enabled: true, ids: ['urn:a'] }))
+    for (let i = 0; i < 12; i++) await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
+    expect(result.current.detail).toBe(GAVE_UP)
+    const given = handlers.length
+    failing = false
+    answers.push({ status: 'unavailable', state: 'broker_unavailable' })
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
+    answers.push({ status: 'ok', state: 'active' })
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
+    expect(handlers.length).toBe(given + 1)
+    expect(result.current.status).toBe('ok')
   })
 })

@@ -49,6 +49,9 @@ const GENERIC = new Set(['www', 'ontology', 'ontologies', 'contexts', 'context',
 const VERSION = /^v?\d+(\.\d+)*$/i
 const MAX_LENGTH = 12
 
+/** Text for a regular expression that matches it literally. */
+export const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
 /** Whether a string is an http(s) IRI, the only kind that is shortened. */
 export const isHttpIri = (text) => typeof text === 'string' && HTTP.test(text) && !/\s/.test(text)
 
@@ -195,8 +198,26 @@ export function createRegistry() {
       return this.parts(iri)?.text ?? iri
     },
 
-    /** The entry of a prefix, or null. */
-    lookup(prefix) { return byPrefix.get(prefix) ?? null },
+    /**
+     * An ID pattern as the operator typed it: a leading namespace, as the
+     * explorer escapes it when it expands `prefix:`, as `prefix:` again.
+     */
+    shortenPattern(pattern) {
+      const text = String(pattern ?? '')
+      const found = [...byPrefix.values()]
+        .filter((e) => text.startsWith(escapeRegExp(e.namespace)))
+        .sort((a, b) => b.namespace.length - a.namespace.length)[0]
+      if (!found) return text
+      found.used = true
+      return `${found.prefix}:${text.slice(escapeRegExp(found.namespace).length)}`
+    },
+
+    /** The entry of a prefix, or null. A prefix looked up, as when it is typed, is in use from then on. */
+    lookup(prefix) {
+      const entry = byPrefix.get(prefix) ?? null
+      if (entry) entry.used = true
+      return entry
+    },
 
     /** The prefixes in use, sorted by name. */
     entries() { return [...byPrefix.values()].sort((a, b) => a.prefix.localeCompare(b.prefix)) },
@@ -213,7 +234,7 @@ export function createRegistry() {
       const colon = value.indexOf(':')
       if (colon < 0 || /^(https?|urn):/i.test(value)) return value
       const prefix = value.slice(0, colon)
-      const entry = byPrefix.get(prefix)
+      const entry = this.lookup(prefix)
       if (entry) return entry.namespace + value.slice(colon + 1)
       if (identifier && /^[A-Za-z][A-Za-z0-9+.-]*:\S+$/.test(value)) return value
       throw new UnknownPrefixError(prefix)

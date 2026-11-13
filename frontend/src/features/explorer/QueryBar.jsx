@@ -19,12 +19,9 @@ import { Button } from '../../ui/components'
 import { IconButton } from '../../ui/icons'
 import { attributeKind } from './attributes'
 import { shortenText, useRegistry } from './Iri'
-import { isHttpIri, UnknownPrefixError } from './prefixes'
+import { escapeRegExp, isHttpIri, UnknownPrefixError } from './prefixes'
 import { buildExpression, DEFAULT_LIMIT, emptyCondition, OPERATORS, parseExpression, takesValue } from './query'
 import { useKept } from './store'
-
-/** Text for a regular expression that matches it literally. */
-export const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
 /** Options of a list of IRIs: the short name shown, the full IRI as tooltip. */
 function NameOptions({ id, names, reg }) {
@@ -102,7 +99,7 @@ export default function QueryBar({ query, types, attributes, entities = [], erro
   const parsed = parseExpression(query.q)
   const short = (v) => (v ? reg.shorten(v) : '')
   const [form, setForm] = useState({
-    type: short(query.type), id: short(query.id), idPattern: query.idPattern, limit: query.limit, hasAttr: short(query.hasAttr ?? ''),
+    type: short(query.type), id: short(query.id), idPattern: reg.shortenPattern(query.idPattern), limit: query.limit, hasAttr: short(query.hasAttr ?? ''),
   })
   const [selected, setSelected] = useState(() => (query.attrs ? query.attrs.split(',').filter(Boolean) : []))
   const [adding, setAdding] = useState('')

@@ -509,7 +509,8 @@ class ContextBroker:
         existing = current[name]
         instances = existing if isinstance(existing, list) else [existing]
         holders = [item for item in instances if isinstance(item, dict) and sub_attribute in item]
-        if not holders or sub_attribute in ("type", *VALUE_MEMBERS):
+        # A member of the attribute itself (its value, dataset, times, unit…) is never a sub-attribute.
+        if not holders or not _sub_attribute_name(sub_attribute):
             raise not_found(f"{name} has no sub-attribute {sub_attribute}.")
         changed = [{k: v for k, v in item.items() if k != sub_attribute} for item in holders]
         await self.send("POST", path, body={name: changed[0] if len(changed) == 1 else changed})
