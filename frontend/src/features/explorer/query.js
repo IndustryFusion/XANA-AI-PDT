@@ -64,6 +64,16 @@ export function toSearch(query) {
   return text ? `?${text}` : ''
 }
 
+/** The attribute path a link asks the explorer to show (`focus`), or null. */
+export function readFocus(urlQuery) {
+  try {
+    const levels = JSON.parse(urlQuery.focus ?? 'null')
+    return Array.isArray(levels) && levels.length && levels.every((l) => typeof l === 'string' && l) ? levels : null
+  } catch {
+    return null
+  }
+}
+
 export const explorerPath = (query) => `${paths.explorer()}${toSearch(query)}`
 export const entityPath = (id, query) => `${paths.entity(id)}${toSearch(query)}`
 

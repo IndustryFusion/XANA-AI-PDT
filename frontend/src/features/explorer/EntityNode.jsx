@@ -28,7 +28,7 @@ import AttributeLine from './AttributeLine'
 import AddAttributeForm from './AddAttributeForm'
 import { Iri, nameItems, shortenText, useCopy, useFullIri, useRegistry } from './Iri'
 import { isHttpIri, registry } from './prefixes'
-import { entityPath } from './query'
+import { entityPath, readFocus } from './query'
 import { applyChanges } from './rawEdit'
 import RawJsonEditor from './RawJsonEditor'
 import { pin, renest, toggleSelected, unnest, unpin, useKept, usePins, useSelection } from './store'
@@ -73,8 +73,10 @@ export default function EntityNode({
   place = 'top', origin = null, nodeKey = id,
 }) {
   useRegistry()
-  const { navigate } = useRoute()
+  const { navigate, query: urlQuery } = useRoute()
   const at = query.at || null
+  // A link can name an attribute path of the entity it opens; only that node shows it.
+  const focus = current ? readFocus(urlQuery) : null
   const readOnly = !!at
   const [ownExpanded, setOwnExpanded] = useKept(`${at ?? ''}|${nodeKey}|open`, place !== 'pinned')
   const expanded = expandedProp ?? ownExpanded
@@ -226,7 +228,7 @@ export default function EntityNode({
 
   const lineCtx = (name) => ({
     entityId: id, entityType: entity.type, readOnly, refTo, depth, chain: ownChain, headingLevel: level, nodeKey,
-    changed: !!changed[name], historyOf,
+    changed: !!changed[name], historyOf, focus,
     recorded: !!statusOf(states.data, name),
     onSaved: saved,
     onHistory: (key) => setHistoryOf((h) => (h === key ? null : key)),

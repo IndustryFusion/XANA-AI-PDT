@@ -337,6 +337,22 @@ describe('short names as input', () => {
 })
 
 describe('the same row at every depth', () => {
+  test('a link that names an attribute path opens each level down to it and marks that line', async () => {
+    const source = [F('FlowRate'), F('Quality'), F('Source')]
+    openWith(withPumps(), paths.entity(PUMP, [F('FlowRate'), `${F('Quality')}[0]`, F('Source')]))
+    await waitFor(() => expect(attr(source.join('.'))).not.toBeNull())
+    expect(lineOf(source.join('.'))).toHaveClass('attr-line--focused')
+    expect(within(attr(F('FlowRate'))).getByRole('button', { name: '1 sub-attribute of pumps:FlowRate' })).toHaveAttribute('aria-expanded', 'true')
+    expect(lineOf(F('FlowRate'))).not.toHaveClass('attr-line--focused')
+  })
+
+  test('a link that names an attribute the entity does not have opens the entity without a marked line', async () => {
+    openWith(withPumps(), paths.entity(PUMP, [F('Missing'), F('Source')]))
+    await waitFor(() => expect(attr(F('FlowRate'))).not.toBeNull())
+    expect(document.querySelector('.attr-line--focused')).toBeNull()
+    expect(within(attr(F('FlowRate'))).getByRole('button', { name: '1 sub-attribute of pumps:FlowRate' })).toHaveAttribute('aria-expanded', 'false')
+  })
+
   test('sub-attributes three levels deep: one expand control per level, with tree lines', async () => {
     const user = userEvent.setup()
     await openPump(user)

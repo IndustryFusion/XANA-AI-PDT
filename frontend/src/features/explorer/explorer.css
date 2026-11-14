@@ -174,6 +174,7 @@
 .attr-line .kind-tag { min-width: 6.5rem; text-align: center; }
 .attr-line:hover, .attr-line:focus-within { background: var(--surface-2); }
 .attr-line--changed, .attr-line--changed:hover { background: color-mix(in srgb, var(--tone-attention) var(--tint), var(--surface)); }
+.attr-line--focused { box-shadow: inset 3px 0 0 var(--accent); background: color-mix(in srgb, var(--accent) var(--tint), var(--surface)); }
 .attr-line--note { padding-left: var(--space-5); font-size: var(--text-xs); }
 
 .attr-line__name { font-weight: 600; }

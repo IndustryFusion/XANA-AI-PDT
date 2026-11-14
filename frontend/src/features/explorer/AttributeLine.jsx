@@ -14,7 +14,7 @@
 // limitations under the License.
 //
 
-import { useId, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { entityLabel } from '../../app/EntityRef'
 import { entities } from '../../data'
 import { formatTime } from '../../ui/format'
@@ -41,6 +41,15 @@ export function KindBadge({ kind }) {
 }
 
 const Space = () => ' '
+
+/** Whether a level's name is the one a link gives: the same, or with a dataset index such as `[0]` after it. */
+const sameLevel = (own, given) => own === given || given.replace(/\[\d*\]$/, '') === own
+
+/** How a line stands to the focused path: `'line'` (it is the line), `'above'` (a level above it) or null. */
+export function focusOf(focus, levels) {
+  if (!focus || focus.length < levels.length || !levels.every((l, i) => sameLevel(l, focus[i]))) return null
+  return focus.length === levels.length ? 'line' : 'above'
+}
 
 /** `name.sub.sub2`, only to mark lines in the page; IRIs contain dots, so keys use `levelKey`. */
 export const dotted = (name, path = []) => [name, ...path].join('.')
@@ -139,6 +148,16 @@ function Line({ name, path, inst, ctx, actions, multi = false }) {
   const changed = path.length === 0 && ctx.changed
   const pathKey = levelKey(name, path)
   const historyOpen = ctx.historyOf === pathKey
+  const focused = focusOf(ctx.focus, [name, ...path])
+
+  // A level above the focused line opens its sub-attributes; the line itself comes into view.
+  useEffect(() => {
+    if (focused === 'above') setSubsOpen(true)
+    // After the entity's own scroll and the explorer's kept scroll, which run later in this commit or the next frame.
+    if (focused !== 'line') return undefined
+    const frame = requestAnimationFrame(() => lineRef.current?.scrollIntoView?.({ block: 'center' }))
+    return () => cancelAnimationFrame(frame)
+  }, [focused, setSubsOpen])
   const iriMember = editable && (editable[0] === 'object' || editable[0] === 'vocab' || (editable[0] === 'value' && kind === 'iri'))
 
   const menu = useContextMenu({
@@ -190,7 +209,7 @@ function Line({ name, path, inst, ctx, actions, multi = false }) {
   return (
     <>
       <div
-        ref={lineRef} className={`attr-line${changed ? ' attr-line--changed' : ''}`}
+        ref={lineRef} className={`attr-line${changed ? ' attr-line--changed' : ''}${focused === 'line' ? ' attr-line--focused' : ''}`}
         style={{ '--depth': path.length }} {...menu.triggerProps}
       >
         <KindBadge kind={kind} /><Space />

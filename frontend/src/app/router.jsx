@@ -59,7 +59,8 @@ export const paths = {
   incident: (incidentId) => `/history/${enc(incidentId)}`,
   historyFor: (machineId) => `/history?machine=${enc(machineId)}`,
   explorer: () => '/explorer',
-  entity: (entityId) => `/explorer/${enc(entityId)}`,
+  // `levels`: an attribute and the sub-attributes below it, which the explorer opens and shows.
+  entity: (entityId, levels) => `/explorer/${enc(entityId)}${levels?.length ? `?focus=${enc(JSON.stringify(levels))}` : ''}`,
   alerts: () => '/alerts',
   alert: (alertId) => `/alerts/${enc(alertId)}`,
   dataspace: () => '/dataspace',
