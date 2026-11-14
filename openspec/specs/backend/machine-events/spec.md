@@ -160,7 +160,7 @@ The backend SHALL keep one subscription with the ID `urn:ngsi-ld:Subscription:Xa
 - **THEN** it is created again
 
 #### Scenario: Refused
-- **WHEN** the broker refuses, including with 401 or 403
+- **WHEN** the broker refuses, including with 401 or 403, reading the subscription by ID, listing subscriptions and updating it, or refuses creating it
 - **THEN** the state is `failed`, says why without a secret, and it is tried again
 
 #### Scenario: Not delivered
@@ -205,3 +205,26 @@ With `KEYCLOAK_SERVICE_CLIENT_ID` and `KEYCLOAK_SERVICE_CLIENT_SECRET`, the back
 #### Scenario: Not configured
 - **WHEN** the service client isn't configured
 - **THEN** the signed-in operator's token is used, as the only identity there is
+
+### Requirement: Checking the machine-watch subscription
+At least once a minute, the backend SHALL check that the machine-watch subscription is still in place: by reading it by its ID, or, when that read is refused with 401 or 403, by finding it in the broker's list of subscriptions, or else by updating it. A refused read by ID alone SHALL NOT make the state `failed`, and SHALL NOT count as the subscription being gone.
+
+#### Scenario: Only the read by ID refused
+- **WHEN** the broker refuses reading the subscription by its ID with 403, and lists it or accepts its update
+- **THEN** the check doesn't make the state `failed`, and the state is the one delivery reports, such as `active`, over several checks
+
+#### Scenario: In place again after a failed check
+- **WHEN** the state is `failed`, and a later try finds the subscription in place, updates it or creates it again
+- **THEN** the state is again the one delivery reports, such as `active`
+
+#### Scenario: Gone, while the read by ID is refused
+- **WHEN** the broker refuses reading by ID, and the subscription isn't in its list, or an update is answered as not found
+- **THEN** it is created again
+
+#### Scenario: Delivery status from the list
+- **WHEN** the read by ID is refused, and the list entry reports `notification.status` as `failed`
+- **THEN** the state is `delivery_failing`
+
+#### Scenario: Nothing works
+- **WHEN** the broker refuses reading by ID, listing subscriptions and updating the subscription
+- **THEN** the state is `failed`, and the reason gives the HTTP status of the last answer and, for 401 or 403, that the identity lacks access, without the broker's message or a secret
