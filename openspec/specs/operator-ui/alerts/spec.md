@@ -28,7 +28,7 @@ The operator SHALL be able to filter alerts by status, severity, environment, se
 - **THEN** the list says that no alerts match the current filter
 
 ### Requirement: Alert list
-The list SHALL show one line per alert with severity, status, the resource by its short name, event, text, service, age and the number of duplicates, and refresh automatically at an interval the operator can choose or switch off. The list SHALL fit its width without scrolling sideways: a cell too long for its column is cut off, with its full text shown on hover, and a narrower list leaves out columns, the service first, then the status, which the detail still shows. A row SHALL hold no action buttons; its actions are in its context menu.
+The list SHALL show one line per alert with severity, status, the resource by its short name, event, text, service, age and the number of duplicates, and refresh automatically at an interval the operator can choose or switch off. The list SHALL fit its width without scrolling sideways: a cell too long for its column is cut off, with its full text shown on hover, and a narrower list leaves out columns, the service first, then the status, which the detail still shows.
 
 #### Scenario: Automatic refresh
 - **WHEN** a new alert is raised while the list is shown and automatic refresh is on
