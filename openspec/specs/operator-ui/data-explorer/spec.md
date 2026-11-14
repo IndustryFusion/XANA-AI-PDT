@@ -109,6 +109,10 @@ The operator SHALL be able to change attribute and sub-attribute values in place
 - **WHEN** the operator deletes a sub-attribute and confirms
 - **THEN** only that sub-attribute is removed and the attribute remains
 
+#### Scenario: Add a sub-attribute to an attribute
+- **WHEN** the operator adds a sub-attribute to an attribute of any kind, a relationship included
+- **THEN** it is saved under that attribute, the attribute keeps its value or target and stays one attribute, and the sub-attribute is shown under the attribute's expand control, which is open, and can be expanded and given sub-attributes of its own
+
 #### Scenario: Add a sub-attribute at depth
 - **WHEN** the operator adds a sub-attribute to a sub-attribute
 - **THEN** it is saved under that sub-attribute, the rest of the attribute is unchanged, and it is shown at its place

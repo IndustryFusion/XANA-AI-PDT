@@ -303,6 +303,18 @@ The backend SHALL change, add and delete a sub-attribute at any depth, named by 
 - **WHEN** a sub-attribute is added to a sub-attribute
 - **THEN** it is added there, and an existing sub-attribute of that name is refused as `conflict` with nothing changed
 
+#### Scenario: Add to the attribute itself
+- **WHEN** a sub-attribute is added to an attribute, named by the attribute and no path, whatever the attribute's kind, a relationship included
+- **THEN** it is stored under the attribute as a sub-attribute with its own type and value, the attribute stays one attribute with its value or target, unit and other sub-attributes, and this holds on a broker whose merge stores its own result object; an existing sub-attribute of that name is refused as `conflict` with nothing changed
+
+#### Scenario: Update that brings a new sub-attribute
+- **WHEN** an update of an attribute names a sub-attribute the attribute doesn't have yet, with or without a new value
+- **THEN** the sub-attribute is stored under the attribute with its own type and value, the value changes if the update gives one, and everything else of the attribute stays, on a broker whose merge stores its own result object too; a new sub-attribute without a type is refused as `invalid` with nothing changed
+
+#### Scenario: Live updates after a write of a whole attribute
+- **WHEN** an attribute is written back whole, to add or change a sub-attribute
+- **THEN** the backend expects the broker's notification of that change, as for any other edit
+
 #### Scenario: Delete at depth
 - **WHEN** a sub-attribute of a sub-attribute is deleted
 - **THEN** only it is removed, and with several datasets it is removed from each dataset that has it
