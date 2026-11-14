@@ -20,6 +20,7 @@ import { cleanup } from '@testing-library/react'
 import { forgetPaths } from '../src/app/lastPath'
 import { registry } from '../src/features/explorer/prefixes'
 import { resetExplorerState } from '../src/features/explorer/store'
+import { resetAlertsState } from '../src/features/alerts/kept'
 
 // jsdom does not implement scrolling.
 window.scrollTo = () => {}
@@ -30,5 +31,6 @@ afterEach(() => {
   sessionStorage.clear()
   forgetPaths()
   resetExplorerState()
+  resetAlertsState()
   registry.reset()
 })

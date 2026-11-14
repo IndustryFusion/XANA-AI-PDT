@@ -14,16 +14,19 @@
 // limitations under the License.
 //
 
-import { useCallback, useEffect, useId, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { useData } from '../../data/useData'
-import { EntityRef } from '../../app/EntityRef'
+import { entityLabel } from '../../app/EntityRef'
 import { Link, paths, useRoute } from '../../app/router'
 import { useRevealOnChange } from '../../app/reveal'
+import { rememberPath } from '../../app/lastPath'
 import { Button, Card, DataView, EmptyState, StatusBadge, useToast } from '../../ui/components'
-import { ContextMenu, isMenuKey, menuPointFor } from '../../ui/ContextMenu'
+import { ContextMenu, isMenuKey, LONG_PRESS_MS, menuPointFor } from '../../ui/ContextMenu'
 import { copyText } from '../../ui/clipboard'
 import { formatAge } from '../../ui/format'
 import { SEVERITY_ORDER } from '../../ui/status'
+import { useCopy } from '../explorer/Iri'
+import { keepResults, keepScroll, keepSelection, keptResults, keptScroll, keptSelection } from './kept'
 import AlertActionDialog from './AlertActionDialog'
 import AlertDetail from './AlertDetail'
 import { ACTIONS, actionInfo, actionsFor, alertPath, alertsPath, readFilters, SORTS, STATUS_FILTERS, toRequest } from './model'
@@ -148,7 +151,7 @@ function ActionResults({ outcome, onDismiss }) {
  * with selection and bulk actions, and the selected alert's detail.
  */
 export default function Alerts() {
-  const { params, query, navigate } = useRoute()
+  const { params, query, pathname, search, navigate } = useRoute()
   const filters = readFilters(query)
   const selectedAlert = params.alertId ?? null
   const [chosenRefresh, setChosenRefresh] = useState(readChosenRefresh)
@@ -156,7 +159,7 @@ export default function Alerts() {
   const configuredRefresh = settings.data ? settings.data.refreshIntervalS * 1000 : null
   const refreshMs = chosenRefresh ?? configuredRefresh ?? DEFAULT_REFRESH
   const [refreshKey, setRefreshKey] = useState(0)
-  const [selection, setSelection] = useState([])
+  const [selection, setSelection] = useState(keptSelection)
   const [failures, setFailures] = useState({})
   const [pending, setPending] = useState(null)
   const [outcome, setOutcome] = useState(null)
@@ -171,7 +174,28 @@ export default function Alerts() {
   }, [selectedAlert])
   const closeMenu = useCallback(() => setMenu(null), [])
   const notify = useToast()
-  const result = useData('alerts', 'listAlerts', [toRequest(filters)], { refreshMs, refreshKey })
+  const copy = useCopy()
+  const request = toRequest(filters)
+  const resultsKey = JSON.stringify(request)
+  const result = useData('alerts', 'listAlerts', [request], { refreshMs, refreshKey, initial: keptResults(resultsKey) })
+
+  // Back from another area, the page is as it was left: the navigation returns to this address
+  // (filters, open alert), and the checked rows, the last list and the scroll position are kept.
+  const address = useRef(`${pathname}${search}`)
+  address.current = `${pathname}${search}`
+  useEffect(() => { rememberPath('alerts', `${pathname}${search}`) }, [pathname, search])
+  useEffect(() => { keepSelection(selection) }, [selection])
+  // Keep a list only as the answer to its own request: while a new filter loads, the data is still the old one.
+  const answered = useRef(resultsKey)
+  answered.current = resultsKey
+  useEffect(() => { if (result.status === 'success') keepResults(answered.current, result.data) }, [result.status, result.data])
+  useLayoutEffect(() => {
+    // Only back at the address it was kept for; a link to another filter or alert starts at its own place.
+    // Kept under the address current when the area is left, which filters change while it stays open.
+    const y = keptScroll(address.current)
+    if (y != null) requestAnimationFrame(() => window.scrollTo?.(0, y))
+    return () => keepScroll(address.current, window.scrollY)
+  }, [])
   const refresh = useCallback(() => setRefreshKey((k) => k + 1), [])
 
   const changeFilters = (next, typing) => navigate(selectedAlert ? alertPath(selectedAlert, next) : alertsPath(next), { replace: typing })
@@ -203,6 +227,10 @@ export default function Alerts() {
       { separator: true },
       ...actionsFor(alert.status).map((a) => ({ label: `${a.label}…`, onSelect: () => setPending({ action: a.action, ids: [alert.id] }) })),
       { separator: true },
+      {
+        label: 'Copy resource IRI',
+        onSelect: () => copy(alert.resource, alert.resource),
+      },
       {
         label: 'Copy alert ID',
         onSelect: async () => {
@@ -281,16 +309,48 @@ export default function Alerts() {
 
 const INTERACTIVE = 'a, button, input, select, textarea, label'
 
+/** A cell that keeps to one line, cut off with an ellipsis, with its whole text as tooltip. */
+const Clip = ({ text, children, className = '' }) => (
+  <td className={`alert-table__clip${className ? ` ${className}` : ''}`} title={text}>{children ?? text}</td>
+)
+
 /**
- * The alert list. Selecting a row opens its detail; a right click, the
- * menu key, Shift+F10 or the row's actions button open its context menu.
+ * The alert list: one line per alert with its basic details, in columns that
+ * fit the width. Selecting a row opens its detail; a right click, the menu
+ * key or Shift+F10 on the row open its context menu with every action.
  */
 function AlertTable({ alerts, filters, selected, selection, failures, onToggle, onToggleAll, onOpen, onMenu }) {
   const allSelected = alerts.length > 0 && alerts.every((a) => selection.includes(a.id))
+  // A long press opens the row's menu on touch screens, as the app's other context menus do.
+  const press = useRef(null)
+  const release = () => { clearTimeout(press.current); press.current = null }
+  useEffect(() => release, [])
+  const pressProps = (a) => ({
+    onPointerDown(e) {
+      if (e.pointerType !== 'touch') return
+      const point = { x: e.clientX, y: e.clientY }
+      release()
+      press.current = setTimeout(() => onMenu(a, point), LONG_PRESS_MS)
+    },
+    onPointerUp: release,
+    onPointerCancel: release,
+    onPointerMove: release,
+  })
   return (
-    <div className="table-wrap">
+    <div className="alert-table-wrap">
       <table className="table alert-table">
-        <caption className="visually-hidden">Alerts, most severe and newest first</caption>
+        <caption className="visually-hidden">Alerts, most severe and newest first. Each row has a context menu with its actions.</caption>
+        <colgroup>
+          <col className="alert-col--select" />
+          <col className="alert-col--severity" />
+          <col className="alert-col--status" />
+          <col className="alert-col--resource" />
+          <col className="alert-col--event" />
+          <col className="alert-col--text" />
+          <col className="alert-col--service" />
+          <col className="alert-col--age" />
+          <col className="alert-col--count" />
+        </colgroup>
         <thead>
           <tr>
             <th scope="col"><input type="checkbox" aria-label="Select all listed alerts" checked={allSelected} onChange={(e) => onToggleAll(e.target.checked)} /></th>
@@ -299,9 +359,9 @@ function AlertTable({ alerts, filters, selected, selection, failures, onToggle, 
             <th scope="col">Resource</th>
             <th scope="col">Event</th>
             <th scope="col">Text</th>
-            <th scope="col">Service</th>
+            <th scope="col" className="alert-col--service">Service</th>
             <th scope="col">Age</th>
-            <th scope="col"><span className="visually-hidden">Actions</span></th>
+            <th scope="col" title="Duplicates"><span aria-hidden="true">#</span><span className="visually-hidden">Duplicates</span></th>
           </tr>
         </thead>
         <tbody>
@@ -312,27 +372,20 @@ function AlertTable({ alerts, filters, selected, selection, failures, onToggle, 
               onClick={(e) => { if (!e.target.closest(INTERACTIVE)) onOpen(a) }}
               onContextMenu={(e) => { e.preventDefault(); onMenu(a, { x: e.clientX, y: e.clientY }) }}
               onKeyDown={(e) => { if (isMenuKey(e)) { e.preventDefault(); onMenu(a, menuPointFor(e.target)) } }}
+              {...pressProps(a)}
             >
               <td><input type="checkbox" aria-label={`Select ${a.id}`} checked={selection.includes(a.id)} onChange={() => onToggle(a.id)} /></td>
               <td><StatusBadge kind="severity" value={a.severity} /></td>
               <td><StatusBadge kind="alert" value={a.status} /></td>
-              <td><EntityRef id={a.resource} /></td>
-              <td><Link to={alertPath(a.id, filters)} aria-label={`${a.event} (${a.id})`}>{a.event}</Link></td>
-              <td>
+              <Clip text={a.resource} className="mono">{entityLabel(a.resource)}</Clip>
+              <Clip text={a.event}><Link to={alertPath(a.id, filters)} aria-label={`${a.event} (${a.id})`}>{a.event}</Link></Clip>
+              <Clip text={failures[a.id] ? `${a.text}. Action failed: ${failures[a.id]}` : a.text} className={failures[a.id] ? 'alert-table__wrap' : ''}>
                 {a.text}
                 {failures[a.id] && <span className="field__error alert-table__failure">Action failed: {failures[a.id]}</span>}
-              </td>
-              <td>{a.service.join(', ')}</td>
+              </Clip>
+              <Clip text={a.service.join(', ')} className="alert-col--service" />
               <td><time dateTime={a.createTime}>{formatAge(a.createTime)}</time></td>
-              <td>
-                <button
-                  type="button" className="alert-table__menu" aria-haspopup="menu"
-                  aria-label={`Actions for ${a.event} (${a.id})`}
-                  onClick={(e) => onMenu(a, menuPointFor(e.currentTarget))}
-                >
-                  ⋯
-                </button>
-              </td>
+              <td className="alert-table__count">{a.duplicateCount > 0 ? a.duplicateCount : ''}</td>
             </tr>
           ))}
         </tbody>

@@ -20,6 +20,8 @@ import { EntityRef } from '../../app/EntityRef'
 import { Link, paths } from '../../app/router'
 import { Button, ErrorState, LoadingState, StatusBadge } from '../../ui/components'
 import { formatTime, humanize } from '../../ui/format'
+import { useCopy } from '../explorer/Iri'
+import AlertText from './AlertText'
 import { actionsFor } from './model'
 
 const HISTORY_TYPES = { new: 'Raised', status: 'Status change', note: 'Note', severity: 'Severity change' }
@@ -31,6 +33,7 @@ const HISTORY_TYPES = { new: 'Raised', status: 'Status change', note: 'Note', se
 export default function AlertDetail({ id, refreshKey, onAction, onClose }) {
   const result = useData('alerts', 'getAlert', [id], { refreshKey })
   const titleId = useId()
+  const copy = useCopy()
 
   if (result.status === 'loading' && result.data === undefined) return <LoadingState label="Loading alert…" />
   if (result.status === 'error' && result.error?.kind === 'not_found') {
@@ -58,7 +61,7 @@ export default function AlertDetail({ id, refreshKey, onAction, onClose }) {
           <StatusBadge kind="severity" value={alert.severity} />
           <StatusBadge kind="alert" value={alert.status} />
         </p>
-        <p className="alert-detail__text">{alert.text}</p>
+        <div className="alert-detail__text"><AlertText text={alert.text} resource={alert.resource} /></div>
 
         <div className="row" role="group" aria-label="Actions">
           <Link to={paths.newIncident(alert.resource, alert.text)} className="btn btn--primary btn--sm">Start new incident</Link>
@@ -77,19 +80,19 @@ export default function AlertDetail({ id, refreshKey, onAction, onClose }) {
         <section aria-labelledby={`${titleId}-attrs`} className="stack">
           <h3 id={`${titleId}-attrs`} className="details__title">Attributes</h3>
           <dl className="details">
-            <dt>Resource</dt><dd><EntityRef id={alert.resource} /></dd>
-            <dt>Event</dt><dd>{alert.event}</dd>
+            <dt>Resource</dt><dd><EntityRef id={alert.resource} label={alert.resource} menu="context" className="mono" items={[{ label: 'Copy IRI', onSelect: () => copy(alert.resource, 'the IRI') }]} /></dd>
+            <dt>Event</dt><dd><AlertText text={alert.event} resource={alert.resource} /></dd>
             <dt>Environment</dt><dd>{alert.environment}</dd>
             <dt>Service</dt><dd>{alert.service.join(', ')}</dd>
             {alert.group && <><dt>Group</dt><dd>{alert.group}</dd></>}
-            {alert.value && <><dt>Value</dt><dd>{alert.value}</dd></>}
+            {alert.value && <><dt>Value</dt><dd><AlertText text={alert.value} resource={alert.resource} /></dd></>}
             {alert.origin && <><dt>Origin</dt><dd>{alert.origin}</dd></>}
             {alert.type && <><dt>Type</dt><dd>{alert.type}</dd></>}
             <dt>Created</dt><dd><time dateTime={alert.createTime}>{formatTime(alert.createTime)}</time></dd>
             <dt>Last received</dt><dd><time dateTime={alert.lastReceiveTime}>{formatTime(alert.lastReceiveTime)}</time></dd>
             <dt>Duplicates</dt><dd>{alert.duplicateCount}</dd>
             {Object.entries(alert.attributes ?? {}).map(([k, v]) => (
-              <Fragment key={k}><dt>{humanize(k)}</dt><dd>{typeof v === 'object' ? JSON.stringify(v) : String(v)}</dd></Fragment>
+              <Fragment key={k}><dt>{humanize(k)}</dt><dd><AlertText text={typeof v === 'object' ? JSON.stringify(v) : String(v)} resource={alert.resource} /></dd></Fragment>
             ))}
           </dl>
         </section>
@@ -104,7 +107,7 @@ export default function AlertDetail({ id, refreshKey, onAction, onClose }) {
                   <span>{HISTORY_TYPES[h.type] ?? humanize(h.type)}</span>
                   <StatusBadge kind="alert" value={h.status} />
                 </span>
-                <span>{h.text}</span>
+                <span><AlertText text={h.text} resource={alert.resource} /></span>
                 {h.user && <span className="muted">by {h.user}</span>}
               </li>
             ))}

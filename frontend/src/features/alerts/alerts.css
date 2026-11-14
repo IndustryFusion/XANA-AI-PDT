@@ -71,26 +71,61 @@
 
 .alert-table tr[aria-current='true'] td { background: var(--surface-2); }
 .alert-table__row { cursor: pointer; }
-.alert-table th:last-child { position: relative; }
 .alert-table__row:hover td { background: var(--surface-hover); }
 
-.alert-table__menu {
-  min-width: 2rem;
-  padding: 0 var(--space-2);
-  border: 1px solid transparent;
-  border-radius: var(--radius);
-  background: none;
-  color: var(--text);
-  font: inherit;
-  font-size: var(--text-md);
-  line-height: 1.6;
-  cursor: pointer;
+/* The list fits its width: fixed columns, one line per cell, cut off with the full text as tooltip. */
+.alert-list { container-type: inline-size; }
+.alert-table-wrap { width: 100%; }
+.alert-table { width: 100%; table-layout: fixed; font-size: var(--text-sm); }
+.alert-table th, .alert-table td { padding: var(--space-1) var(--space-2); vertical-align: middle; overflow: hidden; }
+.alert-table th { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.alert-table td { white-space: nowrap; }
+.alert-table__clip { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.alert-table__clip > a { display: inline; }
+/* The reason of a failed action is never cut off. */
+.alert-table td.alert-table__wrap { white-space: normal; overflow-wrap: anywhere; }
+.alert-table__failure { display: block; }
+.alert-table__count { text-align: right; color: var(--text-muted); }
+.alert-col--select { width: 2rem; }
+.alert-col--severity { width: 7.5rem; }
+.alert-col--status { width: 7.5rem; }
+.alert-col--resource { width: 16%; }
+.alert-col--event { width: 20%; }
+/* The text takes what the others leave; their shares keep it visible wherever it is shown. */
+.alert-col--text { width: auto; }
+col.alert-col--service { width: 8%; }
+.alert-col--age { width: 4.5rem; }
+.alert-col--count { width: 2.5rem; }
+
+/* Narrower lists (a small window, or the detail open beside the list) leave out the service first… */
+@container (max-width: 960px) {
+  .alert-table :is(th, td).alert-col--service { padding: 0; border-width: 0; }
+  col.alert-col--service { width: 0; }
+  .alert-col--severity, .alert-col--status { width: 6.5rem; }
+}
+/* …then the status. */
+@container (max-width: 700px) {
+  .alert-table :is(th, td):nth-child(3) { padding: 0; border-width: 0; }
+  .alert-table col:nth-child(3) { width: 0; }
+  .alert-col--resource { width: 18%; }
+  .alert-col--event { width: 20%; }
+}
+/* A phone: severity, resource and event; the rest is in the detail. */
+@container (max-width: 560px) {
+  /* Collapsed to no width, not removed, so the other cells stay in their columns. */
+  .alert-table :is(th, td):is(:nth-child(3), :nth-child(6), :nth-child(7), :nth-child(8), :nth-child(9)) { padding: 0; border-width: 0; white-space: nowrap; }
+  .alert-table col:is(:nth-child(3), :nth-child(6), :nth-child(7), :nth-child(8), :nth-child(9)) { width: 0; }
+  .alert-col--severity { width: 6.5rem; }
+  .alert-col--resource { width: 38%; }
+  .alert-col--event { width: auto; }
 }
 
-.alert-table__menu:hover,
-.alert-table__menu:focus-visible { border-color: var(--border-strong); background: var(--surface-2); }
-.alert-table td:first-child, .alert-table th:first-child { width: 2rem; }
-.alert-table__failure { display: block; }
+/* IRIs in an alert's text: right click (or Shift+F10) for their actions. */
+.alert-iri { cursor: context-menu; overflow-wrap: anywhere; border-bottom: 1px dotted var(--border-strong); }
+.alert-iri:hover, .alert-iri:focus-visible { background: var(--surface-2); border-bottom-color: var(--accent); }
+.alert-detail { overflow-wrap: anywhere; min-width: 0; }
+.alert-detail dd { min-width: 0; }
+.alert-detail :is(.entity-ref, .entity-ref__link, .alert-detail__context a) { white-space: normal; overflow-wrap: anywhere; min-width: 0; max-width: 100%; }
 
 .alert-detail__text { font-weight: 500; }
 .alert-detail__context { font-size: var(--text-sm); }
@@ -102,4 +137,3 @@
 @media (max-width: 899.98px) {
   .alerts__layout--detail { grid-template-columns: minmax(0, 1fr); }
 }
-.alert-table td:last-child { white-space: nowrap; }

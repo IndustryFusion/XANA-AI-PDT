@@ -97,15 +97,41 @@ test('right click on an alert row → start new incident, prefilled', async ({ p
   await expect(page.getByLabel('Issue')).toHaveValue(text)
 })
 
-test('selecting one alert offers start new incident directly; the actions button opens the menu', async ({ page }) => {
+test('selecting one alert offers start new incident directly; Shift+F10 on the row opens its menu', async ({ page }) => {
   await page.goto('/alerts')
   const row = list(page).locator('tbody tr').first()
   await row.getByRole('checkbox').check()
   const bar = page.getByRole('region', { name: 'Selected alerts' })
   await expect(bar.getByRole('link', { name: 'Start new incident' })).toBeVisible()
-  await row.locator('.alert-table__menu').click()
+  await expect(row.getByRole('button')).toHaveCount(0)
+  const link = row.getByRole('link').first()
+  await link.focus()
+  await page.keyboard.press('Shift+F10')
   await expect(page.getByRole('menu')).toBeVisible()
   await page.keyboard.press('Escape')
   await expect(page.getByRole('menu')).toHaveCount(0)
-  await expect(row.locator('.alert-table__menu')).toBeFocused()
+  await expect(link).toBeFocused()
 })
+
+for (const width of [1280, 1024, 390]) {
+  test(`at ${width} px the alert list fits without scrolling sideways, one line per alert`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 })
+    const overflow = () => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
+    const oneLine = () => list(page).locator('tbody tr').evaluateAll((rows) => {
+      const heights = rows.map((r) => Math.round(r.getBoundingClientRect().height))
+      return Math.max(...heights) - Math.min(...heights)
+    })
+    for (const path of ['/alerts', '/alerts/alert-001']) {
+      await page.goto(path)
+      await expect(list(page).locator('tbody tr').first()).toBeVisible()
+      if (path !== '/alerts') await expect(page.getByRole('article', { name: 'Alert alert-001' })).toBeVisible()
+      expect(await overflow(), `${path} overflows horizontally at ${width} px`).toBeLessThanOrEqual(0)
+      expect(await oneLine(), `rows of ${path} differ in height at ${width} px`).toBeLessThanOrEqual(1)
+      // Cells too long for their column end with an ellipsis and carry their full text.
+      const cut = await list(page).locator('td.alert-table__clip').evaluateAll((cells) => cells
+        .filter((c) => c.clientWidth > 0 && c.scrollWidth > c.clientWidth)
+        .map((c) => getComputedStyle(c).textOverflow === 'ellipsis' && c.title.length > 0))
+      expect(cut.every(Boolean), `cut-off cells of ${path} at ${width} px`).toBe(true)
+    }
+  })
+}

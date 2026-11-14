@@ -14,12 +14,14 @@
 // limitations under the License.
 //
 
-import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { act, createEvent, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { paths } from '../../src/app/router'
 import { raiseAlert, store } from '../../src/data/sources/mock'
 import { SEVERITY_RANK } from '../../src/data/sources/mock/alertsArea'
 import { REFRESH_KEY } from '../../src/features/alerts/Alerts'
+import { iriParts } from '../../src/features/alerts/AlertText'
+import { writeControls } from '../../src/data/sources/mock/controls'
 import { renderApp } from '../helpers'
 
 const open = (path = paths.alerts()) => renderApp({ path, controls: { authEnabled: false } })
@@ -36,6 +38,23 @@ async function waitForRows(count) {
 }
 
 describe('list and filters', () => {
+  test('cut-off cells carry their full text, the resource as its full IRI, and the duplicates column counts duplicates', async () => {
+    open()
+    await waitFor(async () => expect((await rows()).length).toBeGreaterThan(3))
+    const listed = (await rowIds()).map(stored)
+    const again = listed.find((a) => a.duplicateCount > 0)
+    const once = listed.find((a) => a.duplicateCount === 0)
+    const cells = [...row(again.id).cells]
+    for (const text of [again.resource, again.event, again.text, again.service.join(', ')]) {
+      const cell = cells.find((c) => c.title === text)
+      expect(cell, text).toBeTruthy()
+      expect(cell).toHaveClass('alert-table__clip')
+    }
+    expect(cells.at(-1)).toHaveTextContent(new RegExp(`^${again.duplicateCount}$`))
+    expect([...row(once.id).cells].at(-1)).toHaveTextContent(/^$/)
+    expect(screen.getByRole('columnheader', { name: 'Duplicates' })).toBeVisible()
+  })
+
   test('default: open and acknowledged alerts, most severe and newest first, with all columns', async () => {
     open()
     const expected = store.get().alerts
@@ -45,7 +64,9 @@ describe('list and filters', () => {
     expect(await rowIds()).toEqual(expected.map((a) => a.id))
     const first = row(expected[0].id)
     expect(within(first).getByText(expected[0].text)).toBeVisible()
-    expect(within(first).getByRole('link', { name: expected[0].resource.split(':').at(-1) })).toBeVisible()
+    expect(within(first).getByTitle(expected[0].resource)).toHaveTextContent(expected[0].resource.split(':').at(-1))
+    // The actions are in the row's context menu, not behind buttons on the row.
+    expect(within(first).queryAllByRole('button')).toHaveLength(0)
     expect(within(first).getByText(expected[0].service[0])).toBeVisible()
     expect(within(first).getAllByText(/Critical|Major|Minor|Warning|Informational/)[0]).toBeVisible()
     expect(within(first).getAllByText(/^(Open|Acknowledged)$/)[0]).toBeVisible()
@@ -96,6 +117,130 @@ describe('list and filters', () => {
     await user.selectOptions(screen.getByLabelText('Order'), 'time')
     const expected = store.get().alerts.filter((a) => ['open', 'ack'].includes(a.status)).sort((a, b) => b.createTime.localeCompare(a.createTime))
     await waitFor(async () => expect(await rowIds()).toEqual(expected.map((a) => a.id)))
+  })
+})
+
+describe('coming back', () => {
+  test('after another area, the filters, the open alert and the checked rows are as they were left', async () => {
+    const user = userEvent.setup()
+    open(`${paths.alerts()}?environment=Production`)
+    await waitFor(async () => expect((await rows()).length).toBeGreaterThan(3))
+    const [firstId, secondId] = await rowIds()
+    await user.click(within(row(secondId)).getByRole('checkbox'))
+    fireEvent.click(within(row(firstId)).getAllByRole('link')[0])
+    await screen.findByRole('article', { name: `Alert ${firstId}` })
+    const left = `${window.location.pathname}${window.location.search}`
+
+    const nav = () => within(screen.getByRole('navigation', { name: 'Main' }))
+    await user.click(nav().getByRole('link', { name: 'Data explorer' }))
+    await waitFor(() => expect(window.location.pathname).toContain('/explorer'))
+    await user.click(nav().getByRole('link', { name: 'Alerts' }))
+
+    expect(await screen.findByRole('article', { name: `Alert ${firstId}` })).toBeVisible()
+    expect(`${window.location.pathname}${window.location.search}`).toBe(left)
+    expect(within(row(secondId)).getByRole('checkbox')).toBeChecked()
+    expect(screen.getByText('1 selected')).toBeVisible()
+  })
+
+  test('the last list is shown at once, at the scroll position it had, and the next answer replaces it', async () => {
+    const user = userEvent.setup()
+    open()
+    await waitFor(async () => expect((await rows()).length).toBeGreaterThan(3))
+    const before = await rowIds()
+    Object.defineProperty(window, 'scrollY', { value: 420, configurable: true })
+    const nav = () => within(screen.getByRole('navigation', { name: 'Main' }))
+    await user.click(nav().getByRole('link', { name: 'Data explorer' }))
+    await waitFor(() => expect(window.location.pathname).toContain('/explorer'))
+    Object.defineProperty(window, 'scrollY', { value: 0, configurable: true })
+
+    writeControls({ authEnabled: false, latencyMs: { alerts: 300 } })
+    const raised = raiseAlert({ severity: 'critical' })
+    const scrollTo = vi.spyOn(window, 'scrollTo')
+    await user.click(nav().getByRole('link', { name: 'Alerts' }))
+    // Before the answer: the list as it was left.
+    expect(await rowIds()).toEqual(before)
+    await waitFor(() => expect(scrollTo).toHaveBeenCalledWith(0, 420))
+    // The answer brings the alert raised meanwhile.
+    await waitFor(() => expect(row(raised.id)).not.toBeNull(), { timeout: 2000 })
+  })
+
+  test('a list still loading for a new filter is not kept under that filter', async () => {
+    const user = userEvent.setup()
+    open()
+    await waitFor(async () => expect((await rows()).length).toBeGreaterThan(3))
+    writeControls({ authEnabled: false, latencyMs: { alerts: 400 } })
+    const summary = screen.getByRole('group', { name: /severity/i })
+    await user.click(within(summary).getAllByRole('button')[0])
+    const chosen = search().severity
+    expect(chosen).toBeTruthy()
+    const nav = () => within(screen.getByRole('navigation', { name: 'Main' }))
+    await user.click(nav().getByRole('link', { name: 'Data explorer' }))
+    await waitFor(() => expect(window.location.pathname).toContain('/explorer'))
+    await user.click(nav().getByRole('link', { name: 'Alerts' }))
+    // The unfiltered list was never the answer to this filter, so it is not shown under it.
+    expect((await rowIds()).map(stored).every((a) => a.severity === chosen)).toBe(true)
+    await waitFor(async () => expect((await rows()).length).toBeGreaterThan(0), { timeout: 2000 })
+    expect((await rowIds()).map(stored).every((a) => a.severity === chosen)).toBe(true)
+  })
+
+  test('after a filter change, the scroll position is kept for the new address', async () => {
+    const user = userEvent.setup()
+    open()
+    await waitFor(async () => expect((await rows()).length).toBeGreaterThan(3))
+    await user.selectOptions(screen.getByLabelText('Environment'), 'Production')
+    await waitFor(() => expect(search().environment).toBe('Production'))
+    Object.defineProperty(window, 'scrollY', { value: 300, configurable: true })
+    const nav = () => within(screen.getByRole('navigation', { name: 'Main' }))
+    await user.click(nav().getByRole('link', { name: 'Data explorer' }))
+    await waitFor(() => expect(window.location.pathname).toContain('/explorer'))
+    Object.defineProperty(window, 'scrollY', { value: 0, configurable: true })
+    const scrollTo = vi.spyOn(window, 'scrollTo')
+    await user.click(nav().getByRole('link', { name: 'Alerts' }))
+    expect(search().environment).toBe('Production')
+    await waitFor(() => expect(scrollTo).toHaveBeenCalledWith(0, 300))
+  })
+
+  test('the kept scroll position applies only back at the address it was left at', async () => {
+    const user = userEvent.setup()
+    open()
+    await waitFor(async () => expect((await rows()).length).toBeGreaterThan(3))
+    Object.defineProperty(window, 'scrollY', { value: 420, configurable: true })
+    const nav = () => within(screen.getByRole('navigation', { name: 'Main' }))
+    await user.click(nav().getByRole('link', { name: 'Data explorer' }))
+    await waitFor(() => expect(window.location.pathname).toContain('/explorer'))
+    Object.defineProperty(window, 'scrollY', { value: 0, configurable: true })
+    const scrollTo = vi.spyOn(window, 'scrollTo')
+    const [alert] = withStatus('open')
+    act(() => { window.history.pushState(null, '', paths.alert(alert.id)); window.dispatchEvent(new PopStateEvent('popstate')) })
+    await screen.findByRole('article', { name: `Alert ${alert.id}` })
+    await new Promise((r) => requestAnimationFrame(r))
+    expect(scrollTo).not.toHaveBeenCalledWith(0, 420)
+  })
+
+  test('when the session ends, the Alerts area forgets its view', async () => {
+    const user = userEvent.setup()
+    const signIn = async () => {
+      await user.type(await screen.findByLabelText('Username'), 'operator')
+      await user.type(screen.getByLabelText('Password'), 'operator')
+      await user.click(screen.getByRole('button', { name: 'Sign in' }))
+    }
+    renderApp({ path: `${paths.alerts()}?environment=Production` })
+    await signIn()
+    await waitFor(async () => expect((await rows()).length).toBeGreaterThan(1))
+    const [firstId] = await rowIds()
+    await user.click(within(row(firstId)).getByRole('checkbox'))
+    const nav = () => within(screen.getByRole('navigation', { name: 'Main' }))
+    await user.click(nav().getByRole('link', { name: 'Data explorer' }))
+    await waitFor(() => expect(window.location.pathname).toContain('/explorer'))
+    await user.click(screen.getByRole('button', { name: /account and factory details/ }))
+    await user.click(screen.getByRole('button', { name: 'Sign out' }))
+    await signIn()
+
+    expect(await nav().findByRole('link', { name: 'Alerts' })).toHaveAttribute('href', paths.alerts())
+    await user.click(nav().getByRole('link', { name: 'Alerts' }))
+    await waitFor(async () => expect((await rows()).length).toBeGreaterThan(1))
+    expect(search()).toEqual({})
+    expect(screen.queryByRole('region', { name: 'Selected alerts' })).not.toBeInTheDocument()
   })
 })
 
@@ -176,6 +321,10 @@ describe('actions', () => {
     expect(screen.getByRole('region', { name: 'Selected alerts' })).toHaveTextContent('1 selected')
     expect(within(row(acked.id)).getByRole('checkbox')).toBeChecked()
     expect(row(acked.id)).toHaveTextContent('Action failed: The alert is acknowledged and cannot be acknowledged.')
+    // The reason is never cut off: its cell wraps and carries it in its tooltip too.
+    const reason = within(row(acked.id)).getByText('Action failed: The alert is acknowledged and cannot be acknowledged.').closest('td')
+    expect(reason).toHaveClass('alert-table__wrap')
+    expect(reason.title).toContain('Action failed: The alert is acknowledged and cannot be acknowledged.')
     await waitFor(() => expect(within(row(opened.id)).getByText('Acknowledged')).toBeVisible())
     expect(within(row(opened.id)).getByRole('checkbox')).not.toBeChecked()
   })
@@ -261,7 +410,7 @@ describe('context menu and quick start', () => {
     const menu = screen.getByRole('menu', { name: `Actions for alert ${alert.id}` })
     expect(menuItems()).toEqual([
       'Start new incident', 'Open details', 'Open resource in the data explorer', 'Show active incidents', 'Show incident history',
-      'Acknowledge…', 'Shelve…', 'Close…', 'Copy alert ID',
+      'Acknowledge…', 'Shelve…', 'Close…', 'Copy resource IRI', 'Copy alert ID',
     ])
     expect(within(menu).getByRole('menuitem', { name: 'Start new incident' })).toHaveFocus()
     await user.click(within(menu).getByRole('menuitem', { name: 'Start new incident' }))
@@ -288,12 +437,30 @@ describe('context menu and quick start', () => {
     expect(checkbox).toHaveFocus()
   })
 
-  test("the row's actions button opens the same menu, and an action opens its dialog", async () => {
+  test('a long press on a row opens its menu on a touch screen', async () => {
+    const [alert] = withStatus('open')
+    open()
+    await waitFor(() => expect(row(alert.id)).toBeTruthy())
+    vi.useFakeTimers()
+    try {
+      const cell = row(alert.id).cells[1]
+      const press = createEvent.pointerDown(cell, { clientX: 20, clientY: 20 })
+      Object.defineProperty(press, 'pointerType', { value: 'touch' })
+      fireEvent(cell, press)
+      act(() => { vi.advanceTimersByTime(600) })
+      expect(screen.getByRole('menu', { name: `Actions for alert ${alert.id}` })).toBeVisible()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  test("Shift+F10 on the row's event opens the same menu, and an action opens its dialog", async () => {
     const user = userEvent.setup()
     const [alert] = withStatus('ack')
     open()
     await waitFor(() => expect(row(alert.id)).toBeTruthy())
-    await user.click(within(row(alert.id)).getByRole('button', { name: new RegExp(`^Actions for .*\\(${alert.id}\\)$`) }))
+    within(row(alert.id)).getByRole('link', { name: `${alert.event} (${alert.id})` }).focus()
+    await user.keyboard('{Shift>}{F10}{/Shift}')
     expect(menuItems()).toContain('Unacknowledge…')
     await user.click(screen.getByRole('menuitem', { name: 'Unacknowledge…' }))
     expect(screen.getByRole('dialog', { name: `Unacknowledge alert ${alert.id}` })).toBeVisible()
@@ -332,5 +499,94 @@ describe('a search that stopped early', () => {
     renderApp({ path: `${paths.alerts()}?text=zzz-no-such`, controls: { authEnabled: false } })
     await screen.findByText('No alerts match the current filter.')
     expect(screen.queryByText(/of this filter were searched/)).toBeNull()
+  })
+})
+
+describe('IRIs in the detail', () => {
+  const PUMPS = 'http://opcfoundation.org/UA/Pumps/'
+  const RESOURCE = 'urn:ngsi-ld:Pump:p-1'
+
+  test('names attributes, sub-attributes after ==>, entities and vocabulary terms apart', () => {
+    const text = `CountConstraintComponent(${PUMPS}hasPorts[0] ==> ${PUMPS}Flow) for ${RESOURCE}. expected datatypes="http://www.w3.org/2001/XMLSchema#double"`
+    const iris = iriParts(text).filter((p) => p.iri)
+    expect(iris).toEqual([
+      { iri: `${PUMPS}hasPorts`, levels: [`${PUMPS}hasPorts`] },
+      { iri: `${PUMPS}Flow`, levels: [`${PUMPS}hasPorts`, `${PUMPS}Flow`] },
+      { iri: RESOURCE, levels: null },
+      { iri: 'http://www.w3.org/2001/XMLSchema#double', levels: null },
+    ])
+    expect(iriParts(text).map((p) => p.text ?? p.iri).join('')).toBe(text)
+  })
+
+  test('an IRI starts at a word boundary, and an arrow without spaces still names a sub-attribute', () => {
+    expect(iriParts('the pump failed to turn:on').filter((p) => p.iri)).toEqual([])
+    const text = `CountConstraintComponent(${PUMPS}hasPorts[0]==>${PUMPS}Flow)`
+    expect(iriParts(text).filter((p) => p.iri)).toEqual([
+      { iri: `${PUMPS}hasPorts`, levels: [`${PUMPS}hasPorts`] },
+      { iri: `${PUMPS}Flow`, levels: [`${PUMPS}hasPorts`, `${PUMPS}Flow`] },
+    ])
+    expect(iriParts(text).map((p) => p.text ?? p.iri).join('')).toBe(text)
+  })
+
+  test("the resource's menu copies its IRI, and an IRI's open menu is not inside a paragraph", async () => {
+    const [alert] = withStatus('open')
+    open(paths.alert(alert.id))
+    store.update((state) => {
+      Object.assign(state.alerts.find((a) => a.id === alert.id), { text: `Validation failed for ${alert.resource}.` })
+      return state
+    })
+    const detail = await screen.findByRole('article', { name: `Alert ${alert.id}` })
+    const resource = within(detail).getByRole('link', { name: alert.resource })
+    fireEvent.contextMenu(resource, { clientX: 10, clientY: 10 })
+    expect(within(screen.getByRole('menu')).getByRole('menuitem', { name: 'Copy IRI' })).toBeVisible()
+    fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' })
+
+    fireEvent.contextMenu(within(detail.querySelector('.alert-detail__text')).getByTitle(alert.resource), { clientX: 10, clientY: 10 })
+    expect(screen.getByRole('menu').closest('p')).toBeNull()
+  })
+
+  test("a right click on an attribute IRI goes to it in the data explorer, below the alert's resource", async () => {
+    const user = userEvent.setup()
+    const [alert] = withStatus('open')
+    const attribute = `${PUMPS}hasEnergyConsumption`
+    open(paths.alert(alert.id))
+    store.update((state) => {
+      Object.assign(state.alerts.find((a) => a.id === alert.id), { event: `OrConstraintComponent(${attribute})` })
+      return state
+    })
+    const detail = await screen.findByRole('article', { name: `Alert ${alert.id}` })
+    const iri = within(detail).getByTitle(attribute)
+    fireEvent.contextMenu(iri, { clientX: 10, clientY: 10 })
+    const menu = screen.getByRole('menu')
+    expect(within(menu).getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['Go to the attribute in the data explorer', 'Copy IRI', 'Copy resource IRI'])
+    await user.click(within(menu).getByRole('menuitem', { name: 'Go to the attribute in the data explorer' }))
+    expect(`${window.location.pathname}${window.location.search}`).toBe(paths.entity(alert.resource, [attribute]))
+  })
+
+  test('the keyboard opens the menu of an entity IRI in the text', async () => {
+    const user = userEvent.setup()
+    const [alert] = withStatus('open')
+    open(paths.alert(alert.id))
+    store.update((state) => {
+      Object.assign(state.alerts.find((a) => a.id === alert.id), { text: `Validation failed for ${alert.resource}.` })
+      return state
+    })
+    const detail = await screen.findByRole('article', { name: `Alert ${alert.id}` })
+    within(detail.querySelector('.alert-detail__text')).getByTitle(alert.resource).focus()
+    await user.keyboard('{Shift>}{F10}{/Shift}')
+    expect(within(screen.getByRole('menu')).getByRole('menuitem', { name: 'Go to the entity in the data explorer' })).toHaveFocus()
+  })
+
+  test('a vocabulary term in the text only offers copying its IRI', async () => {
+    const [alert] = withStatus('open')
+    const term = 'http://www.w3.org/2001/XMLSchema#double'
+    open(paths.alert(alert.id))
+    store.update((state) => {
+      Object.assign(state.alerts.find((a) => a.id === alert.id), { text: `expected datatypes="${term}"` })
+      return state
+    })
+    const detail = await screen.findByRole('article', { name: `Alert ${alert.id}` })
+    const menu = (fireEvent.contextMenu(within(detail.querySelector('.alert-detail__text')).getByTitle(term), { clientX: 10, clientY: 10 }), screen.getByRole('menu'))
+    expect(within(menu).getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['Copy IRI'])
   })
 })
