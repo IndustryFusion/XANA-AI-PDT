@@ -44,7 +44,7 @@
   Verify with the Playwright backend suite and a manual check.
 - [x] 5.2 On a sub-attribute three levels deep, check change, add, delete and history, and that the rest of the attribute is unchanged. Verify by reading the entity back from the broker.
 - [x] 5.3 Unnest and pin a relationship target, run a new query, switch areas and come back, and reload. Verify that the view, then the query and pins, are as specified.
-- [ ] 5.4 After signing in, check that the indicator shows connecting, then working, and never unavailable while the backend reports `active`. Verify in a browser against the backend.
+- [x] 5.4 After signing in, check that the indicator shows connecting, then working, and never unavailable while the backend reports `active`. Verify in a browser against the backend.
 
 ## Workflow follow-up
 
