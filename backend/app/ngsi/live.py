@@ -49,6 +49,8 @@ LIFETIME_S = 24 * 3600
 RENEW_BEFORE_S = 3600
 TICK_S = 5.0
 VERIFY_EVERY_S = 60.0
+# The sweep's page. A subscription beyond it reads as gone, and creating it again answers 409 and renews it.
+LIST_LIMIT = 1000
 RECONNECT_S = (1.0, 2.0, 4.0, 8.0, 15.0)
 STOP_TIMEOUT_S = 5.0
 LATE_CREATE_S = 1.0
@@ -104,6 +106,17 @@ def parse_notification(payload: bytes) -> list[dict[str, Any]]:
                 }
             )
     return changes
+
+
+def _failure_reason(refused: Refused) -> str:
+    """The status and what it means, never the broker's message: that could quote the endpoint, and its token."""
+    status = refused.upstream_status
+    if status is None:
+        return "The context broker can't keep the live update subscription: it can't be reached."
+    reason = f"The context broker can't keep the live update subscription (HTTP {status})."
+    if refused.kind == "unauthorized":
+        reason += " The operator's token lacks access to it."
+    return reason
 
 
 def _refused_code(code: Any) -> bool:
@@ -176,6 +189,7 @@ class LiveUpdates:
         self._maybe_exists = False  # a create was sent, whatever came of it
         self._expires_at = 0.0
         self._verified_at = 0.0
+        self._failing = False  # the last call about the subscription failed: no delivery state until one succeeds
         self._swept = False
         self._connected = False
         self._stopping = False
@@ -251,13 +265,15 @@ class LiveUpdates:
                 await self._sweep()
                 await self._create(token)
         except Refused as refused:
-            # Only the kind: a broker's message about a subscription could quote its endpoint.
-            log.warning("Live updates: the subscription failed (%s, HTTP %d).", refused.kind, refused.http_status)
+            # Only the kind and status: a broker's message about a subscription could quote its endpoint.
+            status = refused.upstream_status
+            log.warning("Live updates: the subscription failed (%s, HTTP %s).", refused.kind, status or "none")
             self._exists = self._exists and refused.kind != "not_found"
+            self._failing = True
             if self._connected:
-                self._set_state("subscription_failed", "The context broker can't keep the live update subscription.")
+                self._set_state("subscription_failed", _failure_reason(refused))
             return
-        if self._connected and self._exists:
+        if self._connected and self._exists and not self._failing:
             self._report_delivery()
 
     def _report_delivery(self) -> None:
@@ -290,6 +306,7 @@ class LiveUpdates:
 
     def _forget(self) -> None:
         self._exists = False
+        self._failing = False
         self._maybe_exists = False
         self._last_received = None
         self._expected_by = None
@@ -351,6 +368,7 @@ class LiveUpdates:
 
     def _note(self, token: str | None, expires_at: float) -> None:
         self._exists = True
+        self._failing = False
         self._subscribed_token = token
         self._expires_at = expires_at
         self._verified_at = self._clock()
@@ -360,8 +378,65 @@ class LiveUpdates:
         if token != self._subscribed_token or self._expires_at - now < RENEW_BEFORE_S:
             await self._renew(token)
         elif now - self._verified_at >= VERIFY_EVERY_S:
-            await self._broker.send("GET", f"/subscriptions/{self._id}")
+            try:
+                await self._check(token)
+            except Refused as refused:
+                if refused.upstream_status is not None:  # the broker answered: the next check is a minute later
+                    self._verified_at = now
+                raise
             self._verified_at = now
+            self._failing = False
+
+    async def _check(self, token: str | None) -> None:
+        """Whether the subscription is still in place: by its ID, else in the list, else by renewing it.
+
+        Some brokers refuse reading a subscription by its ID, also one that doesn't exist, while they list and
+        renew it, so a refused read says nothing about it.
+        """
+        try:
+            await self._broker.send("GET", f"/subscriptions/{self._id}")
+            return
+        except Refused as refused:
+            if refused.kind == "not_found":
+                self._gone()
+                return
+            if refused.kind != "unauthorized":
+                raise
+        listed = await self._listed()
+        if listed is not None:
+            if not listed:
+                self._gone()
+            return
+        try:
+            await self._renew(token)
+        except Refused as refused:
+            if refused.kind != "not_found":
+                raise
+            self._gone()
+
+    def _gone(self) -> None:
+        """The next tick creates it again."""
+        log.warning("Live updates: the subscription is gone, creating it again.")
+        self._exists = False
+
+    async def _listed(self) -> bool | None:
+        """Whether the broker lists the subscription, or None when it refuses the list or answers no list.
+
+        The list holds other subscriptions' endpoints, with their tokens: only the IDs are looked at.
+        """
+        try:
+            response = await self._broker.send("GET", "/subscriptions", params={"limit": LIST_LIMIT})
+        except Refused as refused:
+            if refused.kind != "unauthorized":
+                raise
+            return None
+        try:
+            listed = response.json()
+        except ValueError:
+            return None
+        if not isinstance(listed, list):
+            return None
+        return any(isinstance(item, dict) and item.get("id") == self._id for item in listed)
 
     async def _delete(self) -> None:
         if not self._maybe_exists:
@@ -376,7 +451,7 @@ class LiveUpdates:
         """Removes what an earlier process left: once per start, so two backends can't keep at it."""
         if self._swept:
             return
-        response = await self._broker.send("GET", "/subscriptions", params={"limit": 1000})
+        response = await self._broker.send("GET", "/subscriptions", params={"limit": LIST_LIMIT})
         for item in response.json():
             if item.get("subscriptionName") == SUBSCRIPTION_NAME and item.get("id") != self._id:
                 await self._broker.send("DELETE", f"/subscriptions/{item['id']}")

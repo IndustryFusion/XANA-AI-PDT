@@ -50,12 +50,25 @@ class FakeBroker:
         self.subscriptions: dict[str, dict] = {}
         self.requests: list[httpx.Request] = []
         self.down = False
+        self.read_answer: int | None = None  # for reading one by its ID, as the platform's broker refuses with 403
+        self.list_answer: int | object | None = None  # a status, or a JSON body, for the list
+        self.renew_answer: int | None = None
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request)
         if self.down:
             raise httpx.ConnectError("no route", request=request)
         path = request.url.path.removeprefix("/ngsi-ld/v1/subscriptions").strip("/")
+        # A refusal quoting the subscription, as a broker's message could: none of it may show.
+        quoted = {"detail": f"refused {list(self.subscriptions.values())}"}
+        if request.method == "GET" and not path and self.list_answer is not None:
+            if isinstance(self.list_answer, int):
+                return httpx.Response(self.list_answer, json=quoted)
+            return httpx.Response(200, json=self.list_answer)
+        if request.method == "GET" and path and self.read_answer is not None:
+            return httpx.Response(self.read_answer, json=quoted)
+        if request.method == "PATCH" and self.renew_answer is not None:
+            return httpx.Response(self.renew_answer, json=quoted)
         if not path and request.method == "POST":
             body = json.loads(request.content)
             self.subscriptions[body["id"]] = body
@@ -899,3 +912,92 @@ def test_configured_logging_masks_a_librarys_line(capfd):
     logging.getLogger("some.library").error("failed", exc_info=(ValueError, ValueError(f"bad {TOKEN_B}"), None))
     captured = capfd.readouterr().err
     assert "token-a" not in captured and "token-b" not in captured
+
+
+# ── Checking the subscription where reading it by its ID is refused ─────────
+
+
+def steps(world: World) -> list[str]:
+    """Each request to the broker as a short name: `read` by ID, `list`, or the method."""
+    names = []
+    for request in world.broker.requests:
+        path = request.url.path.removeprefix("/ngsi-ld/v1/subscriptions").strip("/")
+        names.append(("read" if path else "list") if request.method == "GET" else request.method)
+    return names
+
+
+async def minutes(world: World, times: int) -> None:
+    """Moves a minute on, `times` over, with many ticks in each."""
+    for _ in range(times):
+        world.clock.now += 61
+        await asyncio.sleep(0.1)
+
+
+async def test_read_by_id_refused_the_list_keeps_it_active_once_a_minute(world):
+    world.live.start()
+    await world.settled()
+    world.broker.read_answer = 403
+    await minutes(world, 3)
+    assert world.live.health()["state"] == "active"
+    assert steps(world)[steps(world).index("POST") :] == ["POST"] + ["read", "list"] * 3
+
+
+async def test_read_and_list_refused_a_renewal_keeps_it_active(world):
+    world.live.start()
+    await world.settled()
+    world.broker.read_answer = world.broker.list_answer = 403
+    await minutes(world, 2)
+    assert world.live.health()["state"] == "active"
+    assert steps(world)[-6:] == ["read", "list", "PATCH"] * 2
+
+
+async def test_a_list_that_isnt_a_list_goes_on_to_the_renewal(world):
+    world.live.start()
+    await world.settled()
+    world.broker.read_answer, world.broker.list_answer = 403, {"not": "a list"}
+    await minutes(world, 1)
+    assert world.live.health()["state"] == "active"
+    assert steps(world)[-3:] == ["read", "list", "PATCH"]
+
+
+async def test_missing_from_the_list_it_is_created_again_within_a_minute(world):
+    world.live.start()
+    await world.settled()
+    world.broker.read_answer = 403
+    world.broker.subscriptions.clear()
+    await minutes(world, 1)
+    assert len(world.broker.subscriptions) == 1
+    assert steps(world)[-3:] == ["read", "list", "POST"]
+    await world.settled()
+
+
+async def test_a_renewal_answered_as_not_found_it_is_created_again(world):
+    world.live.start()
+    await world.settled()
+    world.broker.read_answer = world.broker.list_answer = 403
+    world.broker.subscriptions.clear()
+    await minutes(world, 1)
+    assert len(world.broker.subscriptions) == 1
+    assert steps(world)[-4:] == ["read", "list", "PATCH", "POST"]
+    await world.settled()
+
+
+async def test_everything_refused_says_why_without_endpoint_or_token_and_comes_back(world, caplog):
+    world.live.start()
+    await world.settled()
+    world.broker.read_answer = world.broker.list_answer = world.broker.renew_answer = 403
+    with caplog.at_level(logging.DEBUG):
+        await minutes(world, 1)
+        await world.settled("subscription_failed")
+    health = world.live.health()
+    assert "HTTP 403" in health["detail"] and "lacks access" in health["detail"]
+    for leaked in (TOKEN_A, "mqtt://", "refused ["):
+        assert leaked not in health["detail"]
+        assert leaked not in caplog.text
+    # Refused once, it is checked again a minute later, not at every tick.
+    await asyncio.sleep(0.1)
+    assert steps(world)[-3:] == ["read", "list", "PATCH"]
+    assert world.live.health()["state"] == "subscription_failed", "it holds until a check succeeds"
+    world.broker.renew_answer = None
+    await minutes(world, 1)
+    await world.settled()

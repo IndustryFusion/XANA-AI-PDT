@@ -58,7 +58,13 @@ def reason_from(response: httpx.Response) -> str | None:
 
 
 def refusal(service: str, response: httpx.Response) -> Refused:
-    """The refusal for an answer that isn't a success."""
+    """The refusal for an answer that isn't a success, holding the status the service answered."""
+    refused = _refusal(service, response)
+    refused.upstream_status = response.status_code
+    return refused
+
+
+def _refusal(service: str, response: httpx.Response) -> Refused:
     status = response.status_code
     if status in (401, 403):
         return unauthorized(f"{service} refused the request (HTTP {status}); check the operator's sign-in and roles.")

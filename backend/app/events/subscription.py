@@ -40,6 +40,8 @@ CORE_CONTEXT = "https://uri.etsi.org/ngsi-ld/v1/ngsi-ld-core-context.jsonld"
 TICK_S = 15.0
 VERIFY_EVERY_S = 60.0
 TIMEOUT_S = 10.0
+# A subscription beyond the first page reads as gone, and creating it again answers 409 and updates it.
+LIST_LIMIT = 1000
 
 NOT_CONFIGURED = "not_configured"
 WAITING = "waiting_for_identity"
@@ -132,10 +134,7 @@ class MachineWatch:
     async def _ensure(self, client: httpx.AsyncClient, token: str | None) -> None:
         response = await client.post(self._url, json=self._subscription(), headers=self._headers(token, True))
         if response.status_code == 409:
-            body = {k: v for k, v in self._subscription().items() if k not in ("id", "type")}
-            response = await client.patch(
-                f"{self._url}/{SUBSCRIPTION_ID}", json=body, headers=self._headers(token, True)
-            )
+            response = await self._update(client, token)
         if response.status_code not in (201, 204):
             self._refused(response.status_code)
             return
@@ -144,17 +143,60 @@ class MachineWatch:
         self._set_delivering()
 
     async def _verify(self, client: httpx.AsyncClient, token: str | None) -> None:
+        """Whether the subscription is still in place: by its ID, else in the list, else by updating it.
+
+        Some brokers refuse reading a subscription by its ID, also one that doesn't exist, while they list and
+        update it, so a refused read says nothing about it.
+        """
         response = await client.get(f"{self._url}/{SUBSCRIPTION_ID}", headers=self._headers(token, False))
         self._verified_at = self._clock()
-        if response.status_code == 404:
+        status = response.status_code
+        if status == 200:
+            self._set_delivery(_notification_status(_json(response)))
+            return
+        if status in (401, 403):
+            status, entry = await self._listed(client, token)
+            if entry is not None:
+                self._set_delivery(_notification_status(entry))
+                return
+            if status is None:  # the list is refused as well: an update says whether it is there
+                status = (await self._update(client, token)).status_code
+                if status == 204:
+                    self._set_delivering()
+                    return
+        if status == 404:
             log.warning("Machine watch: the subscription is gone, creating it again.")
             self._ensured = False
             await self._ensure(client, token)
             return
+        self._refused(status)
+
+    async def _update(self, client: httpx.AsyncClient, token: str | None) -> httpx.Response:
+        body = {k: v for k, v in self._subscription().items() if k not in ("id", "type")}
+        return await client.patch(f"{self._url}/{SUBSCRIPTION_ID}", json=body, headers=self._headers(token, True))
+
+    async def _listed(self, client: httpx.AsyncClient, token: str | None) -> tuple[int | None, dict[str, Any] | None]:
+        """The subscription's entry in the broker's list: (None, entry) when listed, (404, None) when not listed.
+
+        A refused list, or an answer that isn't a list, gives (None, None); another failure gives its status. The
+        list holds other subscriptions' endpoints and their tokens: only the IDs, and this entry's delivery status,
+        are read from it.
+        """
+        response = await client.get(self._url, params={"limit": LIST_LIMIT}, headers=self._headers(token, False))
+        if response.status_code in (401, 403):
+            return None, None
         if response.status_code != 200:
-            self._refused(response.status_code)
-            return
-        if _notification_status(response) == "failed":
+            return response.status_code, None
+        listed = _json(response)
+        if not isinstance(listed, list):
+            return None, None
+        for item in listed:
+            if isinstance(item, dict) and item.get("id") == SUBSCRIPTION_ID:
+                return None, item
+        return 404, None
+
+    def _set_delivery(self, status: Any) -> None:
+        if status == "failed":
             self._set(
                 DELIVERY_FAILING,
                 f"The context broker reports that it can't deliver to {mask_url(self._callback())}. "
@@ -213,8 +255,15 @@ class MachineWatch:
         self.state, self.detail = state, detail
 
 
-def _notification_status(response: httpx.Response) -> str | None:
+def _json(response: httpx.Response) -> Any:
     try:
-        return response.json()["notification"]["status"]
-    except (ValueError, KeyError, TypeError):
+        return response.json()
+    except ValueError:
+        return None
+
+
+def _notification_status(subscription: Any) -> str | None:
+    try:
+        return subscription["notification"]["status"]
+    except (KeyError, TypeError):
         return None

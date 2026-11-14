@@ -871,6 +871,10 @@ class Broker:
         self.subscription = None
         self.answer = None
         self.delivery = "ok"
+        self.read_answer = None  # a status for reading it by its ID, as the platform's broker refuses with 403
+        self.list_answer = None  # a status, or a JSON body, for listing subscriptions
+        self.update_answer = None  # a status for updating it
+        self.status_in_list = True  # the platform's broker leaves `notification.status` out of its list
 
     def __call__(self, request):
         body = json.loads(request.content) if request.content else None
@@ -879,6 +883,20 @@ class Broker:
             if isinstance(self.answer, Exception):
                 raise self.answer
             return httpx.Response(self.answer, json={"detail": f"quoted {SECRET}"})
+        listing = request.method == "GET" and request.url.path.endswith("/subscriptions")
+        if listing and self.list_answer is not None:
+            if isinstance(self.list_answer, int):
+                return httpx.Response(self.list_answer, json={"detail": f"quoted {SECRET}"})
+            return httpx.Response(200, json=self.list_answer)
+        if listing:
+            entries = [self.subscription] if self.subscription else []
+            if self.status_in_list:
+                entries = [{**e, "notification": {**e["notification"], "status": self.delivery}} for e in entries]
+            return httpx.Response(200, json=entries)
+        if request.method == "GET" and self.read_answer is not None:
+            return httpx.Response(self.read_answer, json={"detail": f"quoted {SECRET}"})
+        if request.method == "PATCH" and self.update_answer is not None:
+            return httpx.Response(self.update_answer, json={"detail": f"quoted {SECRET}"})
         if request.method == "POST":
             if self.subscription:
                 return httpx.Response(409, json={"detail": "exists"})
@@ -895,6 +913,16 @@ class Broker:
 
     def methods(self):
         return [c[0] for c in self.calls]
+
+    def steps(self):
+        """Each call as a short name: `read` by ID, `list`, or the method."""
+        names = []
+        for method, path, _body, _auth in self.calls:
+            if method == "GET":
+                names.append("list" if path.endswith("/subscriptions") else "read")
+            else:
+                names.append(method)
+        return names
 
 
 class Clock:
@@ -1057,6 +1085,100 @@ async def test_a_refusal_says_why_without_the_secret_and_tries_again(status_code
     fake.answer = None
     await subscription.check()
     assert subscription.state == ACTIVE
+
+
+async def checked_minutes(subscription, clock, times):
+    for _ in range(times):
+        clock.now += 61
+        await subscription.check()
+
+
+async def test_only_the_read_by_id_refused_stays_active_and_changes_nothing():
+    fake, clock = Broker(), Clock()
+    subscription = watch(fake, clock=clock)
+    await subscription.check()
+    fake.read_answer = 403
+    await checked_minutes(subscription, clock, 3)
+    assert subscription.state == ACTIVE
+    assert fake.steps() == ["POST"] + ["read", "list"] * 3
+
+
+async def test_the_list_refused_as_well_an_update_says_it_is_there():
+    fake, clock = Broker(), Clock()
+    subscription = watch(fake, clock=clock)
+    await subscription.check()
+    fake.read_answer = fake.list_answer = 403
+    await checked_minutes(subscription, clock, 2)
+    assert subscription.state == ACTIVE
+    assert fake.steps() == ["POST"] + ["read", "list", "PATCH"] * 2
+
+
+async def test_a_list_that_isnt_a_list_goes_on_to_the_update():
+    fake, clock = Broker(), Clock()
+    subscription = watch(fake, clock=clock)
+    await subscription.check()
+    fake.read_answer, fake.list_answer = 403, {"not": "a list"}
+    await checked_minutes(subscription, clock, 1)
+    assert subscription.state == ACTIVE
+    assert fake.steps()[-1] == "PATCH"
+
+
+async def test_missing_from_the_list_it_is_created_again():
+    fake, clock = Broker(), Clock()
+    subscription = watch(fake, clock=clock)
+    await subscription.check()
+    fake.read_answer, fake.subscription = 403, None
+    await checked_minutes(subscription, clock, 1)
+    assert fake.steps() == ["POST", "read", "list", "POST"]
+    assert fake.subscription and subscription.state == ACTIVE
+
+
+async def test_an_update_answered_as_not_found_it_is_created_again():
+    fake, clock = Broker(), Clock()
+    subscription = watch(fake, clock=clock)
+    await subscription.check()
+    fake.read_answer, fake.list_answer, fake.subscription = 403, 403, None
+    await checked_minutes(subscription, clock, 1)
+    assert fake.steps() == ["POST", "read", "list", "PATCH", "POST"]
+    assert fake.subscription and subscription.state == ACTIVE
+
+
+async def test_delivery_status_from_the_list_entry():
+    fake, clock = Broker(), Clock()
+    subscription = watch(fake, clock=clock)
+    await subscription.check()
+    fake.read_answer, fake.delivery = 403, "failed"
+    await checked_minutes(subscription, clock, 1)
+    assert subscription.state == DELIVERY_FAILING
+    fake.delivery = "ok"
+    await checked_minutes(subscription, clock, 1)
+    assert subscription.state == ACTIVE
+
+
+async def test_a_list_entry_without_a_delivery_status_counts_as_delivering():
+    fake, clock = Broker(), Clock()
+    subscription = watch(fake, clock=clock)
+    await subscription.check()
+    fake.read_answer, fake.delivery, fake.status_in_list = 403, "failed", False
+    await checked_minutes(subscription, clock, 1)
+    assert subscription.state == ACTIVE
+
+
+async def test_everything_refused_is_failed_says_why_and_comes_back(caplog):
+    fake, clock = Broker(), Clock()
+    subscription = watch(fake, clock=clock)
+    await subscription.check()
+    fake.read_answer = fake.list_answer = fake.update_answer = 403
+    with caplog.at_level(logging.DEBUG):
+        await checked_minutes(subscription, clock, 1)
+    assert subscription.state == FAILED
+    assert "HTTP 403" in subscription.detail and "lacks access" in subscription.detail
+    assert SECRET not in subscription.detail and "quoted" not in subscription.detail
+    assert SECRET not in caplog.text
+    fake.update_answer = None
+    await subscription.check()  # the next try, with no minute to wait: the existing create, 409 and update
+    assert subscription.state == ACTIVE
+    assert fake.steps()[-2:] == ["POST", "PATCH"]
 
 
 async def test_a_broker_that_cant_be_reached():
