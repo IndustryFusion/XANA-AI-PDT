@@ -36,6 +36,8 @@ class Refused(Exception):
         self.kind = kind
         self.message = message
         self._status = status
+        # What the service behind answered, when it answered: 403 becomes `unauthorized`, which is 401 here.
+        self.upstream_status: int | None = None
 
     @property
     def http_status(self) -> int:
