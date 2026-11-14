@@ -401,6 +401,14 @@ describe('entities', () => {
     expect(params[2].get('sub_attribute')).toBeNull()
   })
 
+  test('a sub-attribute added to an attribute itself sends its name and no path parameter', async () => {
+    const fn = fakeFetch({ 'POST /api/ngsi/entities/urn%3Am/attrs': { status: 204 } })
+    await entities.appendAttributes('urn:m', { 'https://x.example/a': { d: { type: 'Property', value: 2 } } }, { sub: true })
+    const params = new URLSearchParams(fn.calls[0].search)
+    expect([params.get('name'), params.getAll('path')]).toEqual(['https://x.example/a', []])
+    expect(fn.calls[0].body).toEqual({ 'https://x.example/a': { d: { type: 'Property', value: 2 } } })
+  })
+
   test('without a path, edits send no path parameter', async () => {
     const fn = fakeFetch({ 'PATCH /api/ngsi/entities/urn%3Am/attrs': { status: 204 } })
     await entities.updateAttributes('urn:m', { a: { value: 1 } })

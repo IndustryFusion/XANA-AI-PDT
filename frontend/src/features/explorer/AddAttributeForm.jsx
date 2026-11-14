@@ -118,8 +118,7 @@ export default function AddAttributeForm({ entityId, parent, path = [], label, o
     }
     setBusy(true)
     try {
-      if (parent && path.length) await entities.appendAttributes(entityId, { [parent]: { [name]: attr } }, { path })
-      else if (parent) await entities.updateAttributes(entityId, { [parent]: { [name]: attr } })
+      if (parent) await entities.appendAttributes(entityId, { [parent]: { [name]: attr } }, { path, sub: true })
       else await entities.appendAttributes(entityId, { [name]: attr })
       onAdded(parent ?? name)
     } catch (err) {

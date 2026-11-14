@@ -122,11 +122,12 @@ async def query_entities(
 
 
 def _at_path(name: str | None, path: list[str], body: Any) -> Any:
-    """The fragment for the deepest level of a path: the body holds the attribute `name`, and only it."""
+    """The fragment for the attribute `name`, or for the deepest level of a path below it: the body holds
+    that attribute, and only it."""
     if not name:
         raise invalid("Name the attribute that the path is below.")
     if not isinstance(body, dict) or list(body) != [name]:
-        raise invalid("With a path, the body holds the named attribute and only it.")
+        raise invalid("With a name, the body holds the named attribute and only it.")
     check_document(body)
     return body[name]
 
@@ -158,8 +159,11 @@ async def append_attributes(
     dataset_id: str | None = None,
 ) -> Response:
     broker = request.app.state.broker
-    if path:
-        await broker.append_at_path(entity_id, name, path, _at_path(name, path, body), dataset_id)
+    # With `name`, the body adds sub-attributes to that attribute, or to the sub-attribute at `path`
+    # below it. The whole attribute is written back: the broker's merge can't add one (it stores its
+    # own result object instead).
+    if path or name:
+        await broker.append_at_path(entity_id, name, path or [], _at_path(name, path or [], body), dataset_id)
     else:
         await broker.append_attributes(entity_id, _attributes(body))
     return Response(status_code=204)

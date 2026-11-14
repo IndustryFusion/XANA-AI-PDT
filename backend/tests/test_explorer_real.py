@@ -149,6 +149,30 @@ def test_add_and_change_a_sub_attribute(api, entity):
 
 
 @needs_broker
+@pytest.mark.parametrize("name", [f"{IRI}temp", f"{IRI}hasFilter"])
+def test_a_sub_attribute_added_to_the_attribute_itself_is_one(api, entity, name):
+    # Some brokers store their merge's result object here; the attribute is written back whole instead.
+    before = api.get(path(entity)).json()[name]
+    sub, below = f"{IRI}acc", f"{IRI}prec"
+    added = {name: {sub: {"type": "Property", "value": 0.1}}}
+    assert api.post(f"{path(entity)}/attrs", params={"name": name}, json=added).status_code == 204
+    deeper = {name: {below: {"type": "Property", "value": 3}}}
+    assert api.post(f"{path(entity)}/attrs", params={"name": name, "path": [sub]}, json=deeper).status_code == 204
+    stored = api.get(path(entity)).json()[name]
+    assert isinstance(stored, dict)
+    assert {k: stored[k] for k in ("type", "value", "object", "unitCode") if k in before} == {
+        k: before[k] for k in ("type", "value", "object", "unitCode") if k in before
+    }
+    assert stored[sub]["type"] == "Property"
+    assert stored[sub]["value"] == 0.1
+    assert stored[sub][below] == {"type": "Property", "value": 3}
+    for kept in (k for k in before if k.startswith(IRI)):
+        assert stored[kept] == before[kept]
+    again = api.post(f"{path(entity)}/attrs", params={"name": name}, json=added)
+    assert again.status_code == 409
+
+
+@needs_broker
 def test_one_dataset_changes(api, entity):
     fragment = {f"{IRI}many": {"value": 22, "datasetId": "urn:d:2"}}
     assert api.patch(f"{path(entity)}/attrs", json=fragment).status_code == 204

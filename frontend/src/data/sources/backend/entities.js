@@ -57,7 +57,7 @@ function subscribeEntities({ type, ids } = {}, onEvent) {
 }
 
 /** `name` and `path` for an edit at a path of sub-attributes; none without one. */
-const pathParams = (attrs, path) => (path?.length ? { name: Object.keys(attrs)[0], path } : undefined)
+const pathParams = (attrs, path, sub = false) => (path?.length || sub ? { name: Object.keys(attrs)[0], path } : undefined)
 
 const queryParams = ({ type, id, idPattern, q, limit } = {}) => ({ type, id, id_pattern: idPattern, q, limit })
 const pagedParams = ({ offset, attrs, hasAttr, ...query } = {}) => ({ ...queryParams(query), offset, attrs, has_attr: hasAttr })
@@ -71,8 +71,9 @@ export const entities = {
   // With `path`, `attrs` holds one attribute whose fragment applies at that path of sub-attributes below it.
   updateAttributes: (id, attrs, { path } = {}) =>
     request(AREA, 'PATCH', `/api/ngsi/entities/${seg(id)}/attrs`, { ...raw, body: attrs, params: pathParams(attrs, path) }),
-  appendAttributes: (id, attrs, { path } = {}) =>
-    request(AREA, 'POST', `/api/ngsi/entities/${seg(id)}/attrs`, { ...raw, body: attrs, params: pathParams(attrs, path) }),
+  // With `sub`, `attrs` holds one attribute and the sub-attributes to add to it (at `path` below it, if given).
+  appendAttributes: (id, attrs, { path, sub = false } = {}) =>
+    request(AREA, 'POST', `/api/ngsi/entities/${seg(id)}/attrs`, { ...raw, body: attrs, params: pathParams(attrs, path, sub) }),
   deleteAttribute: (id, name, { subAttribute, path } = {}) =>
     request(AREA, 'DELETE', `/api/ngsi/entities/${seg(id)}/attrs`, { params: { name, ...(path?.length ? { path } : { sub_attribute: subAttribute }) } }),
   deleteEntity: (id) => request(AREA, 'DELETE', `/api/ngsi/entities/${seg(id)}`),

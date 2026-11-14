@@ -85,6 +85,9 @@ function walk(attr, name, path) {
 const CONTEXT_PREFIXES = [
   { prefix: 'samples', namespace: 'https://samples.example.org/ngsi-ld/' },
 ]
+/** Members an attribute holds about itself; the backend refuses them as sub-attribute names. */
+const OWN_MEMBERS = ['type', 'value', 'object', 'objectList', 'json', 'languageMap', 'valueList', 'vocab', 'observedAt', 'unitCode',
+  'datasetId', 'lang', 'createdAt', 'modifiedAt', 'deletedAt', 'instanceId', 'objectType', 'previousValue', 'previousObject']
 const attributeNames = (e) => Object.keys(e).filter((k) => !RESERVED.includes(k))
 
 function parseMoment(at) {
@@ -271,13 +274,14 @@ export function createEntitiesArea(store) {
       })
     }),
 
-    appendAttributes: withControls((id, attrs = {}, { path } = {}) => {
+    appendAttributes: withControls((id, attrs = {}, { path = [], sub: toAttribute = false } = {}) => {
       const entity = requireEntity(id)
-      if (path?.length) {
+      if (path.length || toAttribute) {
         const [[name, fragment]] = Object.entries(attrs)
         if (!entity[name] || Array.isArray(entity[name])) throw err('not_found', `${id} has no attribute ${name}.`)
         const target = walk(entity[name], name, path)
         for (const [sub, attr] of Object.entries(fragment)) {
+          if (OWN_MEMBERS.includes(sub)) throw err('invalid', `${sub} is a member of the attribute itself, not a name for a sub-attribute.`)
           if (target[sub] !== undefined) throw err('conflict', `${[name, ...path].join('.')} already has a sub-attribute ${sub}.`)
           validateAttribute(sub, attr, null)
         }

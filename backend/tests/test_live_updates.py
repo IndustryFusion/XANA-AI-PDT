@@ -552,6 +552,12 @@ def test_only_writes_that_the_broker_notifies_expect_a_delivery():
         await client.send("POST", "/entities/urn:a/attrs", body={})
         await client.send("POST", "/entityOperations/upsert", body=[])
         assert len(seen) == 3
+        # An attribute written back whole by its name (gh-95) is a write the broker notifies too.
+        await client.send("PATCH", "/entities/urn:a/attrs/temp", body={})
+        assert len(seen) == 4
+        await client.send("DELETE", "/entities/urn:a/attrs/temp")
+        await client.send("PATCH", "/entities/urn:a/attrs/temp/extra", body={})
+        assert len(seen) == 4
 
     asyncio.run(scenario())
 

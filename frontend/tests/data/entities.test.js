@@ -119,6 +119,18 @@ describe('edit', () => {
     await expect(entities.appendAttributes(MACHINE, { owner: { type: 'Relationship', object: 'not an id' } })).rejects.toMatchObject({ kind: 'invalid' })
   })
 
+  test('adds a sub-attribute to an attribute itself, refusing an existing name and the attribute\'s own members', async () => {
+    await entities.appendAttributes(MACHINE, { status: { reason: { type: 'Property', value: 'Planned' } } }, { sub: true })
+    const status = (await entities.getEntity(MACHINE)).status
+    expect(status.reason).toEqual({ type: 'Property', value: 'Planned' })
+    expect(status.value).toBeDefined()
+    await expect(entities.appendAttributes(MACHINE, { status: { reason: { type: 'Property', value: 'x' } } }, { sub: true })).rejects.toMatchObject({ kind: 'conflict' })
+    for (const member of ['unitCode', 'value', 'observedAt']) {
+      await expect(entities.appendAttributes(MACHINE, { status: { [member]: { type: 'Property', value: 'x' } } }, { sub: true })).rejects.toMatchObject({ kind: 'invalid' })
+    }
+    expect((await entities.getEntity(MACHINE)).status.unitCode).toBeUndefined()
+  })
+
   test('deletes a sub-attribute only, then the attribute, then the entity', async () => {
     await entities.deleteAttribute(SENSOR, 'value', { subAttribute: 'accuracy' })
     let sensor = await entities.getEntity(SENSOR)

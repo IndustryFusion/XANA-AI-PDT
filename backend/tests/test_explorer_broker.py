@@ -603,6 +603,59 @@ def test_adding_at_depth_two(client, broker):
     assert attrs("step") not in two[attrs("limit")][attrs("max")]
 
 
+@pytest.mark.parametrize(
+    "attribute",
+    [
+        {"type": "Property", "value": 42, "unitCode": "CEL"},
+        {"type": "Relationship", "object": "urn:line:a"},
+    ],
+)
+def test_a_sub_attribute_added_to_the_attribute_itself_writes_the_whole_attribute(client, broker, attribute):
+    # The broker's merge stores its own result object as the sub-attribute, so the merge is not used.
+    broker.entities[MACHINE][attrs("top")] = json.loads(json.dumps(attribute))
+    body = {attrs("top"): {attrs("acc"): {"type": "Property", "value": 0.1}}}
+    answer = client.post(f"{ENTITY}/attrs", params={"name": attrs("top")}, json=body)
+    assert answer.status_code == 204
+    writes = [r for r in broker.requests if r.method != "GET"]
+    assert [(r.method, r.url.raw_path.decode().endswith(f"/attrs/{quote(attrs('top'), safe='')}")) for r in writes] == [
+        ("PATCH", True)
+    ]
+    assert json.loads(writes[0].content) == {**attribute, attrs("acc"): {"type": "Property", "value": 0.1}}
+    assert broker.entities[MACHINE][attrs("top")] == {**attribute, attrs("acc"): {"type": "Property", "value": 0.1}}
+
+
+def test_an_update_that_brings_a_new_sub_attribute_writes_the_attribute_back(client, broker):
+    broker.entities[MACHINE][attrs("top")] = {"type": "Relationship", "object": "urn:line:a"}
+    fragment = {attrs("top"): {attrs("acc"): {"type": "Property", "value": 0.1}}}
+    assert client.patch(f"{ENTITY}/attrs", json=fragment).status_code == 204
+    writes = [r for r in broker.requests if r.method != "GET"]
+    assert [r.method for r in writes] == ["PATCH"]
+    assert writes[0].url.raw_path.decode().endswith(f"/attrs/{quote(attrs('top'), safe='')}")
+    assert broker.entities[MACHINE][attrs("top")] == {
+        "type": "Relationship",
+        "object": "urn:line:a",
+        attrs("acc"): {"type": "Property", "value": 0.1},
+    }
+
+
+def test_an_update_with_a_new_sub_attribute_without_a_type_is_invalid(client, broker):
+    fragment = {attrs(): {attrs("acc"): {"value": 0.1}}}
+    assert client.patch(f"{ENTITY}/attrs", json=fragment).status_code == 422
+    assert all(r.method == "GET" for r in broker.requests)
+
+
+def test_a_sub_attribute_the_attribute_has_already_is_a_conflict(client, broker):
+    broker.entities[MACHINE][attrs("top")] = {
+        "type": "Property",
+        "value": 1,
+        attrs("acc"): {"type": "Property", "value": 2},
+    }
+    body = {attrs("top"): {attrs("acc"): {"type": "Property", "value": 3}}}
+    answer = client.post(f"{ENTITY}/attrs", params={"name": attrs("top")}, json=body)
+    assert answer.status_code == 409
+    assert all(r.method == "GET" for r in broker.requests)
+
+
 def test_adding_an_existing_sub_attribute_at_depth_is_a_conflict_and_changes_nothing(client, broker):
     stored = deep(broker)
     before = json.dumps(stored, sort_keys=True)

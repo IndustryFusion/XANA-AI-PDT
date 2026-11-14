@@ -375,7 +375,7 @@ describe('the same row at every depth', () => {
     await user.type(within(form).getByLabelText('Value'), 'checked')
     await user.click(within(form).getByRole('button', { name: 'Add' }))
     await waitFor(() => expect(stored(PUMP)[F('FlowRate')][F('Quality')][F('Source')][F('Note')]).toEqual({ type: 'Property', value: 'checked' }))
-    expect(spy.append).toHaveBeenCalledWith(PUMP, { [F('FlowRate')]: { [F('Note')]: { type: 'Property', value: 'checked' } } }, { path: [F('Quality'), F('Source')] })
+    expect(spy.append).toHaveBeenCalledWith(PUMP, { [F('FlowRate')]: { [F('Note')]: { type: 'Property', value: 'checked' } } }, { path: [F('Quality'), F('Source')], sub: true })
 
     await user.click(within(line()).getByRole('button', { name: /^History of sub-attribute pumps:Source/ }))
     expect(await screen.findByRole('heading', { name: 'History of pumps:FlowRate.pumps:Quality.pumps:Source' })).toBeVisible()

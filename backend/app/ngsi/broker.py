@@ -458,6 +458,7 @@ class ContextBroker:
         current = await self._existing(entity_id)
         merge: dict[str, Any] = {}
         overwrite: dict[str, Any] = {}
+        rewrite: dict[str, Any] = {}
         for name, fragment in attributes.items():
             if name in RESERVED or name not in current:
                 raise not_found(f"{entity_id} has no attribute {name}.")
@@ -471,12 +472,19 @@ class ContextBroker:
                 # scalar", 22023), so a declared value is written as the whole attribute (gh-84, D3).
                 _check_value(name, existing, fragment)
                 overwrite[name] = {**existing, **_stamped(existing, _keep_datatype(existing, fragment))}
+            elif isinstance(existing, dict) and _new_sub_attributes(name, existing, fragment):
+                # Some brokers' merge stores its own result object as a new sub-attribute (#95), so
+                # an attribute that gains one is written back whole, as an edit at a path is.
+                _check_value(name, existing, fragment)
+                rewrite[name] = {**existing, **_stamped(existing, _keep_datatype(existing, fragment))}
             else:
                 merge[name] = _merge_fragment(name, existing, fragment)
         if merge:
             await self.send("PATCH", f"/entities/{_segment(entity_id)}", body=merge)
         if overwrite:
             await self.send("POST", f"/entities/{_segment(entity_id)}/attrs", body=overwrite)
+        for name, instance in rewrite.items():
+            await self._write_attribute(entity_id, name, instance)
 
     def _refuse_contexts(self, attributes: dict[str, Any]) -> None:
         if _inner_context(attributes):
@@ -766,11 +774,23 @@ def _something_changed(response: httpx.Response) -> bool:
 
 
 def _changes_entities(path: str) -> bool:
+    below = path.removeprefix("/entities/") if path.startswith("/entities/") else None
     return (
         path.endswith("/attrs")
         or path == "/entityOperations/upsert"
-        or (path.startswith("/entities/") and "/" not in path.removeprefix("/entities/"))
+        or (below is not None and "/" not in below)
+        # An attribute written back whole, by its name: `/entities/{id}/attrs/{name}`.
+        or (below is not None and below.count("/") == 2 and below.split("/")[1] == "attrs")
     )
+
+
+def _new_sub_attributes(name: str, existing: dict[str, Any], fragment: dict[str, Any]) -> list[str]:
+    """The sub-attributes the fragment brings that the attribute doesn't have yet."""
+    new = [k for k, v in fragment.items() if _sub_attribute_name(k) and k not in existing and isinstance(v, dict)]
+    for sub in new:
+        if not isinstance(fragment[sub].get("type"), str):
+            raise invalid(f"Sub-attribute {sub} of {name} needs a type and a value.")
+    return new
 
 
 @dataclass(frozen=True)
