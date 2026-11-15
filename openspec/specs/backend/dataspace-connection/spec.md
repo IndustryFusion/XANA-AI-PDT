@@ -16,6 +16,10 @@ The backend SHALL get a dataspace token with the client credentials grant from t
 - **WHEN** the identity provider rejects the secret
 - **THEN** the request is refused as `unauthorized`, and a secret stored earlier is kept
 
+#### Scenario: Details of a refusal
+- **WHEN** connecting fails at the identity provider or the gateway
+- **THEN** the refusal names the step, and gives the address called with any credentials masked, the client, the HTTP status, and the identity provider's OAuth error code, and never the secret, a token or another service's message
+
 #### Scenario: Provider unreachable
 - **WHEN** the identity provider can't be reached
 - **THEN** the request is refused as `unavailable`, which the operator can tell from a rejected secret
@@ -23,6 +27,10 @@ The backend SHALL get a dataspace token with the client credentials grant from t
 #### Scenario: Not configured
 - **WHEN** no gateway or no client ID is configured
 - **THEN** the state is `not_configured`, and connecting is refused as `conflict`
+
+#### Scenario: Sign-in needed
+- **WHEN** the gateway and its identity provider are configured but no client is known, from the operator's claim or the configuration
+- **THEN** the state is `not_configured` and the status says that a sign-in is needed
 
 #### Scenario: Disconnect
 - **WHEN** the operator disconnects
@@ -71,11 +79,11 @@ The backend SHALL offer, under `/api/gateway`, the compatible peers, their capab
 
 #### Scenario: Peers
 - **WHEN** peers are listed while connected
-- **THEN** every compatible participant is returned with what it offers, and one peer that can't be read does not fail the list
+- **THEN** every compatible participant is returned with what it offers, its participant type and what it was approved here, and one peer that can't be read does not fail the list
 
 #### Scenario: Status mapping
 - **WHEN** a peer's capabilities are read
-- **THEN** both directions are listed, `auto` and `approved` as `granted`, `on-request` and `pending` as `default`, and `denied` as `denied`
+- **THEN** both directions are listed, `auto` and `approved` as `granted`, `on-request` and `pending` as `default`, and `denied` as `denied`, each with the gateway's own status beside it, and nothing for a status the gateway doesn't define
 
 #### Scenario: Unknown peer
 - **WHEN** the capabilities of a participant that is not compatible are requested
