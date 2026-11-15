@@ -37,7 +37,7 @@ async function refusal(area, response) {
     // Not JSON: fall back to the status.
   }
   const error = body?.error
-  if (error?.kind && error?.message) return new DataError(area, error.kind, error.message)
+  if (error?.kind && error?.message) return new DataError(area, error.kind, error.message, error.details)
   const kind = KIND_BY_STATUS[response.status] ?? 'unavailable'
   return new DataError(area, kind, `The backend answered HTTP ${response.status}.`)
 }

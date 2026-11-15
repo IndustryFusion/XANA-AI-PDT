@@ -14,31 +14,38 @@
 // limitations under the License.
 //
 
-import { Card, StatusBadge } from '../../ui/components'
+import { useId } from 'react'
+import { StatusBadge } from '../../ui/components'
 import { capabilityLabel, TIERS } from './model'
 
-/** The configured data-sharing tier, and what each tier sends, in plain words. */
-export default function SharingTier({ tier, status }) {
-  const known = TIERS.some((t) => t.id === tier)
+/**
+ * The configured data-sharing tier in one line, with what each tier sends behind a disclosure: it is
+ * part of the deployment configuration, so it rarely needs more than a glance.
+ */
+export default function SharingTier({ tier }) {
+  const titleId = useId()
+  const configured = TIERS.find((t) => t.id === tier)
   return (
-    <Card title="Data-sharing tier" className="sharing-tier">
-      <div className="stack">
+    <section className="sharing-tier" aria-labelledby={titleId}>
+      <p>
+        <strong id={titleId}>Data-sharing tier</strong>{': '}
+        {configured ? <><code>{configured.id}</code> · {configured.title}</> : tier ? <code>{tier}</code> : <span className="muted">none configured</span>}
+      </p>
+      <details className="sharing-tier__more">
+        <summary>What each tier sends</summary>
         <p>
           When you escalate an incident, data about the affected machine is sent to its machine builder. The tier decides what is
           sent automatically; anything beyond it is only sent after you approve the machine builder’s request. The tier is part of
           the deployment configuration and cannot be changed here.
         </p>
-        {status === 'error' && <p className="muted">The configured tier could not be loaded.</p>}
-        {status === 'success' && !tier && <p className="muted">No tier is configured because there is no dataspace connection.</p>}
-        {status === 'success' && tier && !known && <p>Configured tier: <code>{tier}</code></p>}
         <ol className="tier-list">
           {TIERS.map((t) => {
-            const configured = t.id === tier
+            const isConfigured = t.id === tier
             return (
-              <li key={t.id} className={`tier${configured ? ' tier--configured' : ''}`} aria-current={configured ? 'true' : undefined} data-tier={t.id}>
+              <li key={t.id} className={`tier${isConfigured ? ' tier--configured' : ''}`} aria-current={isConfigured ? 'true' : undefined} data-tier={t.id}>
                 <div className="row tier__head">
                   <strong><code>{t.id}</code> · {t.title}</strong>
-                  {configured && <StatusBadge kind="tier" value="configured" label="Configured tier" tone="info" />}
+                  {isConfigured && <StatusBadge kind="tier" value="configured" label="Configured tier" tone="info" />}
                 </div>
                 <p>{t.sends}</p>
                 <p className="muted tier__capabilities">Capabilities: {t.capabilities.map((c) => `${capabilityLabel(c)} (${c})`).join(', ')}</p>
@@ -46,7 +53,7 @@ export default function SharingTier({ tier, status }) {
             )
           })}
         </ol>
-      </div>
-    </Card>
+      </details>
+    </section>
   )
 }

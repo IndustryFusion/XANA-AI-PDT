@@ -82,8 +82,11 @@ test('dataspace and system sections stack below 900 px', async ({ page }) => {
   await expect(page.getByRole('table', { name: 'What Formwerk Press Technology may access here' })).toBeVisible()
   expect(await overflow(), 'dataspace overflows horizontally').toBeLessThanOrEqual(0)
   const [connection, tier, list, detail] = await Promise.all(['.dataspace-connection', '.sharing-tier', '.peer-list', '.peers__detail'].map(box))
+  // The tier is a line inside the gateway card.
   expect(tier.top).toBeGreaterThan(connection.top)
-  expect(Math.round(tier.left)).toBe(Math.round(connection.left))
+  expect(tier.left).toBeGreaterThanOrEqual(connection.left)
+  expect(tier.bottom).toBeLessThanOrEqual(connection.bottom)
+  expect(list.top).toBeGreaterThan(connection.bottom)
   expect(detail.top).toBeGreaterThan(list.top)
 
   await page.goto('/system')

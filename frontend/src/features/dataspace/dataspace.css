@@ -91,3 +91,43 @@
 .level--elevated { color: var(--warning-text, var(--text)); font-weight: 600; }
 .level--restricted { color: var(--text-muted); }
 .level--unknown { color: var(--text-muted); font-style: italic; }
+
+/* The session's time left: muted, and in the warning tone in its last minute. */
+.session-countdown { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.session-countdown--urgent { color: var(--tone-warning); font-weight: 600; }
+.connect-form__details summary { cursor: pointer; font-size: var(--text-sm); }
+.connect-form__details .details { margin-top: var(--space-2); font-size: var(--text-sm); }
+.connect-form__details .details__row { display: contents; }
+.connect-form__details dd { overflow-wrap: anywhere; }
+
+/* A peer's kind, and what it was granted beyond its defaults, coloured by how much each reveals. */
+.peer-list__type { font-size: var(--text-xs); color: var(--text-muted); }
+.peer-list__granted { display: inline-flex; flex-wrap: wrap; gap: var(--space-1); }
+/* The tone is in the border and a dot; the text keeps the body colour, for contrast in both themes. */
+.cap-pill { --pill-tone: var(--tone-neutral); font-size: var(--text-xs); padding: 0 var(--space-2); border-radius: 999px; border: 1px solid var(--pill-tone); color: var(--text); }
+.cap-pill::before { content: ''; display: inline-block; width: 0.5em; height: 0.5em; margin-right: 0.35em; border-radius: 50%; background: var(--pill-tone); vertical-align: middle; }
+.cap-pill--low { --pill-tone: var(--tone-success, var(--tone-neutral)); }
+.cap-pill--medium { --pill-tone: var(--tone-warning); }
+.cap-pill--high { --pill-tone: var(--tone-danger); }
+
+/* The gateway card: one compact overview, like a status panel. */
+.gateway__details { font-size: var(--text-sm); }
+.gateway__details dd { overflow-wrap: anywhere; min-width: 0; }
+.token-box {
+  --token-tone: var(--tone-neutral);
+  display: flex; flex-direction: column; gap: var(--space-1);
+  padding: var(--space-3) var(--space-4) var(--space-3) calc(var(--space-4) + 0.75rem);
+  border: 1px solid var(--token-tone); border-radius: var(--radius);
+  background: var(--surface-2);
+  position: relative;
+}
+.token-box::before {
+  content: ''; position: absolute; left: var(--space-3); top: 1.05em;
+  width: 0.6rem; height: 0.6rem; border-radius: 50%; background: var(--token-tone);
+}
+.token-box span { color: var(--text-muted); font-size: var(--text-sm); }
+.token-box--success { --token-tone: var(--tone-success); }
+.token-box--warning { --token-tone: var(--tone-warning); }
+.token-box--danger { --token-tone: var(--tone-danger); }
+.sharing-tier__more summary { cursor: pointer; font-size: var(--text-sm); color: var(--text-muted); }
+.sharing-tier__more[open] { margin-top: var(--space-2); }

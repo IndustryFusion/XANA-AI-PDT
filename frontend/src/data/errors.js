@@ -22,11 +22,13 @@ export const ERROR_KINDS = ['unavailable', 'not_found', 'conflict', 'invalid', '
  * `area` names the interface area, `kind` is one of ERROR_KINDS.
  */
 export class DataError extends Error {
-  constructor(area, kind, message) {
+  constructor(area, kind, message, details = null) {
     super(message)
     this.name = 'DataError'
     this.area = area
     this.kind = ERROR_KINDS.includes(kind) ? kind : 'unavailable'
+    /** Facts for diagnosis the source gave, such as the stage that failed; never a secret. */
+    this.details = details && typeof details === 'object' ? details : null
   }
 }
 

@@ -31,7 +31,7 @@ export function createDataspaceArea(store) {
     await applyControls('dataspace')
     return fn(...args)
   }
-  const fail = (kind, message) => new DataError('dataspace', kind, message)
+  const fail = (kind, message, details) => new DataError('dataspace', kind, message, details)
 
   /** Effective state: the preset of the controls, else the stored state (expired once past its expiry). */
   function connectionState() {
@@ -49,8 +49,10 @@ export function createDataspaceArea(store) {
       state,
       participantId: state === 'not_configured' ? null : connection.participantId,
       expiresAt: state === 'connected' ? connection.expiresAt : null,
+      expiresInS: state === 'connected' ? Math.max(0, Math.floor((Date.parse(connection.expiresAt) - Date.now()) / 1000)) : null,
       credentialConfigured: state !== 'not_configured' && Boolean(currentControls().credentialConfigured),
       sharingTier: state === 'not_configured' ? null : connection.sharingTier,
+      needsSignIn: false,
     }
   }
 
@@ -84,15 +86,32 @@ export function createDataspaceArea(store) {
     return { accessLevel, approved }
   }
 
+  /** Like the gateway: the machine entity is open by default, everything else on request; a label where it gives one. */
+  function withGateway(capability, policy) {
+    // Like the gateway: an approval reads approved; by default the machine twin is open, the rest on request.
+    const gatewayStatus = policy === 'granted' ? 'approved'
+      : policy === 'denied' ? 'denied' : capability === 'twin:direct' ? 'auto' : 'on-request'
+    const label = capability === 'mb:confidential' ? 'Machine builder documents' : null
+    return { capability, status: policy, gatewayStatus, label }
+  }
+
   const area = {
     getConnection: withControls(connectionResult),
 
     connect: withControls(({ secret } = {}) => {
       const state = connectionState()
       if (state === 'not_configured') throw fail('conflict', 'No dataspace connection is configured.')
-      if (!currentControls().gatewayReachable) throw fail('unavailable', 'The dataspace gateway cannot be reached.')
+      if (!currentControls().gatewayReachable) {
+        throw fail('unavailable', 'The dataspace gateway can\u2019t be reached.', { stage: 'gateway', url: 'http://gateway.dataspace:8080/health', error: 'ConnectError' })
+      }
       if (!currentControls().credentialConfigured && String(secret ?? '') !== MOCK_DATASPACE_SECRET) {
-        throw fail('unauthorized', 'The dataspace rejected the credential.')
+        throw fail('unauthorized', 'The dataspace refused the client or its secret. Check the secret, and that the client is registered in the dataspace.', {
+          stage: 'identity_provider',
+          url: 'http://keycloak.dataspace:8080/auth/realms/dataspace/protocol/openid-connect/token',
+          client_id: store.get().connection.participantId,
+          http_status: 401,
+          provider_error: 'invalid_client',
+        })
       }
       setState('connected')
       return connectionResult()
@@ -117,7 +136,10 @@ export function createDataspaceArea(store) {
 
     listPeers: withControls(() => {
       requireConnected()
-      return structuredClone(store.get().peers).map((p) => ({ ...p, accessLevel: levelOf(p.id).accessLevel }))
+      return structuredClone(store.get().peers).map((p) => {
+        const { accessLevel, approved } = levelOf(p.id)
+        return { participantType: 'machine_builder', ...p, accessLevel, approved }
+      })
     }),
 
     getAccessLevels: withControls(() => {
@@ -138,8 +160,8 @@ export function createDataspaceArea(store) {
       return {
         peerId: peer.id,
         name: peer.name,
-        atPeer: peer.capabilities.map((capability) => ({ capability, status: status(remoteGrants[peer.id], capability) })),
-        here: CAPABILITIES.map((capability) => ({ capability, status: status(policies[peer.id], capability) })),
+        atPeer: peer.capabilities.map((capability) => withGateway(capability, status(remoteGrants[peer.id], capability))),
+        here: CAPABILITIES.map((capability) => withGateway(capability, status(policies[peer.id], capability))),
       }
     }),
 

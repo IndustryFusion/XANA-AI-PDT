@@ -92,6 +92,8 @@ export const HEALTH_STATES = ['ok', 'degraded', 'error', 'unknown']
 /** Dataspace: data-sharing tiers, policy status of a capability, and capability request statuses. */
 export const SHARING_TIERS = ['minimal', 'adjacent', 'timeseries']
 export const POLICY_STATES = ['granted', 'denied', 'default']
+/** A capability's status as the gateway applies it: open by default (`auto`), on request, requested, approved or denied. */
+export const GATEWAY_STATES = ['auto', 'on-request', 'pending', 'approved', 'denied']
 export const POLICY_ACTIONS = ['grant', 'deny', 'reset']
 export const REQUEST_STATES = ['pending', 'approved', 'denied']
 
@@ -303,8 +305,12 @@ const message = { messageId: 'string', sender: { $enum: ['agent', 'operator', 'm
 const connection = {
   state: { $enum: CONNECTION_STATES }, participantId: '?string', expiresAt: '?date',
   credentialConfigured: 'boolean', sharingTier: { $optional: { $enum: SHARING_TIERS } },
+  needsSignIn: { $optional: 'boolean' }, expiresInS: '?number',
 }
-const policy = { capability: 'string', status: { $enum: POLICY_STATES } }
+const policy = {
+  capability: 'string', status: { $enum: POLICY_STATES },
+  gatewayStatus: { $optional: { $enum: GATEWAY_STATES } }, label: '?string', description: '?string',
+}
 const capabilityRequest = {
   id: 'string', requesterId: 'string', capability: 'string', purpose: '?string', requestedAt: 'date',
   status: { $enum: REQUEST_STATES }, note: '?string', decidedAt: '?date',
@@ -395,7 +401,10 @@ export const SHAPES = {
     getConnectionConfig: {
       configured: 'boolean', gatewayUrl: '?string', keycloakUrl: '?string', registryUrl: '?string', realm: 'string', clientId: '?string',
     },
-    listPeers: [{ id: 'string', name: 'string', capabilities: ['string'], accessLevel: { $optional: { $enum: ACCESS_LEVELS } } }],
+    listPeers: [{
+      id: 'string', name: 'string', capabilities: ['string'], accessLevel: { $optional: { $enum: ACCESS_LEVELS } },
+      approved: { $optional: ['string'] }, participantType: '?string',
+    }],
     getAccessLevels: {
       peers: [{ peerId: 'string', name: 'string', accessLevel: { $optional: { $enum: ACCESS_LEVELS } }, approved: ['string'], error: '?string' }],
       counts: { standard: 'number', elevated: 'number', restricted: 'number', unknown: 'number' },

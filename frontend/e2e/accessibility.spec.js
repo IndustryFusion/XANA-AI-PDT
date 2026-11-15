@@ -207,7 +207,7 @@ const DATASPACE_SYSTEM_STATES = [
     await page.goto('/dataspace')
     await page.getByLabel('Dataspace credential').fill('wrong')
     await page.getByRole('button', { name: 'Connect' }).click()
-    await expect(page.getByRole('region', { name: 'Connection' }).getByRole('alert')).toBeVisible()
+    await expect(page.getByRole('region', { name: 'Dataspace gateway' }).getByRole('alert')).toBeVisible()
   }],
   ['dataspace not configured', { connection: 'not_configured' }, async (page) => {
     await page.goto('/dataspace')
@@ -219,7 +219,7 @@ const DATASPACE_SYSTEM_STATES = [
   }],
   ['dataspace policy confirmation', {}, async (page) => {
     await page.goto('/dataspace?peer=peer-formwerk')
-    await page.getByRole('button', { name: 'Grant Signal history for Formwerk Press Technology' }).click()
+    await page.getByRole('button', { name: 'Approve Machine history for Formwerk Press Technology' }).click()
     await expect(page.getByRole('dialog')).toBeVisible()
   }],
   ['dataspace request decision dialog', {}, async (page) => {
@@ -494,15 +494,15 @@ test('keyboard only: connect, decide a request, change a policy and upload with 
   await credential.focus()
   await page.keyboard.type('plant-north-secret')
   await page.keyboard.press('Enter')
-  await expect(page.getByRole('region', { name: 'Connection' }).getByText('Dataspace connected')).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Dataspace gateway' }).getByText('Dataspace connected')).toBeVisible()
 
   const peer = page.getByRole('region', { name: 'Compatible peers' }).getByRole('link', { name: /CoolFlow Process Cooling/ })
   await peer.focus()
   await page.keyboard.press('Enter')
-  const deny = page.getByRole('button', { name: 'Deny Signal history for CoolFlow Process Cooling' })
+  const deny = page.getByRole('button', { name: 'Deny Machine history for CoolFlow Process Cooling' })
   await deny.focus()
   await page.keyboard.press('Enter')
-  const dialog = page.getByRole('dialog', { name: 'Deny: Signal history for CoolFlow Process Cooling' })
+  const dialog = page.getByRole('dialog', { name: 'Deny: Machine history for CoolFlow Process Cooling' })
   await expect(dialog.getByRole('button', { name: 'Close dialog' })).toBeFocused()
   await page.keyboard.press('Escape')
   await expect(dialog).toHaveCount(0)

@@ -136,7 +136,7 @@ test('a stopped backend affects only its areas: active incidents, the explorer, 
   await expect(page.getByRole('alert').filter({ hasText: 'Could not load alerts' })).toContainText('The backend cannot be reached.')
 
   await page.goto('/dataspace')
-  await expect(page.getByRole('heading', { name: 'Dataspace' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Dataspace', exact: true })).toBeVisible()
   await expect(page.getByRole('alert').filter({ hasText: 'Could not load the dataspace connection' })).toContainText('The backend cannot be reached.')
 
   await page.unroute('**/api/**')

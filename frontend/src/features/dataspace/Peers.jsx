@@ -21,12 +21,15 @@ import { Link } from '../../app/router'
 import { useRevealOnChange } from '../../app/reveal'
 import { Button, Card, DataView, EmptyState, StatusBadge, useToast } from '../../ui/components'
 import { ConfirmDialog } from '../../ui/structured'
-import { capabilityDescription, capabilityLabel, dataspacePath, POLICY_ACTIONS } from './model'
+import { capabilityDescription, capabilityLabel, capabilitySensitivity, dataspacePath, participantTypeLabel, policyActionsFor } from './model'
 
 /**
  * Compatible peers (left) and the selected peer's capabilities in both
  * directions (right), with policy actions on what the peer may access here.
  */
+/** What a policy action leaves a capability at, in the gateway's words. */
+const OUTCOME = { grant: 'approved', deny: 'denied', reset: 'back at its default' }
+
 export default function Peers({ selected, factoryName, policyKey, onPolicyChange }) {
   const peers = useData('dataspace', 'listPeers')
   const detailRef = useRef(null)
@@ -47,9 +50,20 @@ export default function Peers({ selected, factoryName, policyKey, onPolicyChange
                   <Link to={dataspacePath(p.id)} className="peer-list__link" aria-current={selected === p.id ? 'true' : undefined}>
                     <span className="peer-list__name">{p.name}</span>
                     <span className="mono muted">{p.id}</span>
+                    {p.participantType && <span className="peer-list__type">{participantTypeLabel(p.participantType)}</span>}
                     <span className={`level level--${p.accessLevel ?? 'unknown'}`} data-testid="access-level">
                       {p.accessLevel ? `${p.accessLevel[0].toUpperCase()}${p.accessLevel.slice(1)} access` : 'Access unknown'}
                     </span>
+                    {p.accessLevel === 'elevated' && p.approved?.length > 0 && (
+                      <span className="peer-list__granted" role="group" aria-label={`Granted beyond the defaults: ${p.approved.map(capabilityLabel).join(', ')}`}>
+                        {p.approved.map((c) => (
+                          <span key={c} className={`cap-pill cap-pill--${capabilitySensitivity(c) ?? 'unknown'}`} title={capabilityDescription(c) ?? c}>
+                            {capabilityLabel(c)}
+                            {capabilitySensitivity(c) && <span className="visually-hidden"> ({capabilitySensitivity(c)} sensitivity)</span>}
+                          </span>
+                        ))}
+                      </span>
+                    )}
                   </Link>
                 </li>
               ))}
@@ -83,11 +97,11 @@ function PeerCapabilities({ peerId, factoryName, policyKey, onPolicyChange }) {
           <CapabilityTable
             caption={`What ${caps.name} may access here`}
             rows={caps.here}
-            actions={(row) => POLICY_ACTIONS.filter((a) => a.status !== row.status).map((a) => (
+            actions={(row) => policyActionsFor(row).map((a) => (
               <Button
-                key={a.action} size="sm"
-                aria-label={`${a.label} ${capabilityLabel(row.capability)} for ${caps.name}`}
-                onClick={() => setPending({ ...a, capability: row.capability })}
+                key={a.action} size="sm" variant={a.action === 'grant' ? 'primary' : undefined}
+                aria-label={`${a.label} ${capabilityLabel(row.capability, row)} for ${caps.name}`}
+                onClick={() => setPending({ ...a, capability: row.capability, row })}
               >
                 {a.label}…
               </Button>
@@ -95,16 +109,16 @@ function PeerCapabilities({ peerId, factoryName, policyKey, onPolicyChange }) {
           />
           <ConfirmDialog
             open={!!pending}
-            title={pending ? `${pending.label}: ${capabilityLabel(pending.capability)} for ${caps.name}` : ''}
+            title={pending ? `${pending.label}: ${capabilityLabel(pending.capability, pending.row)} for ${caps.name}` : ''}
             confirmLabel={pending?.label}
             onClose={() => setPending(null)}
             onConfirm={async () => {
               await dataspace.setCapabilityPolicy({ peerId, capability: pending.capability, action: pending.action })
-              notify(`${capabilityLabel(pending.capability)} is now ${pending.status} for ${caps.name}.`, 'success')
+              notify(`${capabilityLabel(pending.capability, pending.row)} is now ${OUTCOME[pending.action]} for ${caps.name}.`, 'success')
               onPolicyChange()
             }}
           >
-            {pending && <PolicyConsequence action={pending.action} capability={pending.capability} peer={caps.name} />}
+            {pending && <PolicyConsequence action={pending.action} capability={pending.capability} row={pending.row} peer={caps.name} />}
           </ConfirmDialog>
         </section>
       )}
@@ -112,8 +126,8 @@ function PeerCapabilities({ peerId, factoryName, policyKey, onPolicyChange }) {
   )
 }
 
-function PolicyConsequence({ action, capability, peer }) {
-  const what = <><strong>{capabilityLabel(capability)}</strong> (<code>{capability}</code>): {capabilityDescription(capability) ?? 'this capability'}</>
+function PolicyConsequence({ action, capability, row, peer }) {
+  const what = <><strong>{capabilityLabel(capability, row)}</strong> (<code>{capability}</code>): {capabilityDescription(capability, row) ?? 'this capability'}</>
   if (action === 'grant') return <p>{peer} will be allowed to access {what}.</p>
   if (action === 'deny') return <p>{peer} will no longer be allowed to access {what}.</p>
   return <p>The policy for {peer} on {what} returns to the default of the dataspace.</p>
@@ -136,10 +150,10 @@ function CapabilityTable({ caption, rows, actions }) {
           {rows.map((row) => (
             <tr key={row.capability} data-capability={row.capability}>
               <th scope="row">
-                {capabilityLabel(row.capability)} <span className="mono muted capability-id">{row.capability}</span>
-                {capabilityDescription(row.capability) && <span className="capability-table__description muted">{capabilityDescription(row.capability)}</span>}
+                {capabilityLabel(row.capability, row)} <span className="mono muted capability-id">{row.capability}</span>
+                {capabilityDescription(row.capability, row) && <span className="capability-table__description muted">{capabilityDescription(row.capability, row)}</span>}
               </th>
-              <td><StatusBadge kind="policy" value={row.status} /></td>
+              <td><StatusBadge kind="policy" value={row.gatewayStatus ?? row.status} /></td>
               {actions && <td><div className="row">{actions(row)}</div></td>}
             </tr>
           ))}

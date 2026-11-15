@@ -123,6 +123,11 @@ export const POLICY = {
   granted: { label: 'Granted', tone: 'success' },
   denied: { label: 'Denied', tone: 'danger' },
   default: { label: 'Default', tone: 'neutral' },
+  // As the gateway applies them, when it says.
+  auto: { label: 'Auto', tone: 'success' },
+  approved: { label: 'Approved', tone: 'success' },
+  'on-request': { label: 'On request', tone: 'warning' },
+  pending: { label: 'Pending', tone: 'warning' },
 }
 
 /** Decision on an incoming capability request. */

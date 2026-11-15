@@ -100,12 +100,20 @@ describe('peers and policies', () => {
   test('capabilities in both directions with granted, denied or default status', async () => {
     const caps = await dataspace.getPeerCapabilities('peer-formwerk')
     expect(caps).toMatchObject({ peerId: 'peer-formwerk', name: 'Formwerk Press Technology' })
-    expect(caps.atPeer).toEqual([{ capability: 'twin:direct', status: 'granted' }, { capability: 'twin:adjacents', status: 'default' }])
-    expect(caps.here).toEqual([
-      { capability: 'twin:direct', status: 'granted' },
-      { capability: 'twin:adjacents', status: 'default' },
-      { capability: 'twin:history', status: 'denied' },
+    const pick = (rows) => rows.map(({ capability, status, gatewayStatus }) => ({ capability, status, gatewayStatus }))
+    expect(pick(caps.atPeer)).toEqual([
+      { capability: 'twin:direct', status: 'granted', gatewayStatus: 'approved' },
+      { capability: 'twin:adjacents', status: 'default', gatewayStatus: 'on-request' },
     ])
+    expect(pick(caps.here)).toEqual([
+      { capability: 'twin:direct', status: 'granted', gatewayStatus: 'approved' },
+      { capability: 'twin:adjacents', status: 'default', gatewayStatus: 'on-request' },
+      { capability: 'twin:history', status: 'denied', gatewayStatus: 'denied' },
+    ])
+    // Back at its default, the machine twin is open (auto), as on the gateway.
+    await dataspace.setCapabilityPolicy({ peerId: 'peer-formwerk', capability: 'twin:direct', action: 'reset' })
+    const reset = await dataspace.getPeerCapabilities('peer-formwerk')
+    expect(reset.here.find((c) => c.capability === 'twin:direct')).toMatchObject({ status: 'default', gatewayStatus: 'auto' })
     await expect(dataspace.getPeerCapabilities('peer-nope')).rejects.toMatchObject({ kind: 'not_found' })
   })
 
