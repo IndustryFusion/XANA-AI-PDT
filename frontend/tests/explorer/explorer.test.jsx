@@ -764,6 +764,29 @@ describe('live updates', () => {
     expect(lineOf('value', node(SENSOR))).toHaveClass('attr-line--changed')
   })
 
+  test('an entity expanded in place under a relationship receives live updates too', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    openEntity(CHILLER)
+    store.update((s) => {
+      s.entities.find((e) => e.id === CHILLER).monitoredBy = { type: 'Relationship', object: SENSOR }
+      return s
+    })
+    writeControls({ speed: 10 })
+    await screen.findByText('Live updates working')
+    await waitFor(() => expect(attribute('monitoredBy')).not.toBeNull())
+    await user.click(within(attribute('monitoredBy')).getByRole('button', { name: `Expand ${SENSOR} in place` }))
+    const nested = await waitFor(() => {
+      const el = attribute('monitoredBy').querySelector(`.attr-line__nested [data-entity="${SENSOR}"]`)
+      expect(attribute('value', el)).not.toBeNull()
+      return el
+    })
+    await act(() => vi.advanceTimersByTimeAsync(LIVE_UPDATE_MS / 10 + 50))
+    const after = entityStored(SENSOR).value.value
+    await waitFor(() => expect(attribute('value', nested)).toHaveTextContent(`${after} l/min`))
+    expect(lineOf('value', nested)).toHaveClass('attr-line--changed')
+  })
+
   test('when live updates cannot be delivered the indicator says so and the explorer keeps working', async () => {
     const user = userEvent.setup()
     open(`${paths.explorer()}?type=Machine`, { liveUpdates: 'unavailable' })

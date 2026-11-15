@@ -42,7 +42,7 @@ export const STABLE_MS = 30_000
 export const GAVE_UP = 'The live update stream keeps closing. Switch live updates off and on to try again.'
 
 /**
- * Live updates of the expanded entities. Returns the health (`off`,
+ * Live updates of the expanded entities, and of every entity that listens. Returns the health (`off`,
  * `connecting`, `ok`, `unavailable`), the backend's reason (`detail`), and
  * `listen(entityId, onAttributes)`, with which each shown entity receives
  * its changed attributes; it returns the function that stops listening.
@@ -67,12 +67,15 @@ export function useLiveUpdates({ enabled, ids = [], onResync }) {
   const onResyncRef = useRef(onResync)
   onResyncRef.current = onResync
   const listeners = useRef(new Map())
+  // The entities that listen, such as ones expanded in place under a relationship: watched as well as `ids`.
+  const [listened, setListened] = useState('')
+  const noteListened = useCallback(() => setListened([...listeners.current.keys()].sort().join('\n')), [])
   const checkRef = useRef(null)
   const timers = useRef({ retry: null, stable: null })
   const gap = useRef(false)
   // Stream failures since it last proved itself; past the back-off, it is given up.
   const failures = useRef(0)
-  const idsKey = [...ids].sort().join('\n')
+  const idsKey = [...new Set([...ids, ...(listened ? listened.split('\n') : [])])].sort().join('\n')
 
   const show = useCallback((next, reason) => {
     statusRef.current = next
@@ -153,13 +156,19 @@ export function useLiveUpdates({ enabled, ids = [], onResync }) {
 
   const listen = useCallback((entityId, fn) => {
     const map = listeners.current
-    if (!map.has(entityId)) map.set(entityId, new Set())
+    if (!map.has(entityId)) {
+      map.set(entityId, new Set())
+      noteListened()
+    }
     map.get(entityId).add(fn)
     return () => {
       map.get(entityId)?.delete(fn)
-      if (map.get(entityId)?.size === 0) map.delete(entityId)
+      if (map.get(entityId)?.size === 0) {
+        map.delete(entityId)
+        noteListened()
+      }
     }
-  }, [])
+  }, [noteListened])
 
   return { status: enabled ? status : 'off', detail: enabled ? detail : null, listen }
 }

@@ -107,8 +107,9 @@ export default function EntityNode({
     if (current) ref.current?.scrollIntoView?.({ block: 'start' })
   }, [current])
 
+  // Only an expanded entity shows attributes, so only it listens; that includes one expanded in place.
   useEffect(() => {
-    if (!listen || at) return undefined
+    if (!listen || at || !expanded) return undefined
     const timers = new Set()
     let seq = 0
     const stop = listen(id, (attributes) => {
@@ -129,7 +130,7 @@ export default function EntityNode({
       stop()
       timers.forEach(clearTimeout)
     }
-  }, [listen, id, at])
+  }, [listen, id, at, expanded])
 
   const menu = useContextMenu({
     label: `Actions for ${entityTitle(shownRef.current, id)}`,
