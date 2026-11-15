@@ -35,6 +35,7 @@ import './alerts.css'
 export const REFRESH_KEY = 'xana.alerts.refreshMs'
 export const REFRESH_OPTIONS = [
   { value: 0, label: 'Off' },
+  { value: 1_000, label: '1 s' },
   { value: 10_000, label: '10 s' },
   { value: 30_000, label: '30 s' },
   { value: 60_000, label: '1 min' },

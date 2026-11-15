@@ -266,6 +266,19 @@ describe('automatic refresh', () => {
     expect(search()).toEqual({ environment: 'Production' })
   })
 
+  test('a refresh every second shows a new alert within a second', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    open()
+    await waitFor(async () => expect((await rows()).length).toBeGreaterThan(3))
+    await user.selectOptions(screen.getByLabelText('Automatic refresh'), '1000')
+    expect(screen.getByLabelText('Automatic refresh')).toHaveDisplayValue('1 s')
+    expect(localStorage.getItem(REFRESH_KEY)).toBe('1000')
+    const alert = raiseAlert({ severity: 'critical' })
+    await act(() => vi.advanceTimersByTimeAsync(1_200))
+    await waitFor(() => expect(row(alert.id)).not.toBeNull())
+  })
+
   test('with refresh off the list changes only on request', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
