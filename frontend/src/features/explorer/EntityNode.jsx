@@ -33,6 +33,8 @@ import { applyChanges } from './rawEdit'
 import RawJsonEditor from './RawJsonEditor'
 import { pin, renest, toggleSelected, unnest, unpin, useKept, usePins, useSelection } from './store'
 
+/** The time series records a change asynchronously; its state is read again at these delays after it. */
+export const STATUS_RECHECK_MS = [2000, 6000]
 /** How long a live-updated value stays highlighted. */
 export const HIGHLIGHT_MS = 3000
 /** Number of depth tints the nested nodes cycle through. */
@@ -89,7 +91,17 @@ export default function EntityNode({
   const headerRef = useRef(null)
   const [showFull, popover] = useFullIri(headerRef)
   const result = useData('entities', at ? 'queryEntitiesAt' : 'getEntity', at ? [at, { id }] : [id], { enabled: expanded || !summary, refreshKey })
-  const states = useData('entities', 'getAttributeStatus', [id], { enabled: expanded && !at })
+  // The time series' latest state per attribute; read again after a save, once the store has recorded it.
+  const [statusKey, setStatusKey] = useState(0)
+  const rechecks = useRef([])
+  const stopRechecks = () => { rechecks.current.forEach(clearTimeout); rechecks.current = [] }
+  useEffect(() => stopRechecks, [])
+  /** Read the time series' state again after a change, once it has had time to record it; a new change starts afresh. */
+  function recheckStatus() {
+    stopRechecks()
+    rechecks.current = STATUS_RECHECK_MS.map((ms) => setTimeout(() => setStatusKey((k) => k + 1), ms))
+  }
+  const states = useData('entities', 'getAttributeStatus', [id], { enabled: expanded && !at, refreshKey: refreshKey + statusKey })
   const [overrides, setOverrides] = useState({})
   const shownRef = useRef(null)
   const [changed, setChanged] = useState({})
@@ -180,6 +192,7 @@ export default function EntityNode({
   function saved(levels) {
     notify(`${[].concat(levels).map((n) => registry.shorten(n)).join('.')} saved.`, 'success')
     refresh()
+    recheckStatus()
   }
 
   function openBody(next) {
@@ -193,6 +206,7 @@ export default function EntityNode({
       notify('Entity JSON saved.', 'success')
     } finally {
       refresh()
+      recheckStatus()
     }
   }
 
@@ -213,6 +227,7 @@ export default function EntityNode({
     const open = historyOf ? JSON.parse(historyOf) : null
     if (open && gone.every((level, i) => open[i] === level)) setHistoryOf(null)
     refresh()
+    recheckStatus()
   }
 
   const short = (n) => registry.shorten(n)
@@ -231,6 +246,7 @@ export default function EntityNode({
     entityId: id, entityType: entity.type, readOnly, refTo, depth, chain: ownChain, headingLevel: level, nodeKey,
     changed: !!changed[name], historyOf, focus,
     recorded: !!statusOf(states.data, name),
+    stored: statusOf(states.data, name),
     onSaved: saved,
     onHistory: (key) => setHistoryOf((h) => (h === key ? null : key)),
     onDelete: (n, path = []) => setDeleting({ name: n, path }),

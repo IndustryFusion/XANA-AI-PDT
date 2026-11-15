@@ -21,7 +21,7 @@ import { formatTime } from '../../ui/format'
 import { useContextMenu } from '../../ui/ContextMenu'
 import { Icon, IconButton } from '../../ui/icons'
 import {
-  attributeKind, editableValue, hasHistory, instancesOf, iriOf, kindInfo, literalOf, parseInput, subAttributesOf, targetsOf,
+  attributeKind, editableValue, hasHistory, instancesOf, iriOf, kindInfo, literalOf, parseInput, subAttributesOf, targetsOf, timeSeriesAhead,
 } from './attributes'
 import AttributeValue from './AttributeValue'
 import AddAttributeForm from './AddAttributeForm'
@@ -49,6 +49,17 @@ const sameLevel = (own, given) => own === given || given.replace(/\[\d*\]$/, '')
 export function focusOf(focus, levels) {
   if (!focus || focus.length < levels.length || !levels.every((l, i) => sameLevel(l, focus[i]))) return null
   return focus.length === levels.length ? 'line' : 'above'
+}
+
+const AHEAD = {
+  newer: 'The time series holds a more recent value than the one shown. Alerts check the latest value, so this one may mislead; see the history.',
+  deleted: 'This attribute is in the broker, but the time series records it as deleted. Alerts no longer see it; see the history.',
+}
+
+/** A small attention mark beside a value the time series is ahead of; its tooltip says what is wrong. */
+function TimeSeriesAhead({ ahead }) {
+  const text = AHEAD[ahead]
+  return <span className="attr-line__behind" role="img" tabIndex={0} title={text} aria-label={text}>⚠</span>
 }
 
 /** `name.sub.sub2`, only to mark lines in the page; IRIs contain dots, so keys use `levelKey`. */
@@ -149,6 +160,8 @@ function Line({ name, path, inst, ctx, actions, multi = false }) {
   const pathKey = levelKey(name, path)
   const historyOpen = ctx.historyOf === pathKey
   const focused = focusOf(ctx.focus, [name, ...path])
+  // The time series is the reference for alerts: say when it is ahead of the instance shown.
+  const ahead = path.length === 0 ? timeSeriesAhead(ctx.stored, inst) : null
 
   // A level above the focused line opens its sub-attributes; the line itself comes into view.
   useEffect(() => {
@@ -209,13 +222,14 @@ function Line({ name, path, inst, ctx, actions, multi = false }) {
   return (
     <>
       <div
-        ref={lineRef} className={`attr-line${changed ? ' attr-line--changed' : ''}${focused === 'line' ? ' attr-line--focused' : ''}`}
+        ref={lineRef} className={`attr-line${changed ? ' attr-line--changed' : ''}${focused === 'line' ? ' attr-line--focused' : ''}${ahead ? ' attr-line--behind' : ''}`}
         style={{ '--depth': path.length }} {...menu.triggerProps}
       >
         <KindBadge kind={kind} /><Space />
         <span className="attr-line__name mono" title={own !== registry.shorten(own) ? own : undefined}>{registry.shorten(own)}</span><Space />
         <span className="tok tok--punct" aria-hidden="true">=</span><Space />
         <div className="attr-line__value mono">{value}</div><Space />
+        {ahead && <><TimeSeriesAhead ahead={ahead} /><Space /></>}
         {inst.unitCode && !editing && <><span className="attr-line__unit">{inst.unitCode}</span><Space /></>}
         {inst.datasetId && <><span className="attr-line__meta" title={inst.datasetId}>dataset {isHttpIri(inst.datasetId) ? registry.shorten(inst.datasetId) : entityLabel(inst.datasetId)}</span><Space /></>}
         {inst.lang && <><span className="attr-line__meta">lang {inst.lang}</span><Space /></>}

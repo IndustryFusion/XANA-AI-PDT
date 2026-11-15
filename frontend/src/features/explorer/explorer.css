@@ -410,3 +410,8 @@
 .entity-list > .card__header { padding: var(--space-2) var(--space-3); }
 .entity-list > .card__body { padding: var(--space-2) var(--space-3) var(--space-3); }
 .entity-list > .card__body > .stack { gap: var(--space-2); }
+
+/* The time series holds a newer value, or a deletion: the value shown isn't what alerts check. */
+.attr-line--behind .attr-line__value, .attr-line--behind .attr-line__unit, .attr-line--behind .attr-line__time { opacity: 0.4; }
+.attr-line__behind { color: var(--tone-warning); font-size: var(--text-sm); line-height: 1; cursor: help; border-radius: var(--radius); }
+.attr-line__behind:focus-visible { outline: 2px solid var(--tone-warning); outline-offset: 2px; }

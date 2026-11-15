@@ -22,7 +22,7 @@ import { store } from '../../src/data/sources/mock'
 import { writeControls } from '../../src/data/sources/mock/controls'
 import { LIVE_UPDATE_MS } from '../../src/data/sources/mock/entitiesArea'
 import { MAX_DEPTH } from '../../src/features/explorer/AttributeLine'
-import { hasHistory, sameValue, statusOf } from '../../src/features/explorer/attributes'
+import { hasHistory, sameValue, statusOf, timeSeriesAhead } from '../../src/features/explorer/attributes'
 import ValueEditor from '../../src/features/explorer/ValueEditor'
 import { HIGHLIGHT_MS } from '../../src/features/explorer/EntityNode'
 import { renderApp, renderAppWith } from '../helpers'
@@ -964,5 +964,127 @@ describe('paging, attributes to return and has-attribute', () => {
     await user.click(within(dialog).getByRole('button', { name: /^Import 1 entities$/ }))
     expect(await within(dialog).findByText(/Import finished: 0 created, 1 updated, 0 failed/)).toBeVisible()
     expect(Object.keys(entityStored(MACHINE)).sort()).toEqual(['id', 'name', 'type'])
+  })
+})
+
+describe('time series ahead of the broker', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.restoreAllMocks()
+  })
+
+  test('compares the instants, whatever their notation, and a later deletion wins', () => {
+    const at = (observedAt, datasetId) => ({ observedAt, datasetId })
+    expect(timeSeriesAhead({ deleted: false, observedAt: '2026-11-15T11:42:09.221+00:00' }, at('2026-11-15T11:42:09.221Z'))).toBeNull()
+    expect(timeSeriesAhead({ deleted: false, observedAt: '2026-11-15T11:42:41.093+00:00' }, at('2026-11-15T11:42:09.221Z'))).toBe('newer')
+    expect(timeSeriesAhead({ deleted: false, observedAt: '2026-11-15T11:40:00+00:00' }, at('2026-11-15T11:42:09.221Z'))).toBeNull()
+    expect(timeSeriesAhead({ deleted: true, observedAt: '2026-11-15T11:50:00+00:00' }, at('2026-11-15T11:42:09.221Z'))).toBe('deleted')
+    expect(timeSeriesAhead(null, at('2026-11-15T11:42:09.221Z'))).toBeNull()
+    expect(timeSeriesAhead({ deleted: false, observedAt: '2026-11-15T11:42:41Z' }, at(undefined))).toBeNull()
+  })
+
+  test('each instance is compared with its own dataset: the default one deleted leaves another one unmarked', () => {
+    const state = {
+      deleted: true,
+      observedAt: '2026-11-15T11:15:18.21+00:00',
+      datasets: {
+        '@none': { deleted: true, observedAt: '2026-11-15T11:15:18.21+00:00' },
+        'urn:d:sensor1': { deleted: false, observedAt: '2026-11-15T11:15:17.357+00:00' },
+      },
+    }
+    expect(timeSeriesAhead(state, { datasetId: 'urn:d:sensor1', observedAt: '2026-11-15T11:15:17.357Z' })).toBeNull()
+    expect(timeSeriesAhead(state, { observedAt: '2026-11-14T16:21:45.81Z' })).toBe('deleted')
+    expect(timeSeriesAhead(state, { datasetId: 'urn:d:other', observedAt: '2026-11-15T11:00:00Z' })).toBeNull() // no row for this instance
+    // Deleted, then written again: the value shown is later than the deletion, so the time series lags.
+    expect(timeSeriesAhead(state, { observedAt: '2026-11-15T11:20:00Z' })).toBeNull()
+    expect(timeSeriesAhead({ deleted: true, observedAt: '2026-11-15T11:15:18Z' }, { observedAt: '2026-11-15T11:15:18Z' })).toBe('deleted')
+    expect(timeSeriesAhead({ deleted: true, observedAt: '2026-11-15T11:15:18Z' }, {})).toBe('deleted')
+  })
+
+  test('a newer value in the time series is marked beside the value, which is shown faint', async () => {
+    const shown = entityStored(SENSOR).value.observedAt
+    const later = new Date(Date.parse(shown) + 60_000).toISOString().replace('Z', '+00:00')
+    vi.spyOn(entities, 'getAttributeStatus').mockResolvedValue({ value: { deleted: false, observedAt: later } })
+    openEntity(SENSOR)
+    const mark = await waitFor(() => within(attribute('value')).getByRole('img', { name: /^The time series holds a more recent value/ }))
+    expect(mark).toHaveAttribute('title', mark.getAttribute('aria-label'))
+    expect(mark).toHaveAttribute('tabindex', '0')
+    expect(lineOf('value')).toHaveClass('attr-line--behind')
+  })
+
+  test('an attribute the time series records as deleted is marked', async () => {
+    // Deleted after the value shown was observed.
+    vi.spyOn(entities, 'getAttributeStatus').mockResolvedValue({ value: { deleted: true, observedAt: new Date(Date.now() + 3_600_000).toISOString() } })
+    openEntity(SENSOR)
+    await waitFor(() => expect(within(attribute('value')).getByRole('img', { name: /time series records it as deleted/ })).toBeVisible())
+  })
+
+  test('after a save the time-series state is read again, so the mark follows the save', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    const shown = entityStored(SENSOR).value.observedAt
+    const later = new Date(Date.parse(shown) + 60_000).toISOString()
+    const status = vi.spyOn(entities, 'getAttributeStatus').mockResolvedValue({ value: { deleted: false, observedAt: later } })
+    openEntity(SENSOR)
+    await waitFor(() => expect(lineOf('value')).toHaveClass('attr-line--behind'))
+    const reads = status.mock.calls.length
+    await user.click(within(attribute('value')).getByRole('button', { name: 'Edit value' }))
+    const input = screen.getByRole('combobox', { name: 'New value of value' })
+    await user.clear(input)
+    await user.type(input, '12.5')
+    await user.click(screen.getByRole('button', { name: 'Save value' }))
+    // The save itself reads again at once, which can be before the time series has recorded it:
+    // one more read follows a moment later.
+    await act(() => vi.advanceTimersByTimeAsync(500))
+    // Now the time series has recorded the saved value.
+    status.mockResolvedValue({ value: { deleted: false, observedAt: entityStored(SENSOR).value.observedAt ?? null } })
+    const afterSave = status.mock.calls.length
+    expect(afterSave).toBeGreaterThanOrEqual(reads)
+    await act(() => vi.advanceTimersByTimeAsync(1700))
+    await waitFor(() => expect(status.mock.calls.length).toBeGreaterThan(afterSave))
+    await waitFor(() => expect(lineOf('value')).not.toHaveClass('attr-line--behind'))
+    // And once more a little later, for a store that takes longer to record it.
+    const second = status.mock.calls.length
+    await act(() => vi.advanceTimersByTimeAsync(4100))
+    await waitFor(() => expect(status.mock.calls.length).toBeGreaterThan(second))
+  })
+
+  test('a live update with a value as recent as the time series removes the mark', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    // Just after the value shown when first read: any live update is observed later still.
+    let recorded = null
+    vi.spyOn(entities, 'getAttributeStatus').mockImplementation(async () => {
+      recorded ??= new Date(Date.parse(entityStored(SENSOR).value.observedAt) + 1).toISOString()
+      return { value: { deleted: false, observedAt: recorded } }
+    })
+    openEntity(SENSOR)
+    await waitFor(() => expect(lineOf('value')).toHaveClass('attr-line--behind'))
+    const before = entityStored(SENSOR).value.observedAt
+    await act(() => vi.advanceTimersByTimeAsync(LIVE_UPDATE_MS + 50))
+    expect(entityStored(SENSOR).value.observedAt).not.toBe(before)
+    await waitFor(() => expect(lineOf('value')).not.toHaveClass('attr-line--behind'))
+    expect(within(attribute('value')).queryByRole('img', { name: /time series/ })).toBeNull()
+  })
+
+  test('deleting an attribute reads the time-series state again a moment later', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    const status = vi.spyOn(entities, 'getAttributeStatus')
+    openEntity(MACHINE)
+    await waitFor(() => expect(attribute('manufacturer')).not.toBeNull())
+    await user.click(screen.getByRole('button', { name: 'Delete manufacturer' }))
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete' }))
+    await waitFor(() => expect(attribute('manufacturer')).toBeNull())
+    await act(() => vi.advanceTimersByTimeAsync(500))
+    const afterDelete = status.mock.calls.length
+    await act(() => vi.advanceTimersByTimeAsync(1700))
+    await waitFor(() => expect(status.mock.calls.length).toBeGreaterThan(afterDelete))
+  })
+
+  test('nothing is marked while the time series holds the value shown', async () => {
+    openEntity(SENSOR)
+    await waitFor(() => expect(attribute('value')).not.toBeNull())
+    await act(async () => {})
+    expect(document.querySelector('.attr-line--behind')).toBeNull()
   })
 })

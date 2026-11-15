@@ -163,6 +163,25 @@ export function statusOf(states, name) {
   return key ? states[key] : null
 }
 
+/**
+ * How the time series stands to a shown instance: `'deleted'` when it records
+ * that instance as deleted and the value shown isn't later, `'newer'` when it holds a later observation of it
+ * than the one shown, otherwise null. Each instance is compared with its own
+ * dataset (`@none` for the default one): another instance's deletion or newer
+ * value says nothing about it. Alerts check the latest values, so a value that
+ * isn't the latest must not pass for it.
+ */
+export function timeSeriesAhead(state, instance = {}) {
+  const own = state?.datasets ? state.datasets[instance.datasetId ?? '@none'] : state
+  if (!own) return null
+  const recorded = Date.parse(own.observedAt ?? '')
+  const shown = Date.parse(instance.observedAt ?? '')
+  const known = Number.isFinite(recorded) && Number.isFinite(shown)
+  // A deletion counts unless the value shown was observed after it: then the time series lags behind.
+  if (own.deleted) return known && shown > recorded ? null : 'deleted'
+  return known && recorded > shown ? 'newer' : null
+}
+
 /** Whether two attribute values are the same, whatever the order of their members. */
 export function sameValue(a, b) {
   if (a === b) return true

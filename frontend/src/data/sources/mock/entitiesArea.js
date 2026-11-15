@@ -427,9 +427,11 @@ export function createEntitiesArea(store) {
     getAttributeStatus: withControls((id) => {
       const entity = find(id)
       const recorded = entity ? attributeNames(entity).filter((name) => entity[name]?.observedAt) : []
-      const states = Object.fromEntries(recorded.map((name) => [name, { deleted: false, observedAt: entity[name].observedAt }]))
+      // Like the backend: the latest state of each instance under `datasets`, `@none` for the default one.
+      const state = (deleted, observedAt, dataset = '@none') => ({ deleted, observedAt, datasets: { [dataset]: { deleted, observedAt } } })
+      const states = Object.fromEntries(recorded.map((name) => [name, state(false, entity[name].observedAt, entity[name].datasetId ?? '@none')]))
       for (const [name, at] of Object.entries(store.get().entityLog.deletedAttributes?.[id] ?? {})) {
-        if (!states[name]) states[name] = { deleted: true, observedAt: at }
+        if (!states[name]) states[name] = state(true, at)
       }
       return states
     }),

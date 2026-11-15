@@ -378,7 +378,7 @@ export const SHAPES = {
     fetchImportDocument: { url: 'string' },
     deleteByTypes: [{ type: 'string', count: 'number' }],
     getAttributeHistory: [{ at: 'date' }],
-    getAttributeStatus: { $record: { deleted: 'boolean', observedAt: '?date' } },
+    getAttributeStatus: { $record: { deleted: 'boolean', observedAt: '?date', datasets: { $optional: { $record: { deleted: 'boolean', observedAt: '?date' } } } } },
     listTypesAt: ['string'],
     queryEntitiesAt: [entity],
     getLiveUpdateHealth: { status: { $enum: LIVE_UPDATE_STATES }, state: '?string', detail: '?string' },
