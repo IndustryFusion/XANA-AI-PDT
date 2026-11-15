@@ -305,9 +305,67 @@ def test_rejected_filter_is_invalid_with_the_reason():
 
 def test_status_is_latest_per_attribute(client):
     status = client.get("/api/ngsi/attr-status", params={"entity_id": MACHINE}).json()
-    assert status[f"{IRI}gone"] == {"deleted": True, "observedAt": T1}
-    assert status[f"{IRI}temp"] == {"deleted": False, "observedAt": T3}
+    gone, temp = status[f"{IRI}gone"], status[f"{IRI}temp"]
+    assert {k: gone[k] for k in ("deleted", "observedAt")} == {"deleted": True, "observedAt": T1}
+    assert {k: temp[k] for k in ("deleted", "observedAt")} == {"deleted": False, "observedAt": T3}
     assert f"{IRI}limit" not in status
+
+
+def test_status_tells_each_dataset_apart():
+    # The default instance deleted after another instance was written: that one is still there.
+    rows = [
+        row("vibration", T0, "urn:s", datasetId="urn:d:sensor1"),
+        row("vibration", T1, "urn:s"),
+        row("vibration", T2, "urn:s", datasetId="urn:d:sensor1"),
+        row("vibration", T3, None, deleted=True),
+    ]
+    client = TestClient(app_with(Broker(), Rows({"attributes": rows, "entities": []})))
+    state = client.get("/api/ngsi/attr-status", params={"entity_id": MACHINE}).json()[f"{IRI}vibration"]
+    assert state == {
+        "deleted": True,
+        "observedAt": T3,
+        "datasets": {
+            "@none": {"deleted": True, "observedAt": T3},
+            "urn:d:sensor1": {"deleted": False, "observedAt": T2},
+        },
+    }
+
+
+def test_status_finds_a_default_instance_without_a_dataset_past_a_full_page():
+    start = datetime(2026, 11, 1, tzinfo=UTC)
+    many = [
+        row("flow", (start + timedelta(seconds=i)).isoformat(), "1", datasetId="urn:d:a")
+        for i in range(history_module.PAGE + 5)
+    ]
+    plain = {**row("flow", T3, "2"), "datasetId": None}
+    rows = [*many, plain, {**row("flow", T0, "3"), "datasetId": None}, row("zeta", T0, "4")]
+    client = TestClient(app_with(Broker(), Rows({"attributes": rows, "entities": []})))
+    status = client.get("/api/ngsi/attr-status", params={"entity_id": MACHINE}).json()
+    assert status[f"{IRI}flow"]["datasets"]["@none"] == {"deleted": False, "observedAt": T3}
+    assert set(status[f"{IRI}flow"]["datasets"]) == {"@none", "urn:d:a"}
+    assert f"{IRI}zeta" in status
+
+
+def test_status_survives_a_time_in_another_form():
+    rows = [row("temp", "2026-11-04T00:00:00", "1", datasetId="urn:d:a"), row("temp", T1, "2")]
+    client = TestClient(app_with(Broker(), Rows({"attributes": rows, "entities": []})))
+    answer = client.get("/api/ngsi/attr-status", params={"entity_id": MACHINE})
+    assert answer.status_code == 200
+    assert answer.json()[f"{IRI}temp"]["observedAt"] == "2026-11-04T00:00:00"
+
+
+def test_status_finds_a_dataset_past_a_full_page_of_another():
+    start = datetime(2026, 11, 1, tzinfo=UTC)
+    many = [
+        row("flow", (start + timedelta(seconds=i)).isoformat(), "1", datasetId="urn:d:a")
+        for i in range(history_module.PAGE + 5)
+    ]
+    rows = [*many, row("flow", T0, "2", datasetId="urn:d:b"), row("zeta", T0, "3")]
+    client = TestClient(app_with(Broker(), Rows({"attributes": rows, "entities": []})))
+    status = client.get("/api/ngsi/attr-status", params={"entity_id": MACHINE}).json()
+    assert set(status[f"{IRI}flow"]["datasets"]) == {"urn:d:a", "urn:d:b"}
+    assert status[f"{IRI}flow"]["observedAt"] == (start + timedelta(seconds=history_module.PAGE + 4)).isoformat()
+    assert f"{IRI}zeta" in status
 
 
 def test_status_goes_beyond_one_page():

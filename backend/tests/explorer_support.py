@@ -206,31 +206,66 @@ class Rows:
                 rows = [r for r in rows if _test(r.get(key), value)]
         for part in reversed((order or "").split(",") if order else []):
             column, _, direction = part.partition(".")
-            rows.sort(key=lambda r: r.get(column) or "", reverse=direction == "desc")
+            descending = direction.startswith("desc")
+            # PostgreSQL puts NULLs last ascending, first descending, unless told otherwise.
+            nulls_first = "nullsfirst" in direction or (descending and "nullslast" not in direction)
+            present = sorted(
+                (r for r in rows if r.get(column) is not None), key=lambda r: r[column], reverse=descending
+            )
+            missing = [r for r in rows if r.get(column) is None]
+            rows = [*missing, *present] if nulls_first else [*present, *missing]
         return httpx.Response(200, json=rows[offset : offset + limit])
 
 
 def _or(row: dict, value: str) -> bool:
-    # Only what `attribute_filter` writes; anything unquoted would fail the assert.
+    """`(term,...)`, any of them; a term is `column.op."value"` or `and(term,...)`."""
     assert value.startswith("(") and value.endswith(")")
-    results = []
-    inner = value[1:-1]
-    position = 0
-    while position < len(inner):
-        head, _, _rest = inner[position:].partition('"')
-        column, op, _ = head.split(".")
-        position += len(head) + 1
-        out = []
-        while inner[position] != '"':
-            if inner[position] == "\\":
+    terms, _ = _terms(value, 1)
+    return any(_term(row, term) for term in terms)
+
+
+def _terms(text: str, position: int) -> tuple[list, int]:
+    """The terms up to the closing parenthesis at their level, and the position after it."""
+    terms: list = []
+    while text[position] != ")":
+        if text.startswith("and(", position):
+            inner, position = _terms(text, position + 4)
+            terms.append(("and", inner))
+        elif text.startswith(("not.is.null", "is.null"), text.index(".", position) + 1):
+            end = min(i for i in (text.find(",", position), text.find(")", position)) if i != -1)
+            column, _, condition = text[position:end].partition(".")
+            terms.append((column, condition, None))
+            position = end
+        else:
+            head_end = text.index('"', position)
+            column, op, _ = text[position:head_end].split(".")
+            position = head_end + 1
+            out = []
+            while text[position] != '"':
+                if text[position] == "\\":
+                    position += 1
+                out.append(text[position])
                 position += 1
-            out.append(inner[position])
             position += 1
-        position += 2  # the closing quote and the comma
-        text = "".join(out)
-        actual = row.get(column) or ""
-        results.append(actual == text if op == "eq" else actual.endswith(text.removeprefix("*")))
-    return any(results)
+            terms.append((column, op, "".join(out)))
+        if text[position] == ",":
+            position += 1
+    return terms, position + 1
+
+
+def _term(row: dict, term: tuple) -> bool:
+    if term[0] == "and":
+        return all(_term(row, inner) for inner in term[1])
+    column, op, text = term
+    if op in ("is.null", "not.is.null"):
+        return (row.get(column) is None) == (op == "is.null")
+    actual = row.get(column) or ""
+    if op == "eq":
+        return actual == text
+    if op == "gt":
+        return actual > text
+    assert op == "like", op
+    return actual.endswith(text.removeprefix("*"))
 
 
 def _test(actual: object, condition: str) -> bool:

@@ -55,6 +55,25 @@ _TEXT_TYPE = re.compile(r"(#|/)(string|anyURI)$")
 _NUMBER_TEXT = re.compile(r"[-+]?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?")
 
 
+DEFAULT_DATASET = "@none"
+
+
+def _later(a: str | None, b: str | None) -> bool:
+    """Whether the time `a` is after `b`; the store writes both alike, but parse to be sure."""
+    if not a or not b:
+        return bool(a) and not b
+    try:
+        return _instant(a) > _instant(b)
+    except (ValueError, TypeError):
+        # A time the store wrote in another form: compare the text, rather than fail the whole status.
+        return a > b
+
+
+def _instant(text: str) -> datetime:
+    moment = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    return moment if moment.tzinfo else moment.replace(tzinfo=UTC)
+
+
 def quoted(value: str) -> str:
     """A value for inside `or=(...)` and `in.(...)`."""
     return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
@@ -230,27 +249,41 @@ class AttributeHistory:
                 return found
 
     async def status(self, entity_id: str) -> dict[str, dict[str, Any]]:
-        """The latest recorded state per attribute, under the name the store holds."""
+        """The latest recorded state per attribute, under the name the store holds.
+
+        `datasets` holds the latest state of each instance, `@none` for the default one: a
+        deleted instance doesn't mean that the attribute's other instances are gone. The top
+        level is the latest row of any instance.
+        """
         latest: dict[str, dict[str, Any]] = {}
-        after: str | None = None
+        after: tuple[str, str] | None = None
         while True:
             params: list[tuple[str, str | int]] = [
                 ("entityId", f"eq.{entity_id}"),
                 ("parentId", "is.null"),
-                ("select", "attributeId,deleted,observedAt"),
-                ("order", "attributeId.asc,observedAt.desc"),
+                ("select", "attributeId,datasetId,deleted,observedAt"),
+                ("order", "attributeId.asc,datasetId.asc.nullsfirst,observedAt.desc"),
                 ("limit", PAGE),
             ]
             if after is not None:
-                params.append(("attributeId", f"gt.{after}"))
+                # Past the instance read last: its first row was its latest. Rows without a dataset come
+                # first, as the default instance, and `gt` never matches them.
+                name = quoted(after[0])
+                rest = "datasetId.not.is.null" if after[1] is None else f"datasetId.gt.{quoted(after[1])}"
+                params.append(("or", f"(attributeId.gt.{name},and(attributeId.eq.{name},{rest}))"))
             rows = await self.read(self._attributes, params)
             for row in rows:
-                name = row.get("attributeId")
-                if name not in latest:
-                    latest[name] = {"deleted": row.get("deleted") is True, "observedAt": row.get("observedAt")}
+                state = {"deleted": row.get("deleted") is True, "observedAt": row.get("observedAt")}
+                entry = latest.setdefault(row.get("attributeId"), {**state, "datasets": {}})
+                dataset = row.get("datasetId") or DEFAULT_DATASET
+                if dataset in entry["datasets"]:
+                    continue
+                entry["datasets"][dataset] = state
+                if _later(state["observedAt"], entry["observedAt"]):
+                    entry.update(state)
             if len(rows) < PAGE:
                 return {compact(name): state for name, state in latest.items()}
-            after = rows[-1]["attributeId"]
+            after = (rows[-1]["attributeId"], rows[-1].get("datasetId"))
 
     # Time-shift ---------------------------------------------------------------
 
