@@ -184,7 +184,15 @@ The backend SHALL read an attribute's values over a time range, and the latest r
 
 #### Scenario: Latest state
 - **WHEN** the latest state of an entity's attributes is requested
-- **THEN** each attribute is listed with whether it is deleted and when it was last observed
+- **THEN** each attribute is listed with whether it is deleted and when it was last observed, from its latest row of any instance, and with the same for each of its instances, keyed by dataset, `@none` for the default instance
+
+#### Scenario: Latest state per instance
+- **WHEN** an attribute's default instance is recorded as deleted after another instance was last written
+- **THEN** the default instance is listed as deleted and the other instance as present, with its own last observation
+
+#### Scenario: Many rows of one instance
+- **WHEN** one instance of an attribute has more rows than the backend reads at once, and another instance or attribute follows it
+- **THEN** the latest state of every instance and attribute is still listed
 
 ### Requirement: Time-shift
 The backend SHALL give the entity types and the entities as they were at a past moment, reconstructed from the `attributes` and `entities` tables.
