@@ -168,6 +168,45 @@ async def test_unusable_answer_from_the_provider(answer):
     assert caught.value.kind == "unavailable"
 
 
+async def test_a_rejected_credential_says_where_and_why_without_the_secret():
+    space = Dataspace()
+    with pytest.raises(Refused) as caught:
+        await connection(space).connect("wrong")
+    details = caught.value.details
+    assert caught.value.kind == "unauthorized" and "Check the secret" in caught.value.message
+    assert details["stage"] == "identity_provider" and details["http_status"] == 401
+    assert details["provider_error"] == "invalid_client" and details["client_id"] == FACTORY
+    assert details["url"].endswith("/realms/dataspace/protocol/openid-connect/token")
+    assert "wrong" not in str(details) and SECRET not in str(details)
+    assert "provider_error_description" not in details
+    assert caught.value.as_dict()["details"] == details
+
+
+async def test_unreachable_provider_and_gateway_name_the_stage():
+    space = Dataspace()
+    space.provider_down = True
+    with pytest.raises(Refused) as caught:
+        await connection(space).connect(SECRET)
+    assert caught.value.details["stage"] == "identity_provider" and caught.value.details["error"] == "ConnectError"
+    space = Dataspace()
+    space.gateway_down = True
+    with pytest.raises(Refused) as caught:
+        await connection(space).connect(SECRET)
+    assert caught.value.details["stage"] == "gateway" and caught.value.details["url"].endswith("/health")
+
+
+async def test_a_refusal_without_details_has_none_in_its_answer():
+    assert Refused("conflict", "No.").as_dict() == {"kind": "conflict", "message": "No."}
+
+
+async def test_without_a_company_or_a_configured_client_it_asks_to_sign_in():
+    conn = connection(gateway_client_id=None)
+    status = await conn.status()
+    assert status["state"] == "not_configured" and status["needs_sign_in"] is True
+    assert (await connection(gateway_client_id=None, gateway_url=None).status())["needs_sign_in"] is False
+    assert (await connection().status())["needs_sign_in"] is False
+
+
 async def test_unreachable_gateway_does_not_connect_or_store():
     space = Dataspace()
     space.gateway_down = True
@@ -385,6 +424,8 @@ async def test_peers_list_with_what_each_offers():
             "capabilities": ["mb:confidential"],
             "capabilities_unavailable": False,
             "access_level": "standard",
+            "approved": [],
+            "participant_type": "t",
         }
     ]
     await conn.close()
@@ -427,6 +468,7 @@ async def test_policies_mark_a_failing_peer():
     assert (await client.policies())[0]["capabilities"][0] == {
         "capability": "twin:direct",
         "status": "granted",
+        "gateway_status": "auto",
         "label": None,
         "description": None,
         "decision_note": None,
@@ -591,6 +633,7 @@ def test_routes_end_to_end():
         assert here[0] == {
             "capability": "twin:direct",
             "status": "granted",
+            "gateway_status": "auto",
             "label": None,
             "description": None,
             "decision_note": None,
@@ -843,3 +886,56 @@ def test_the_configuration_without_a_gateway():
     with client:
         config = client.get("/api/gateway/config").json()
     assert config["configured"] is False and config["gateway_url"] is None and config["keycloak_url"] is None
+
+
+@pytest.mark.parametrize("raw", ["auto", "approved", "on-request", "pending", "denied"])
+def test_a_capability_keeps_the_gateway_status_beside_the_policy(raw):
+    from app.dataspace.gateway import _policy
+
+    policy = _policy({"capability": "twin:adjacents", "status": raw})
+    assert policy["gateway_status"] == raw
+    assert policy["status"] == {"auto": "granted", "approved": "granted", "denied": "denied"}.get(raw, "default")
+
+
+def test_an_unknown_gateway_status_is_not_passed_on():
+    from app.dataspace.gateway import _policy
+
+    assert _policy({"capability": "x", "status": "<script>"})["gateway_status"] is None
+
+
+@pytest.mark.parametrize(
+    ("code", "says"),
+    [
+        ("invalid_client", "Check the secret, and that the client is registered"),
+        ("unauthorized_client", "doesn't let this client get a token on its own"),
+        ("invalid_request", "refused to issue a token"),
+        (None, "refused to issue a token"),
+    ],
+)
+async def test_a_refusal_is_worded_by_its_oauth_code(code, says):
+    def handle(request):
+        return httpx.Response(400, json={"error": code} if code else {})
+
+    conn = GatewayConnection(gateway_settings(), MemoryStore(), transport=httpx.MockTransport(handle), clock=Clock())
+    with pytest.raises(Refused) as caught:
+        await conn.connect(SECRET)
+    assert caught.value.kind == "unauthorized" and says in caught.value.message
+    assert (code is None) == ("provider_error" not in caught.value.details)
+
+
+async def test_the_status_gives_the_seconds_left():
+    clock = Clock()
+    conn = connection(clock=clock)
+    await conn.connect(SECRET)
+    left = (await conn.status())["expires_in_s"]
+    assert isinstance(left, int) and left > 0
+    clock.now += 30
+    assert (await conn.status())["expires_in_s"] == left - 30
+    await conn.close()
+
+
+def test_a_status_that_is_not_text_is_not_passed_on():
+    from app.dataspace.gateway import _policy
+
+    policy = _policy({"capability": "x", "status": ["auto"]})
+    assert policy["gateway_status"] is None and policy["status"] == "default"

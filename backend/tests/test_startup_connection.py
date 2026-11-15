@@ -85,9 +85,9 @@ async def test_a_rejected_credential_is_not_tried_again():
     await asyncio.sleep(0.1)
     assert len(token_calls(space)) == 1
     status = await conn.status()
-    assert status["connecting"] is False and "rejected" in status["detail"]
+    assert status["connecting"] is False and "refused" in status["detail"]
     check = await connector_detail(space, conn)
-    assert "rejected" in check["detail"] and "not tried again" in check["detail"]
+    assert "refused" in check["detail"] and "not tried again" in check["detail"]
     await conn.close()
 
 

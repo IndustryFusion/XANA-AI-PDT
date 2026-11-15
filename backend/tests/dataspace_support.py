@@ -129,7 +129,9 @@ class Dataspace:
         form = {k: v[0] for k, v in parse_qs(request.content.decode()).items()}
         assert form["grant_type"] == "client_credentials"
         if form["client_secret"] != self.secret:
-            return httpx.Response(401, json={"error": "invalid_client"})
+            return httpx.Response(
+                401, json={"error": "invalid_client", "error_description": "Invalid client credentials"}
+            )
         self.grants += 1
         token = jwt(participant_id=form["client_id"], azp=form["client_id"], grant=self.grants)
         self.valid_tokens.add(token)

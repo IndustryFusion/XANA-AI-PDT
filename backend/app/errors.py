@@ -17,7 +17,7 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 Kind = Literal["not_found", "conflict", "invalid", "unavailable", "unauthorized"]
 
@@ -31,11 +31,15 @@ HTTP_STATUS: dict[Kind, int] = {
 
 
 class Refused(Exception):
-    def __init__(self, kind: Kind, message: str, status: int | None = None) -> None:
+    def __init__(
+        self, kind: Kind, message: str, status: int | None = None, details: dict[str, Any] | None = None
+    ) -> None:
         super().__init__(message)
         self.kind = kind
         self.message = message
         self._status = status
+        # Facts for diagnosis, such as the stage that failed: never a secret, a token or a broker's message.
+        self.details = details
         # What the service behind answered, when it answered: 403 becomes `unauthorized`, which is 401 here.
         self.upstream_status: int | None = None
 
@@ -43,28 +47,31 @@ class Refused(Exception):
     def http_status(self) -> int:
         return self._status or HTTP_STATUS[self.kind]
 
-    def as_dict(self) -> dict[str, str]:
-        return {"kind": self.kind, "message": self.message}
+    def as_dict(self) -> dict[str, Any]:
+        answer: dict[str, Any] = {"kind": self.kind, "message": self.message}
+        if self.details:
+            answer["details"] = self.details
+        return answer
 
 
-def not_found(message: str) -> Refused:
-    return Refused("not_found", message)
+def not_found(message: str, details: dict[str, Any] | None = None) -> Refused:
+    return Refused("not_found", message, details=details)
 
 
-def conflict(message: str) -> Refused:
-    return Refused("conflict", message)
+def conflict(message: str, details: dict[str, Any] | None = None) -> Refused:
+    return Refused("conflict", message, details=details)
 
 
-def invalid(message: str) -> Refused:
-    return Refused("invalid", message)
+def invalid(message: str, details: dict[str, Any] | None = None) -> Refused:
+    return Refused("invalid", message, details=details)
 
 
-def unauthorized(message: str) -> Refused:
-    return Refused("unauthorized", message)
+def unauthorized(message: str, details: dict[str, Any] | None = None) -> Refused:
+    return Refused("unauthorized", message, details=details)
 
 
-def unavailable(message: str) -> Refused:
-    return Refused("unavailable", message)
+def unavailable(message: str, details: dict[str, Any] | None = None) -> Refused:
+    return Refused("unavailable", message, details=details)
 
 
 def bad_gateway(message: str) -> Refused:

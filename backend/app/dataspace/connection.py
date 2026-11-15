@@ -88,7 +88,7 @@ class GatewayConnection:
 
     @property
     def configured(self) -> bool:
-        return bool(self._s.gateway_url and self._s.gateway_keycloak_url and self.client_id())
+        return self._gateway_set_up() and bool(self.client_id())
 
     def client_id(self) -> str | None:
         return self._company_id() or self._s.gateway_client_id
@@ -137,13 +137,22 @@ class GatewayConnection:
             "state": state,
             "participant_id": self._token_participant() if state in ("connected", "expired") else None,
             "expires_at": _iso(self._token.expires_at) if state == "connected" and self._token else None,
+            # The time left as seconds, so a client counts down without depending on its own clock.
+            "expires_in_s": max(0, int(self._token.expires_at - self._clock()))
+            if state == "connected" and self._token
+            else None,
             "credential_configured": state != "not_configured" and credential,
             "sharing_tier": None if state == "not_configured" else self._s.data_sharing_policy,
             "detail": self._detail(stored),
             "renewal_failures": self._failures,
             "client_id": None if state == "not_configured" else self.client_in_use(),
             "connecting": self._retrying and (state != "connected" or self._stopped),
+            # The gateway is set up, but no client is known: no company from the sign-in, none configured.
+            "needs_sign_in": state == "not_configured" and self._gateway_set_up(),
         }
+
+    def _gateway_set_up(self) -> bool:
+        return bool(self._s.gateway_url and self._s.gateway_keycloak_url)
 
     def client_in_use(self) -> str | None:
         """The client of the connection while connected, else the one a connection would use now."""
@@ -269,34 +278,49 @@ class GatewayConnection:
             log.warning("The dataspace secret was not stored: %s", error)
 
     async def _require_gateway(self) -> None:
+        url = f"{self.gateway_url}/health"
         try:
             async with httpx.AsyncClient(timeout=HEALTH_TIMEOUT_S, transport=self._transport) as client:
-                response = await client.get(f"{self.gateway_url}/health")
-        except httpx.HTTPError:
-            raise unavailable("The dataspace gateway can't be reached.") from None
+                response = await client.get(url)
+        except httpx.HTTPError as error:
+            raise unavailable(
+                "The dataspace gateway can't be reached.",
+                details={"stage": "gateway", "url": mask_url(url), "error": type(error).__name__},
+            ) from None
         if response.status_code != 200:
-            raise unavailable(f"The dataspace gateway answered HTTP {response.status_code}.")
+            raise unavailable(
+                f"The dataspace gateway answered HTTP {response.status_code}.",
+                details={"stage": "gateway", "url": mask_url(url), "http_status": response.status_code},
+            )
 
     async def _grant(self, client_id: str, secret: str) -> _Token:
         s = self._s
         url = f"{s.gateway_keycloak_url.rstrip('/')}/realms/{s.gateway_keycloak_realm}/protocol/openid-connect/token"
         form = {"grant_type": "client_credentials", "client_id": client_id, "client_secret": secret}
+        facts: dict[str, Any] = {"stage": "identity_provider", "url": mask_url(url), "client_id": client_id}
         try:
             async with httpx.AsyncClient(timeout=PROVIDER_TIMEOUT_S, transport=self._transport) as client:
                 response = await client.post(url, data=form)
-        except httpx.HTTPError:
-            raise unavailable("The dataspace's identity provider can't be reached.") from None
+        except httpx.HTTPError as error:
+            raise unavailable(
+                "The dataspace's identity provider can't be reached.", details={**facts, "error": type(error).__name__}
+            ) from None
+        facts["http_status"] = response.status_code
         if response.status_code in (400, 401):
-            raise unauthorized("The dataspace rejected the credential.")
+            problem = _provider_error(response)
+            raise unauthorized(_refusal(problem.get("provider_error")), details={**facts, **problem})
         if response.status_code != 200:
-            raise unavailable(f"The dataspace's identity provider answered HTTP {response.status_code}.")
+            raise unavailable(
+                f"The dataspace's identity provider answered HTTP {response.status_code}.",
+                details={**facts, **_provider_error(response)},
+            )
         try:
             answer = response.json()
             access, expires_in = answer["access_token"], answer["expires_in"]
         except (ValueError, KeyError, TypeError):
-            raise unavailable("The dataspace's identity provider sent an unexpected answer.") from None
+            raise unavailable("The dataspace's identity provider sent an unexpected answer.", details=facts) from None
         if not isinstance(access, str) or isinstance(expires_in, bool) or not isinstance(expires_in, int | float):
-            raise unavailable("The dataspace's identity provider sent an unexpected answer.")
+            raise unavailable("The dataspace's identity provider sent an unexpected answer.", details=facts)
         return _Token(access, self._clock() + expires_in)
 
     # ── Connecting by itself ─────────────────────────────────────────────────
@@ -400,3 +424,29 @@ class GatewayConnection:
 
 def _iso(epoch: float) -> str:
     return datetime.fromtimestamp(epoch, UTC).isoformat()
+
+
+def _provider_error(response: httpx.Response) -> dict[str, str]:
+    """The identity provider's OAuth error code, short, when it sent one.
+
+    Never its description: that is another service's message."""
+    try:
+        answer = response.json()
+    except ValueError:
+        return {}
+    if not isinstance(answer, dict):
+        return {}
+    code = answer.get("error")
+    return {"provider_error": code[:64]} if isinstance(code, str) and code else {}
+
+
+def _refusal(code: str | None) -> str:
+    """What the identity provider's refusal means for the operator, by its OAuth error code."""
+    if code == "invalid_client":
+        return (
+            "The dataspace refused the client or its secret. Check the secret, "
+            "and that the client is registered in the dataspace."
+        )
+    if code == "unauthorized_client":
+        return "The dataspace doesn't let this client get a token on its own (client credentials)."
+    return "The dataspace refused to issue a token."

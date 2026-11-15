@@ -237,6 +237,7 @@ class GatewayClient:
     async def peers(self) -> list[dict[str, Any]]:
         peers = await self.compatible()
         ids = [peer["participant_id"] for peer in peers]
+        types = {peer["participant_id"]: peer.get("participant_type") for peer in peers}
         names = await self.names(ids)
 
         async def offered(peer_id: str) -> list[str] | None:
@@ -257,6 +258,9 @@ class GatewayClient:
                 "capabilities": capabilities or [],
                 "capabilities_unavailable": capabilities is None,
                 "access_level": level["access_level"],
+                # What the peer may access here beyond its defaults, as granted on request.
+                "approved": level["approved"],
+                "participant_type": types.get(peer_id) if isinstance(types.get(peer_id), str) else None,
             }
             for peer_id, capabilities, level in zip(ids, found, levels, strict=True)
         ]
@@ -366,9 +370,13 @@ def _accepted(answer: Any) -> dict[str, Any]:
 
 
 def _policy(item: dict[str, Any]) -> dict[str, Any]:
+    raw = item.get("status")
+    known = raw if isinstance(raw, str) and raw in ACCESS_STATUS else None
     return {
         "capability": item.get("capability"),
-        "status": ACCESS_STATUS.get(item.get("status"), "default"),
+        "status": ACCESS_STATUS.get(known, "default") if known else "default",
+        # As the gateway applies it: auto (open by default), on-request, pending, approved or denied.
+        "gateway_status": known,
         "label": item.get("label"),
         "description": item.get("description"),
         "decision_note": item.get("decision_note"),
