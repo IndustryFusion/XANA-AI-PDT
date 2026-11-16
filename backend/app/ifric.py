@@ -244,10 +244,10 @@ class RegistryClient:
 
     # ── Builders ─────────────────────────────────────────────────────────────
 
-    async def builder(self, machine_id: str) -> Builder:
+    async def builder(self, machine_id: str, limit_s: float = TIMEOUT_S) -> Builder:
         """The machine's builder, or `NoBuilder` with the reason. Asks with the entity ID as it is."""
         try:
-            answer = await self._get(f"/company/assets/{_segment(machine_id)}/manufacturer")
+            answer = await self._get(f"/company/assets/{_segment(machine_id)}/manufacturer", limit_s)
         except _Failed as failure:
             if failure.status == 403:
                 raise NoBuilder(
@@ -264,21 +264,28 @@ class RegistryClient:
         return Builder(company_id, name if isinstance(name, str) and name else company_id)
 
     async def builders(self, machine_ids: list[str]) -> dict[str, str]:
-        """`{machine_id: builder's name}`, leaving out machines without one."""
+        """`{machine_id: builder's name}`, leaving out machines without one.
+
+        Lists show these beside their rows, so the lookup is bounded like the name lookups: each
+        request within `LOOKUP_REQUEST_S`, all of it within `NAMES_WITHIN_S`, and the registry isn't
+        asked while it is down."""
         unique = list(dict.fromkeys(machine_ids))
         if len(unique) > MAX_RESOLVED:
             raise invalid(f"Ask for at most {MAX_RESOLVED} machines at a time.")
         slots = asyncio.Semaphore(AT_ONCE)
 
-        async def one(machine_id: str) -> tuple[str, str | None]:
+        async def one(machine_id: str) -> str | None:
             async with slots:
+                if self._is_down():
+                    return None
                 try:
-                    return machine_id, (await self.builder(machine_id)).name
+                    return (await self.builder(machine_id, LOOKUP_REQUEST_S)).name
                 except NoBuilder as reason:
                     log.info("No builder for a machine: %s", reason)
-                    return machine_id, None
+                    return None
 
-        return {key: name for key, name in await asyncio.gather(*(one(m) for m in unique)) if name}
+        found = await _within(NAMES_WITHIN_S, {m: one(m) for m in unique}, late=_LATE)
+        return {key: name for key, name in found.items() if name and name is not _LATE}
 
     # ── Factories ────────────────────────────────────────────────────────────
 

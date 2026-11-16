@@ -618,6 +618,18 @@ async def test_machine_names_within_one_time():
     assert asyncio.get_running_loop().time() - started < NAMES_WITHIN_S + 0.5
 
 
+async def test_builders_within_one_time_and_not_asked_while_down():
+    registry, client = hanging_client()
+    started = asyncio.get_running_loop().time()
+    assert await asyncio.wait_for(client.builders([f"urn:m:{n}" for n in range(20)]), 6) == {}
+    assert asyncio.get_running_loop().time() - started < NAMES_WITHIN_S + 0.5
+    # It timed out, so it is down: the next lookup answers at once, with no request.
+    asked = len(registry.paths)
+    started = asyncio.get_running_loop().time()
+    assert await client.builders(["urn:m:1"]) == {}
+    assert asyncio.get_running_loop().time() - started < 0.2 and len(registry.paths) == asked
+
+
 async def test_peers_and_access_levels_answer_in_time_with_the_registry_hanging():
     space = Dataspace()
     peers = [f"urn:example:builder-{n}" for n in range(6)]
