@@ -25,6 +25,30 @@ import { isHttpIri, registry } from './prefixes'
 /** Said of a plain string that reads as a number. */
 export const NUMBER_TEXT_HINT = 'A number written as text: the platform’s check of a double accepts it, as a value without a datatype counts as the one expected.'
 
+/** The choice that lets the operator enter any other unit code. */
+const OTHER_UNIT = 'other'
+
+/** `CEL · °C · degree Celsius`; a code the catalogue doesn't know as it is. */
+export const unitText = (u) => [u.code, u.symbol, u.name].filter(Boolean).join(' · ')
+
+/**
+ * The units to offer: the ones the data model allows, else every known one; the stored unit is always
+ * among them, so the choice shows it.
+ */
+export function unitChoicesOf(allowed, known, current) {
+  const byCode = Object.fromEntries(known.map((u) => [u.code, u]))
+  const codes = allowed.length ? allowed : known.map((u) => u.code)
+  const list = codes.map((code) => byCode[code] ?? { code })
+  return current && !codes.includes(current) ? [...list, byCode[current] ?? { code: current }] : list
+}
+
+/** Why a unit code is refused, or null: not one the data model allows, or no known UN/CEFACT code. */
+export function unitRefusal(code, allowed, known, knownLoaded) {
+  if (allowed.length && !allowed.includes(code)) return `${code} is not a unit the data model allows here (${allowed.join(', ')}).`
+  if (!allowed.length && knownLoaded && !known.some((u) => u.code === code)) return `${code} is not a known UN/CEFACT unit code.`
+  return null
+}
+
 /** The allowed range in words, saying whether each limit is included; null without one. */
 export function rangeText(hint) {
   if (!hint || (hint.minimum == null && hint.maximum == null)) return null
@@ -42,8 +66,12 @@ export function rangeText(hint) {
  *
  * `datatype` is the value's datatype as the platform reads it (a full IRI), preset in a choice of
  * datatypes; picking another one changes it. `numberText` marks a plain string that reads as a number.
+ *
+ * `unit` is the value's `unitCode` (null without one); given, the editor offers a choice of units: the
+ * ones the data model allows for the attribute, else the known UN/CEFACT codes, each with its symbol
+ * and name, and any other code after a warning. Left out, there is no unit to choose.
  */
-export default function ValueEditor({ label, initial, entityType, attribute, iri = false, datatype = null, numberText = false, onSave, onCancel }) {
+export default function ValueEditor({ label, initial, entityType, attribute, iri = false, datatype = null, numberText = false, unit, onSave, onCancel }) {
   const [text, setText] = useState(initial == null ? '' : String(initial))
   // The datatype the editing started from: a live update while the editor is open changes nothing here.
   const [from] = useState(datatype)
@@ -57,8 +85,23 @@ export default function ValueEditor({ label, initial, entityType, attribute, iri
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
   const inputRef = useRef(null)
-  const ids = { input: useId(), list: useId(), error: useId(), type: useId(), other: useId() }
+  const ids = { input: useId(), list: useId(), error: useId(), type: useId(), other: useId(), unit: useId(), otherUnit: useId() }
   const hints = useData('entities', 'getValueHints', [{ entityType, attribute }])
+  const withUnit = unit !== undefined
+  const catalogue = useData('entities', 'getUnits', [], { enabled: withUnit })
+  // The unit the editing started from, as for the datatype: a live update meanwhile is no change by the operator.
+  const [unitFrom] = useState(unit ?? null)
+  const [unitChoice, setUnitChoice] = useState(unitFrom ?? '')
+  const [otherUnit, setOtherUnit] = useState('')
+  // What the operator insisted on after its warning: the value, until the text or datatype changes, and
+  // the unit, until another unit is chosen. Each is saved anyway only for itself.
+  const [valueInsisted, setValueInsisted] = useState(false)
+  const [unitInsisted, setUnitInsisted] = useState(false)
+  const allowedUnits = hints.data?.units ?? []
+  const knownUnits = catalogue.data?.units ?? []
+  const unitOptions = unitChoicesOf(allowedUnits, knownUnits, unitFrom)
+  const chosenUnit = unitChoice === OTHER_UNIT ? otherUnit.trim() : (unitChoice || null)
+  const unitChanged = withUnit && chosenUnit !== unitFrom
   // Suggested IRIs are offered and entered as short names; saving expands them again.
   const shown = (h) => (iri || isHttpIri(h) ? registry.shorten(h) : h)
   const options = (hints.data?.values ?? []).map(shown).filter((h) => h !== text)
@@ -70,19 +113,36 @@ export default function ValueEditor({ label, initial, entityType, attribute, iri
   /** A new text ends any choice in the list, at once: Enter right after a pick must save, not pick again. */
   function changeText(next) {
     setText(next)
+    setValueInsisted(false)
     setActive(-1)
   }
 
-  /** `force`: the operator insists on a value the checks refused, for example to test how the system reacts. */
-  async function save(force = false) {
+  /**
+   * `force`: the operator insists on a value the checks refused, for example to test how the system reacts.
+   * `unitAnyway`: they insist on a unit that was refused; the value's own checks still apply.
+   */
+  async function save(force = valueInsisted, unitAnyway = unitInsisted) {
+    if (force !== valueInsisted) setValueInsisted(force)
+    if (unitAnyway !== unitInsisted) setUnitInsisted(unitAnyway)
     if (from && !chosen) {
       setError({ message: 'Enter the IRI of the datatype.' })
+      return
+    }
+    if (unitChanged && chosenUnit === '') {
+      setError({ message: 'Enter the unit code.' })
+      return
+    }
+    const unitProblem = unitChanged && chosenUnit && !unitAnyway ? unitRefusal(chosenUnit, allowedUnits, knownUnits, catalogue.status === 'success') : null
+    if (unitProblem) {
+      setError({ kind: 'unit', message: unitProblem })
       return
     }
     setBusy(true)
     setError(null)
     try {
-      await onSave(!iri && fullOf[text] ? fullOf[text] : text, { ...(force ? { force: true } : {}), ...(from ? { datatype: chosen, from } : {}) })
+      await onSave(!iri && fullOf[text] ? fullOf[text] : text, {
+        ...(force ? { force: true } : {}), ...(from ? { datatype: chosen, from } : {}), ...(unitChanged ? { unit: chosenUnit } : {}),
+      })
     } catch (err) {
       setError(err)
       setBusy(false)
@@ -128,7 +188,7 @@ export default function ValueEditor({ label, initial, entityType, attribute, iri
         {from && (
           <>
             <label className="visually-hidden" htmlFor={ids.type}>Datatype of {label}</label>
-            <select id={ids.type} className="value-editor__type mono" value={choice} disabled={busy} onChange={(e) => { setChoice(e.target.value); setError(null) }}>
+            <select id={ids.type} className="value-editor__type mono" value={choice} disabled={busy} onChange={(e) => { setChoice(e.target.value); setValueInsisted(false); setError(null) }}>
               {choices.map((d) => <option key={d.id} value={d.id}>{d.label}</option>)}
               <option value={OTHER_DATATYPE}>Other IRI…</option>
             </select>
@@ -136,6 +196,22 @@ export default function ValueEditor({ label, initial, entityType, attribute, iri
               <>
                 <label className="visually-hidden" htmlFor={ids.other}>Datatype IRI of {label}</label>
                 <input id={ids.other} className="value-editor__other mono" value={otherIri} placeholder="xsd:anyURI" disabled={busy} autoComplete="off" onChange={(e) => { setOtherIri(e.target.value); setError(null) }} />
+              </>
+            )}
+          </>
+        )}
+        {withUnit && (
+          <>
+            <label className="visually-hidden" htmlFor={ids.unit}>Unit of {label}</label>
+            <select id={ids.unit} className="value-editor__unit mono" value={unitChoice} disabled={busy} onChange={(e) => { setUnitChoice(e.target.value); setUnitInsisted(false); setError(null) }}>
+              <option value="">No unit</option>
+              {unitOptions.map((u) => <option key={u.code} value={u.code}>{unitText(u)}</option>)}
+              <option value={OTHER_UNIT}>Other code…</option>
+            </select>
+            {unitChoice === OTHER_UNIT && (
+              <>
+                <label className="visually-hidden" htmlFor={ids.otherUnit}>Unit code of {label}</label>
+                <input id={ids.otherUnit} className="value-editor__other mono" value={otherUnit} placeholder="CEL" disabled={busy} autoComplete="off" onChange={(e) => { setOtherUnit(e.target.value); setUnitInsisted(false); setError(null) }} />
               </>
             )}
           </>
@@ -167,15 +243,22 @@ export default function ValueEditor({ label, initial, entityType, attribute, iri
       {numberText && !typeChanged && <p className="muted value-editor__range">{NUMBER_TEXT_HINT}</p>}
       {range && <p className="muted value-editor__range">{range}</p>}
       {hints.data?.hintType === 'none' && hints.data.detail && <p className="muted value-editor__range">No suggestions: {hints.data.detail}</p>}
-      {error && (error.kind === 'invalid' || error.kind === 'datatype') ? (
+      {unitChanged && chosenUnit !== '' && (
+        <p className="muted value-editor__range" role="status">
+          {chosenUnit ? `Changes the unit to ${chosenUnit}.` : 'Removes the unit.'}
+        </p>
+      )}
+      {error && (error.kind === 'invalid' || error.kind === 'datatype' || error.kind === 'unit') ? (
         <div id={ids.error} className="value-editor__warning" role="alert">
           <p className="form-error">Not saved: {shortenText(error.message)}</p>
           <p className="muted">
             {error.kind === 'datatype'
               ? `You can save it anyway, as a value declared ${datatypeLabel(chosen)}, for example to test how alerts and the system react to a value not of its datatype.`
-              : 'You can save it anyway, for example to test how alerts and the system react to a wrong value.'}
+              : error.kind === 'unit'
+                ? 'You can save it anyway, for example to test how the system reacts to a unit it doesn’t expect.'
+                : 'You can save it anyway, for example to test how alerts and the system react to a wrong value.'}
           </p>
-          <Button size="sm" variant="danger" disabled={busy} onClick={() => save(true)}>Save anyway</Button>
+          <Button size="sm" variant="danger" disabled={busy} onClick={() => (error.kind === 'unit' ? save(valueInsisted, true) : save(true, unitInsisted))}>Save anyway</Button>
         </div>
       ) : error && <p id={ids.error} className="form-error value-editor__error" role="alert">Not saved: {shortenText(error.message)}</p>}
     </div>

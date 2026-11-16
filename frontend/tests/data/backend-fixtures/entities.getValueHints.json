@@ -16,6 +16,7 @@
     "minimum_exclusive": false,
     "maximum_exclusive": false,
     "datatype": null,
+    "units": [],
     "detail": null
   }
 }

@@ -561,6 +561,107 @@ describe('edit attributes', () => {
     }
   })
 
+  test('the unit is chosen beside the value: the data model\'s units, with their symbols and names, or none', async () => {
+    const user = userEvent.setup()
+    openEntity(SENSOR)
+    await waitFor(() => expect(attribute('value')).not.toBeNull())
+    const stored = entityStored(SENSOR).value
+    await user.click(within(attribute('value')).getByRole('button', { name: 'Edit value' }))
+    const unit = screen.getByRole('combobox', { name: 'Unit of value' })
+    // The units the data model allows, the stored one, and a way to give none or another code.
+    await waitFor(() => expect(within(unit).getAllByRole('option').map((o) => o.textContent)).toEqual([
+      'No unit', 'CEL · °C · degree Celsius', 'KEL · K · kelvin', stored.unitCode, 'Other code…',
+    ]))
+    expect(unit).toHaveDisplayValue(stored.unitCode)
+    await user.selectOptions(unit, 'KEL')
+    expect(screen.getByText('Changes the unit to KEL.')).toBeVisible()
+    await user.click(screen.getByRole('button', { name: 'Save value' }))
+    await waitFor(() => expect(entityStored(SENSOR).value.unitCode).toBe('KEL'))
+    expect(entityStored(SENSOR).value.datasetId).toBe(stored.datasetId)
+    await user.click(within(attribute('value')).getByRole('button', { name: 'Edit value' }))
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Unit of value' }), 'No unit')
+    expect(screen.getByText('Removes the unit.')).toBeVisible()
+    await user.click(screen.getByRole('button', { name: 'Save value' }))
+    await waitFor(() => expect(entityStored(SENSOR).value).not.toHaveProperty('unitCode'))
+  })
+
+  test('a unit the data model doesn\'t allow, or no known code, is refused, and can be saved anyway', async () => {
+    const user = userEvent.setup()
+    openEntity(SENSOR)
+    await waitFor(() => expect(attribute('value')).not.toBeNull())
+    await user.click(within(attribute('value')).getByRole('button', { name: 'Edit value' }))
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Unit of value' }), 'Other code…')
+    await user.click(screen.getByRole('button', { name: 'Save value' }))
+    expect(await within(attribute('value')).findByRole('alert')).toHaveTextContent('Enter the unit code.')
+    await user.type(screen.getByRole('textbox', { name: 'Unit code of value' }), 'BAR')
+    await user.click(screen.getByRole('button', { name: 'Save value' }))
+    const warning = await within(attribute('value')).findByRole('alert')
+    expect(warning).toHaveTextContent('BAR is not a unit the data model allows here (CEL, KEL).')
+    await user.click(within(warning).getByRole('button', { name: 'Save anyway' }))
+    await waitFor(() => expect(entityStored(SENSOR).value.unitCode).toBe('BAR'))
+    // Where the data model names no units, any known UN/CEFACT code is offered, and an unknown one refused.
+    openEntity(MACHINE)
+    await waitFor(() => expect(attribute('status')).not.toBeNull())
+    await user.click(within(attribute('status')).getByRole('button', { name: 'Edit status' }))
+    const unit = screen.getByRole('combobox', { name: 'Unit of status' })
+    await waitFor(() => expect(within(unit).getByRole('option', { name: 'BAR · bar · bar' })).toBeInTheDocument())
+    await user.selectOptions(unit, 'Other code…')
+    await user.type(screen.getByRole('textbox', { name: 'Unit code of status' }), 'XYZ')
+    await user.click(screen.getByRole('button', { name: 'Save status' }))
+    expect(await within(attribute('status')).findByRole('alert')).toHaveTextContent('XYZ is not a known UN/CEFACT unit code.')
+  })
+
+  test('a unit saved anyway doesn\'t let a refused value through, and each warning is passed alone', async () => {
+    const user = userEvent.setup()
+    openEntity(SENSOR)
+    store.update((s) => { s.entities.find((e) => e.id === SENSOR).value.value = 21.5; return s })
+    await waitFor(() => expect(within(attribute('value')).getByTestId('datatype')).toHaveTextContent('xsd:double'))
+    const before = structuredClone(entityStored(SENSOR).value)
+    await user.click(within(attribute('value')).getByRole('button', { name: 'Edit value' }))
+    const input = screen.getByRole('combobox', { name: 'New value of value' })
+    await user.clear(input)
+    await user.type(input, 'abc')
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Unit of value' }), 'Other code…')
+    await user.type(screen.getByRole('textbox', { name: 'Unit code of value' }), 'BAR')
+    await user.click(screen.getByRole('button', { name: 'Save value' }))
+    let warning = await within(attribute('value')).findByRole('alert')
+    expect(warning).toHaveTextContent('BAR is not a unit the data model allows here')
+    await user.click(within(warning).getByRole('button', { name: 'Save anyway' }))
+    // The unit is taken as insisted on; the value still gets its own warning, and nothing is written yet.
+    await waitFor(() => expect(within(attribute('value')).getByRole('alert')).toHaveTextContent('“abc” is not a value of xsd:double.'))
+    expect(entityStored(SENSOR).value).toEqual(before)
+    warning = within(attribute('value')).getByRole('alert')
+    await user.click(within(warning).getByRole('button', { name: 'Save anyway' }))
+    await waitFor(() => expect(entityStored(SENSOR).value.unitCode).toBe('BAR'))
+    expect(entityStored(SENSOR).value.value).toEqual({ '@value': 'abc', '@type': 'http://www.w3.org/2001/XMLSchema#double' })
+  })
+
+  test('a unit changed by a live update while editing isn\'t put back by saving the value', async () => {
+    const handlers = []
+    const real = entities.subscribeEntities
+    const spy = vi.spyOn(entities, 'subscribeEntities').mockImplementation((params, onEvent) => { handlers.push(onEvent); return real(params, () => {}) })
+    try {
+      const user = userEvent.setup()
+      openEntity(SENSOR)
+      store.update((s) => { s.entities.find((e) => e.id === SENSOR).value.unitCode = 'CEL'; return s })
+      await waitFor(() => expect(attribute('value')).toHaveTextContent('CEL'))
+      await user.click(within(attribute('value')).getByRole('button', { name: 'Edit value' }))
+      await waitFor(() => expect(handlers.length).toBeGreaterThan(0))
+      // Meanwhile the unit is changed elsewhere.
+      store.update((s) => { s.entities.find((e) => e.id === SENSOR).value.unitCode = 'KEL'; return s })
+      const value = structuredClone(entityStored(SENSOR).value)
+      act(() => handlers.forEach((on) => on({ type: 'update', entityId: SENSOR, attributes: { value } })))
+      expect(screen.queryByText(/^Changes the unit/)).toBeNull()
+      const input = screen.getByRole('combobox', { name: 'New value of value' })
+      await user.clear(input)
+      await user.type(input, '81{Enter}')
+      await waitFor(() => expect(entityStored(SENSOR).value.value).toBe(81))
+      expect(entityStored(SENSOR).value.unitCode).toBe('KEL')
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
   test('the default instance beside one with a dataset can be deleted alone', async () => {
     const user = userEvent.setup()
     openEntity(SENSOR)
@@ -667,7 +768,9 @@ describe('edit attributes', () => {
   test('a rejected change keeps the input open with the entered value and the reason', async () => {
     const user = userEvent.setup()
     openEntity(SENSOR)
-    await waitFor(() => expect(attribute('value')).not.toBeNull())
+    // A fractional value, read as xsd:double: the simulated one is sometimes whole.
+    store.update((s) => { s.entities.find((e) => e.id === SENSOR).value.value = 21.5; return s })
+    await waitFor(() => expect(within(attribute('value')).getByTestId('datatype')).toHaveTextContent('xsd:double'))
     await user.click(within(attribute('value')).getByRole('button', { name: 'Edit value' }))
     const input = screen.getByRole('combobox', { name: 'New value of value' })
     await user.clear(input)

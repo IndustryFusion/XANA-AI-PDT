@@ -194,7 +194,7 @@ function Line({ name, path, inst, ctx, actions, multi = false, dataset = null, f
    * deliberate change, so the backend's number check is skipped for it. `force` writes a value the checks
    * refuse, when the operator insists -- one not of its datatype then goes declared as it was entered.
    */
-  async function save(text, { force = false, datatype: chosen = null, from = datatype } = {}) {
+  async function save(text, { force = false, datatype: chosen = null, from = datatype, unit } = {}) {
     const [member] = editable
     const typed = iriMember ? registry.expand(text, { identifier: true }) : text
     // Parsed against the plain value: a declared number is edited as a number (gh-84).
@@ -217,8 +217,10 @@ function Line({ name, path, inst, ctx, actions, multi = false, dataset = null, f
       }
     }
     const options = { force, ...(exact ? { exact } : {}) }
-    if (path.length) await entities.updateAttributes(ctx.entityId, { [name]: { [member]: value } }, { path, datasetId: dataset, ...options })
-    else await entities.updateAttributes(ctx.entityId, { [name]: { [member]: value, ...(dataset ? { datasetId: dataset } : {}) } }, options)
+    // A changed unit goes with the value; null takes it away.
+    const withUnit = unit !== undefined ? { unitCode: unit } : {}
+    if (path.length) await entities.updateAttributes(ctx.entityId, { [name]: { [member]: value, ...withUnit } }, { path, datasetId: dataset, ...options })
+    else await entities.updateAttributes(ctx.entityId, { [name]: { [member]: value, ...withUnit, ...(dataset ? { datasetId: dataset } : {}) } }, options)
     setEditing(false)
     ctx.onSaved([name, ...path])
   }
@@ -238,7 +240,7 @@ function Line({ name, path, inst, ctx, actions, multi = false, dataset = null, f
     value = (
       <ValueEditor
         label={path.length ? `${shortDotted(own)} of ${shortDotted(name, path.slice(0, -1))}` : label} initial={initial}
-        entityType={ctx.entityType} attribute={own} iri={!!iriMember} datatype={datatype} numberText={numberText}
+        entityType={ctx.entityType} attribute={own} iri={!!iriMember} datatype={datatype} numberText={numberText} unit={kind === 'property' && member === 'value' ? (inst.unitCode ?? null) : undefined}
         onSave={save} onCancel={() => setEditing(false)}
       />
     )

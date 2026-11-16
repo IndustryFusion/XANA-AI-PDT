@@ -106,6 +106,17 @@ function instanceIn(attribute, datasetId) {
 /** Whether a value is a number, plain or declared (`{"@value": 42.5, "@type": "…#double"}`). */
 const isNumber = (value) => typeof value === 'number' || (!!value && typeof value === 'object' && typeof value['@value'] === 'number')
 
+/** Units the mock's data model allows per entity type and attribute, as `sh:in` on `unitCode` would. */
+const UNIT_HINTS = { Sensor: { value: ['CEL', 'KEL'] } }
+/** The mock's unit catalogue: a few common UN/CEFACT codes. */
+const MOCK_UNITS = [
+  { code: 'BAR', symbol: 'bar', name: 'bar' }, { code: 'CEL', symbol: '°C', name: 'degree Celsius' },
+  { code: 'KEL', symbol: 'K', name: 'kelvin' }, { code: 'L2', symbol: 'l/min', name: 'litre per minute' },
+  { code: 'MMT', symbol: 'mm', name: 'millimetre' }, { code: 'P1', symbol: '%', name: 'percent' },
+]
+/** A member given as null is taken away, as the backend does for a cleared unit. */
+const clearNulls = (attribute) => { if (attribute && attribute.unitCode === null) delete attribute.unitCode }
+
 function validateAttribute(name, attr, existing, force = false) {
   if (!NAME.test(name) || RESERVED.includes(name)) throw err('invalid', `"${name}" is not a valid attribute name.`)
   if (!isAttribute(attr) && !existing) throw err('invalid', `Attribute ${name} needs a type and a value.`)
@@ -262,6 +273,7 @@ export function createEntitiesArea(store) {
         store.update((state) => {
           const node = walk(instanceIn(state.entities.find((x) => x.id === id)[name], datasetId), name, path)
           Object.assign(node, structuredClone(fragment))
+          clearNulls(node)
           if (node.observedAt && ('value' in fragment || 'vocab' in fragment) && !('observedAt' in fragment)) node.observedAt = now()
           return state
         })
@@ -283,6 +295,7 @@ export function createEntitiesArea(store) {
         for (const [name, fragment] of Object.entries(attrs)) {
           const instance = instanceIn(e[name], fragment.datasetId)
           Object.assign(instance, structuredClone(fragment))
+          clearNulls(instance)
           // A new value is observed now, unless the fragment names its own observation time.
           if (instance.observedAt && ('value' in fragment || 'vocab' in fragment) && !('observedAt' in fragment)) instance.observedAt = now()
         }
@@ -507,8 +520,11 @@ export function createEntitiesArea(store) {
         minimumExclusive: false,
         maximumExclusive: range?.maximumExclusive ?? false,
         datatype,
+        units: [...(UNIT_HINTS[entityType]?.[attribute] ?? [])],
         detail: null,
       }
     }),
+
+    getUnits: withControls(() => ({ source: 'built_in', units: structuredClone(MOCK_UNITS), detail: null })),
   }
 }

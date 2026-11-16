@@ -1,0 +1,316 @@
+{
+  "method": "GET",
+  "path": "/api/shacl/units",
+  "status": 200,
+  "body": {
+    "source": "built_in",
+    "units": [
+      {
+        "code": "CEL",
+        "symbol": "°C",
+        "name": "degree Celsius"
+      },
+      {
+        "code": "KEL",
+        "symbol": "K",
+        "name": "kelvin"
+      },
+      {
+        "code": "FAH",
+        "symbol": "°F",
+        "name": "degree Fahrenheit"
+      },
+      {
+        "code": "PAL",
+        "symbol": "Pa",
+        "name": "pascal"
+      },
+      {
+        "code": "KPA",
+        "symbol": "kPa",
+        "name": "kilopascal"
+      },
+      {
+        "code": "MPA",
+        "symbol": "MPa",
+        "name": "megapascal"
+      },
+      {
+        "code": "BAR",
+        "symbol": "bar",
+        "name": "bar"
+      },
+      {
+        "code": "MBR",
+        "symbol": "mbar",
+        "name": "millibar"
+      },
+      {
+        "code": "MTR",
+        "symbol": "m",
+        "name": "metre"
+      },
+      {
+        "code": "CMT",
+        "symbol": "cm",
+        "name": "centimetre"
+      },
+      {
+        "code": "MMT",
+        "symbol": "mm",
+        "name": "millimetre"
+      },
+      {
+        "code": "4H",
+        "symbol": "µm",
+        "name": "micrometre"
+      },
+      {
+        "code": "KMT",
+        "symbol": "km",
+        "name": "kilometre"
+      },
+      {
+        "code": "MTK",
+        "symbol": "m²",
+        "name": "square metre"
+      },
+      {
+        "code": "MTQ",
+        "symbol": "m³",
+        "name": "cubic metre"
+      },
+      {
+        "code": "LTR",
+        "symbol": "l",
+        "name": "litre"
+      },
+      {
+        "code": "MLT",
+        "symbol": "ml",
+        "name": "millilitre"
+      },
+      {
+        "code": "MQH",
+        "symbol": "m³/h",
+        "name": "cubic metre per hour"
+      },
+      {
+        "code": "MQS",
+        "symbol": "m³/s",
+        "name": "cubic metre per second"
+      },
+      {
+        "code": "L2",
+        "symbol": "l/min",
+        "name": "litre per minute"
+      },
+      {
+        "code": "KGM",
+        "symbol": "kg",
+        "name": "kilogram"
+      },
+      {
+        "code": "GRM",
+        "symbol": "g",
+        "name": "gram"
+      },
+      {
+        "code": "TNE",
+        "symbol": "t",
+        "name": "tonne"
+      },
+      {
+        "code": "KGH",
+        "symbol": "kg/h",
+        "name": "kilogram per hour"
+      },
+      {
+        "code": "KMQ",
+        "symbol": "kg/m³",
+        "name": "kilogram per cubic metre"
+      },
+      {
+        "code": "SEC",
+        "symbol": "s",
+        "name": "second"
+      },
+      {
+        "code": "C26",
+        "symbol": "ms",
+        "name": "millisecond"
+      },
+      {
+        "code": "MIN",
+        "symbol": "min",
+        "name": "minute"
+      },
+      {
+        "code": "HUR",
+        "symbol": "h",
+        "name": "hour"
+      },
+      {
+        "code": "DAY",
+        "symbol": "d",
+        "name": "day"
+      },
+      {
+        "code": "HTZ",
+        "symbol": "Hz",
+        "name": "hertz"
+      },
+      {
+        "code": "KHZ",
+        "symbol": "kHz",
+        "name": "kilohertz"
+      },
+      {
+        "code": "RPM",
+        "symbol": "r/min",
+        "name": "revolutions per minute"
+      },
+      {
+        "code": "MTS",
+        "symbol": "m/s",
+        "name": "metre per second"
+      },
+      {
+        "code": "MSK",
+        "symbol": "m/s²",
+        "name": "metre per second squared"
+      },
+      {
+        "code": "KMH",
+        "symbol": "km/h",
+        "name": "kilometre per hour"
+      },
+      {
+        "code": "NEW",
+        "symbol": "N",
+        "name": "newton"
+      },
+      {
+        "code": "KN",
+        "symbol": "kN",
+        "name": "kilonewton"
+      },
+      {
+        "code": "NU",
+        "symbol": "N·m",
+        "name": "newton metre"
+      },
+      {
+        "code": "WTT",
+        "symbol": "W",
+        "name": "watt"
+      },
+      {
+        "code": "KWT",
+        "symbol": "kW",
+        "name": "kilowatt"
+      },
+      {
+        "code": "MAW",
+        "symbol": "MW",
+        "name": "megawatt"
+      },
+      {
+        "code": "WHR",
+        "symbol": "W·h",
+        "name": "watt hour"
+      },
+      {
+        "code": "KWH",
+        "symbol": "kW·h",
+        "name": "kilowatt hour"
+      },
+      {
+        "code": "JOU",
+        "symbol": "J",
+        "name": "joule"
+      },
+      {
+        "code": "KJO",
+        "symbol": "kJ",
+        "name": "kilojoule"
+      },
+      {
+        "code": "VLT",
+        "symbol": "V",
+        "name": "volt"
+      },
+      {
+        "code": "KVT",
+        "symbol": "kV",
+        "name": "kilovolt"
+      },
+      {
+        "code": "2Z",
+        "symbol": "mV",
+        "name": "millivolt"
+      },
+      {
+        "code": "AMP",
+        "symbol": "A",
+        "name": "ampere"
+      },
+      {
+        "code": "4K",
+        "symbol": "mA",
+        "name": "milliampere"
+      },
+      {
+        "code": "OHM",
+        "symbol": "Ω",
+        "name": "ohm"
+      },
+      {
+        "code": "D33",
+        "symbol": "T",
+        "name": "tesla"
+      },
+      {
+        "code": "P1",
+        "symbol": "%",
+        "name": "percent"
+      },
+      {
+        "code": "59",
+        "symbol": "ppm",
+        "name": "part per million"
+      },
+      {
+        "code": "2N",
+        "symbol": "dB",
+        "name": "decibel"
+      },
+      {
+        "code": "DD",
+        "symbol": "°",
+        "name": "degree (angle)"
+      },
+      {
+        "code": "C81",
+        "symbol": "rad",
+        "name": "radian"
+      },
+      {
+        "code": "LUX",
+        "symbol": "lx",
+        "name": "lux"
+      },
+      {
+        "code": "A86",
+        "symbol": "GHz",
+        "name": "gigahertz"
+      },
+      {
+        "code": "C62",
+        "symbol": "1",
+        "name": "one (no unit)"
+      }
+    ],
+    "detail": null
+  }
+}

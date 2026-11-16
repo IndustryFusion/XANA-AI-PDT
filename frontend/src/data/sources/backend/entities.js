@@ -105,4 +105,5 @@ export const entities = {
   getPrefixes: () => request(AREA, 'GET', '/api/ngsi/prefixes', raw),
   getValueHints: ({ entityType, attribute } = {}) =>
     request(AREA, 'GET', '/api/shacl/hints', { params: { entity_type: entityType, attribute } }),
+  getUnits: () => request(AREA, 'GET', '/api/shacl/units'),
 }

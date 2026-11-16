@@ -423,3 +423,6 @@
 /* The type a plain value is saved as, beside its input; a declared datatype is shown instead. */
 .value-editor__type { font-size: var(--text-sm); height: var(--control-height-sm); }
 .value-editor__other { font-size: var(--text-sm); width: 14ch; height: var(--control-height-sm); }
+.value-editor__unit { font-size: var(--text-sm); height: var(--control-height-sm); max-width: 16rem; }
+/* The small controls of the editor's row keep their text whole: the regular controls' vertical padding doesn't fit them. */
+.value-editor__row :is(select, input) { padding-block: 0; line-height: 1.25; }

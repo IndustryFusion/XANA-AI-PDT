@@ -46,7 +46,7 @@ export const OPERATIONS = {
     'getStats', 'listTypes', 'listAttributes', 'queryEntities', 'getEntity', 'updateAttributes',
     'appendAttributes', 'deleteAttribute', 'deleteEntity', 'importEntities', 'fetchImportDocument',
     'deleteByTypes', 'getAttributeHistory', 'getAttributeStatus', 'listTypesAt', 'queryEntitiesAt', 'subscribeEntities',
-    'getLiveUpdateHealth', 'getValueHints', 'getPrefixes',
+    'getLiveUpdateHealth', 'getValueHints', 'getUnits', 'getPrefixes',
   ],
   alerts: ['listAlerts', 'countAlerts', 'getAlert', 'applyAlertAction', 'listEnvironments', 'listServices', 'getAlertSettings'],
   dataspace: [
@@ -391,8 +391,10 @@ export const SHAPES = {
     getPrefixes: { prefixes: [{ prefix: 'string', namespace: 'string' }], detail: '?string' },
     getValueHints: {
       hintType: { $enum: ['enum', 'range', 'datatype', 'none'] }, values: ['string'], minimum: '?number', maximum: '?number',
-      minimumExclusive: 'boolean', maximumExclusive: 'boolean', datatype: '?string', detail: '?string',
+      minimumExclusive: 'boolean', maximumExclusive: 'boolean', datatype: '?string', units: ['string'], detail: '?string',
     },
+    // The units to offer for `unitCode`: the knowledge's, else common UN/CEFACT codes.
+    getUnits: { source: { $enum: ['knowledge', 'built_in'] }, units: [{ code: 'string', symbol: 'string', name: 'string' }], detail: '?string' },
   },
   dataspace: {
     getConnection: connection,
