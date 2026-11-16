@@ -270,7 +270,7 @@ The Data explorer SHALL show every http(s) IRI as `prefix:local`, or `prefix:` f
 
 #### Scenario: No full view in place
 - **WHEN** the operator clicks a short name, or looks for a setting to show names in full
-- **THEN** the name stays short and no such setting exists; clicking does only what clicking that element otherwise does, such as following a relationship
+- **THEN** the name stays short and no such setting exists; clicking does only what clicking that element otherwise does, such as following a relationship. Only a long name's middle can be shown in place, through its context menu (*Long names shortened in the middle*), and the full IRI still only in the tooltip and the menu
 
 #### Scenario: Prefix legend
 - **WHEN** the operator opens the prefix legend
@@ -290,7 +290,7 @@ The Data explorer SHALL show every http(s) IRI as `prefix:local`, or `prefix:` f
 
 #### Scenario: URNs
 - **WHEN** an identifier is a URN, such as `urn:ngsi-ld:Pump:1`, or a term without a colon that the broker compacted through a configured context
-- **THEN** it is shown as it is: a URN is an entity identifier, not an IRI in a namespace, so this is not an exception to the rule
+- **THEN** it is shown as it is, or shortened in the middle when it is long (*Long names shortened in the middle*): a URN is an entity identifier, not an IRI in a namespace, so this is not an exception to the rule
 
 ### Requirement: Short names in every part of the explorer
 The rule of "Short names for IRIs" SHALL hold wherever the Data explorer shows an IRI, not only in the entity tree. Wherever a list or select offers IRIs, each option SHALL show its short name, with the full IRI as its tooltip.
@@ -637,3 +637,26 @@ The editor of a property's value SHALL offer its unit beside the value: the unit
 #### Scenario: No code entered
 - **WHEN** the operator chooses *Other code…* and enters nothing
 - **THEN** the editor asks for the unit code
+
+### Requirement: Long names shortened in the middle
+The Data explorer SHALL show a URN or a prefixed name whose part after `urn:<nid>:` or `prefix:` is longer than 48 characters with that start, its first and last 6 characters and an ellipsis, such as `urn:uaentity:c3Z1PX…01MDE4`. Its tooltip SHALL hold the name in full, and the full IRI behind a prefixed name. Its context menu SHALL offer *Show in full* and then *Abbreviate*, besides the copy actions.
+
+#### Scenario: A long URN
+- **WHEN** a relationship's target is `urn:uaentity:` followed by 120 characters
+- **THEN** it is shown as `urn:uaentity:`, the first 6 and the last 6 of them with an ellipsis between, on the relationship's line, with the URN in full as its tooltip
+
+#### Scenario: A long prefixed name
+- **WHEN** a vocabulary value's short name is `instanceExam:` followed by 120 characters
+- **THEN** it is shown shortened the same way, with the prefixed name and the full IRI in its tooltip
+
+#### Scenario: Shorter names unchanged
+- **WHEN** a name such as `urn:ngsi-ld:Component:chiller-01-coolant-pump` or `pumps:hasDifferentialPressure` is shown
+- **THEN** it is shown as before, with its tooltip and menu as before
+
+#### Scenario: In full and back
+- **WHEN** the operator chooses *Show in full* in a shortened name's context menu, and later *Abbreviate*
+- **THEN** the name is shown in full in place, then shortened again; copying the identifier, the short name or the full IRI is offered as before
+
+#### Scenario: A long heading
+- **WHEN** an entity without a name is shown under the last segment of a long ID
+- **THEN** its heading is shortened the same way, with the ID as its tooltip
