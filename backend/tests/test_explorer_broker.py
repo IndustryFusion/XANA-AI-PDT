@@ -1380,3 +1380,28 @@ def test_deleting_an_instance_that_isnt_there_changes_nothing(client, broker):
     answer = client.delete(f"{ENTITY}/attrs", params={"name": attrs("vib"), "dataset_id": "urn:d:nope"})
     assert answer.status_code == 404
     assert broker.entities[MACHINE][attrs("vib")] == {"type": "Property", "value": 1}
+
+
+def test_a_unit_is_set_and_cleared_and_the_rest_stays(client, broker):
+    assert client.patch(f"{ENTITY}/attrs", json={attrs(): {"unitCode": "KEL"}}).status_code == 204
+    stored = broker.entities[MACHINE][attrs()]
+    assert stored["unitCode"] == "KEL" and stored["value"] == 42 and attrs("limit") in stored
+    assert client.patch(f"{ENTITY}/attrs", json={attrs(): {"unitCode": None}}).status_code == 204
+    stored = broker.entities[MACHINE][attrs()]
+    assert "unitCode" not in stored and stored["value"] == 42 and attrs("limit") in stored
+    # Cleared through the attribute write, which replaces the attribute: a merge can't take a member away.
+    write = next(r for r in reversed(broker.requests) if r.method in ("PATCH", "POST") and r.content)
+    assert write.method == "POST" and write.url.path.endswith("/attrs")
+
+
+def test_the_unit_of_one_instance_and_at_a_path_is_cleared_alone(client, broker):
+    stored = deep(broker)
+    stored[0]["unitCode"] = stored[1]["unitCode"] = "CEL"
+    body = {attrs("deep"): {"unitCode": None, "datasetId": "urn:d:1"}}
+    assert client.patch(f"{ENTITY}/attrs", json=body).status_code == 204
+    first, second = broker.entities[MACHINE][attrs("deep")]
+    assert "unitCode" not in first and second["unitCode"] == "CEL"
+    params = at("limit", "max", dataset_id="urn:d:2")
+    assert client.patch(f"{ENTITY}/attrs", params=params, json={attrs("deep"): {"unitCode": None}}).status_code == 204
+    second = broker.entities[MACHINE][attrs("deep")][1]
+    assert "unitCode" not in second[attrs("limit")][attrs("max")] and second["unitCode"] == "CEL"

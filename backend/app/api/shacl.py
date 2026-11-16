@@ -23,3 +23,9 @@ router = APIRouter(prefix="/api/shacl", tags=["explorer"])
 @router.get("/hints")
 async def hints(request: Request, entity_type: str, attribute: str) -> dict:
     return await request.app.state.ontology.hints(entity_type, attribute)
+
+
+@router.get("/units")
+async def units(request: Request) -> dict:
+    """The unit codes to offer for `unitCode`: the knowledge's, else common UN/CEFACT codes."""
+    return await request.app.state.ontology.units()

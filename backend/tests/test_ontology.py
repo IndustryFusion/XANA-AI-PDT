@@ -518,6 +518,8 @@ async def test_enum_values_are_unique_and_sorted():
     hint = await source(scripted([{"allowed": "b"}, {"allowed": "a"}, {"allowed": "b"}])).hints("M", "s")
     assert hint["hint_type"] == "enum"
     assert hint["values"] == ["a", "b"]
+    # No shape names units for the attribute.
+    assert hint["units"] == []
 
 
 async def test_class_values_are_its_individuals():
@@ -530,7 +532,9 @@ async def test_unsafe_class_from_the_store_is_not_placed_in_a_query():
     fuseki = scripted([{"class": "urn:c> . ?a ?b ?c . <urn:d"}])
     hint = await source(fuseki).hints("M", "s")
     assert hint["hint_type"] == "none"
-    assert len(fuseki.queries) == 2
+    # The parents, the rules and the allowed units are asked; the class is never placed in a query.
+    assert len(fuseki.queries) == 3
+    assert not any("?a ?b ?c" in query for query in fuseki.queries)
 
 
 async def test_unsafe_parent_from_the_store_is_not_placed_in_a_query():
@@ -573,3 +577,76 @@ def test_config_refuses_an_unsafe_graph_base():
     with pytest.raises(ValidationError):
         Settings(_env_file=None, fuseki_dataset="a/../b")
     assert Settings(_env_file=None, fuseki_url="fuseki:3030").fuseki_url == "http://fuseki:3030"
+
+
+def unit_shapes(codes, rows=()):
+    def answer(query):
+        if "subClassOf" in query:
+            return []
+        if "ngsi-ld:unitCode" in query:
+            return [{"code": c} for c in codes]
+        return list(rows)
+
+    return Fuseki(answer)
+
+
+async def test_the_units_a_shape_allows_come_with_the_hints():
+    hint = await source(unit_shapes(["MTR", "CEL", "CEL"], [{"allowed": "a"}])).hints("M", "s")
+    assert hint["units"] == ["CEL", "MTR"]
+    assert hint["values"] == ["a"]
+    # A shape that only names units still answers them.
+    hint = await source(unit_shapes(["CEL"])).hints("M", "s")
+    assert hint["hint_type"] == "none" and hint["units"] == ["CEL"] and hint["detail"] is None
+
+
+async def test_a_failing_units_query_leaves_the_hints_as_they_were():
+    def answer(query):
+        if "subClassOf" in query:
+            return []
+        return [{"allowed": "a"}]
+
+    class Failing(Fuseki):
+        def __call__(self, request):
+            if "ngsi-ld:unitCode" in request.content.decode():
+                return httpx.Response(500, text="failed")
+            return super().__call__(request)
+
+    hint = await source(Failing(answer)).hints("M", "s")
+    assert hint["hint_type"] == "enum" and hint["values"] == ["a"] and hint["units"] == []
+
+
+async def test_the_units_query_names_the_attribute_and_parses():
+    fuseki = unit_shapes([])
+    await source(fuseki).hints("M", "s")
+    (query,) = [q for q in fuseki.queries if "ngsi-ld:unitCode" in q]
+    parseQuery(query)
+
+
+async def test_units_from_the_knowledge_or_the_built_in_list():
+    known = Fuseki(
+        lambda q: (
+            [{"code": "CEL", "symbol": "°C", "name": "degree Celsius"}, {"code": "BAR"}]
+            if "uneceCommonCode" in q
+            else []
+        )
+    )
+    assert await source(known).units() == {
+        "source": "knowledge",
+        "units": [{"code": "BAR", "symbol": "", "name": ""}, {"code": "CEL", "symbol": "°C", "name": "degree Celsius"}],
+        "detail": None,
+    }
+    answer = await source(Fuseki()).units()
+    assert (
+        answer["source"] == "built_in" and {"code": "CEL", "symbol": "°C", "name": "degree Celsius"} in answer["units"]
+    )
+    codes = [u["code"] for u in answer["units"]]
+    assert len(codes) == len(set(codes))
+
+
+async def test_units_answer_the_built_in_list_whatever_goes_wrong():
+    def broken(request):
+        raise httpx.InvalidURL("no such address")
+
+    answer = await source(broken).units()
+    assert answer["source"] == "built_in" and answer["units"] and "can't be used" in answer["detail"]
+    assert "address" not in answer["detail"]

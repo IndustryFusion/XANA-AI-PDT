@@ -37,6 +37,8 @@ from pyparsing import ParseBaseException, ParseResults
 from rdflib.plugins.sparql.parser import parseQuery
 from rdflib.plugins.sparql.parserutils import CompValue
 
+from xana_agent.sources.units import built_in as units_built_in
+
 NS = """PREFIX sh: <http://www.w3.org/ns/shacl#>
 PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
 PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
@@ -271,9 +273,52 @@ class FusekiOntologySource:
         )
         if not found["ok"]:
             return no_hints(found["error"])
+        units = await self._allowed_units(target, path)
         if not found["rows"]:
-            return no_hints(await self._why_no_shapes())
-        return await self._combine(found["rows"])
+            return {**no_hints(None if units else await self._why_no_shapes()), "units": units}
+        return {**await self._combine(found["rows"]), "units": units}
+
+    async def _allowed_units(self, target: str, path: str) -> list[str]:
+        """The unit codes a shape allows for the attribute's instances (`sh:in` on `ngsi-ld:unitCode`)."""
+        found = await self._send(
+            f"""{NS}SELECT DISTINCT ?code WHERE {{
+  GRAPH {self._shacl} {{
+    ?shape sh:targetClass ?target ; sh:property ?outer .
+    ?outer sh:path ?attribute ; sh:property ?rule .
+    ?rule sh:path ngsi-ld:unitCode ; sh:in/rdf:rest*/rdf:first ?code .
+    FILTER({target} && {path})
+  }}
+}}"""
+        )
+        if not found["ok"]:
+            return []
+        return sorted({str(row["code"]) for row in found["rows"] if isinstance(row, dict) and row.get("code")})
+
+    @_as_data(lambda message: {"source": "built_in", "units": units_built_in(), "detail": message})
+    async def units(self) -> dict[str, Any]:
+        """The units to offer: those the knowledge describes (`qudt:Unit` with its common code), else the
+        built-in list of common UN/CEFACT codes."""
+        found = await self._send(
+            f"""{NS}SELECT DISTINCT ?code ?symbol ?name WHERE {{
+  GRAPH {self._knowledge} {{
+    ?unit <http://qudt.org/schema/qudt/uneceCommonCode> ?code .
+    OPTIONAL {{ ?unit <http://qudt.org/schema/qudt/symbol> ?symbol }}
+    OPTIONAL {{ ?unit rdfs:label ?name }}
+  }}
+}}"""
+        )
+        rows = (
+            [row for row in found.get("rows", []) if isinstance(row, dict) and row.get("code")] if found["ok"] else []
+        )
+        if not rows:
+            return {"source": "built_in", "units": units_built_in(), "detail": None if found["ok"] else found["error"]}
+        known: dict[str, dict[str, str]] = {}
+        for row in rows:
+            code = str(row["code"])
+            known.setdefault(
+                code, {"code": code, "symbol": str(row.get("symbol") or ""), "name": str(row.get("name") or "")}
+            )
+        return {"source": "knowledge", "units": sorted(known.values(), key=lambda u: u["code"]), "detail": None}
 
     async def _why_no_shapes(self) -> str | None:
         """Nothing about this attribute is normal. No shapes at all means the graph name is probably wrong."""
@@ -373,6 +418,7 @@ def no_hints(detail: str | None = None) -> dict[str, Any]:
         "minimum_exclusive": False,
         "maximum_exclusive": False,
         "datatype": None,
+        "units": [],
         "detail": detail,
     }
 

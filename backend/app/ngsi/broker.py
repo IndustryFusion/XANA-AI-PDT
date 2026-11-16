@@ -480,9 +480,11 @@ class ContextBroker:
                 # An instance with a dataset: the broker's merge and its attribute-level update both
                 # lose or mix up instances, so the attribute is written whole, every instance kept.
                 overwrite[name] = _with_instance_merged(name, existing, fragment, force, exact)
-            elif exact:
+            elif exact or _clears(fragment):
+                # A cleared member can't be taken away by a merge: the attribute is written whole.
                 _check_value(name, existing, fragment, force)
-                overwrite[name] = {**existing, **_stamped(existing, fragment)}
+                kept = fragment if exact else _keep_datatype(existing, fragment)
+                overwrite[name] = _cleared({**existing, **_stamped(existing, kept)})
             elif is_value_object(_keep_datatype(existing, fragment).get("value")):
                 # The broker's merge fails on a value object (Scorpio: "cannot get array length of a
                 # scalar", 22023), so a declared value is written as the whole attribute (gh-84, D3).
@@ -574,6 +576,9 @@ class ContextBroker:
             _check_value(path[-1], level, fragment, force)
             # A declared value keeps its datatype here too (gh-84, D3); the whole instance is written.
             level.update(_stamped(level, fragment if exact else _keep_datatype(level, fragment)))
+            for member in CLEARABLE:
+                if level.get(member, "") is None:
+                    del level[member]
 
         await self._edit_at_path(entity_id, name, path, dataset_id, change)
 
@@ -972,6 +977,19 @@ def _level_name(name: str, path: list[str]) -> str:
     return ".".join([name, *path])
 
 
+# Members a change may clear by giving them as `null`: an attribute's unit.
+CLEARABLE = ("unitCode",)
+
+
+def _clears(fragment: dict[str, Any]) -> bool:
+    return any(member in fragment and fragment[member] is None for member in CLEARABLE)
+
+
+def _cleared(attribute: dict[str, Any]) -> dict[str, Any]:
+    """The attribute without the members given as `null` to clear them."""
+    return {k: v for k, v in attribute.items() if not (k in CLEARABLE and v is None)}
+
+
 def _of_dataset(instances: list[dict[str, Any]], dataset_id: str | None) -> list[dict[str, Any]]:
     """The instances of the dataset named, `@none` the default one; every instance without a name."""
     if dataset_id is None:
@@ -994,6 +1012,8 @@ def _with_instance_merged(
     for index, instance in enumerate(instances):
         if instance.get("datasetId") == wanted:
             _check_value(name, instance, fragment, force)
-            merged = {**instance, **_stamped(instance, fragment if exact else _keep_datatype(instance, fragment))}
+            merged = _cleared(
+                {**instance, **_stamped(instance, fragment if exact else _keep_datatype(instance, fragment))}
+            )
             return [*instances[:index], merged, *instances[index + 1 :]]
     raise not_found(f"{name} has no instance with that dataset.")
