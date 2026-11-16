@@ -48,7 +48,8 @@ for (const viewport of [{ width: 1400, height: 800 }, { width: 800, height: 800 
 }
 
 test('active incidents: the open runs list stays in view next to a long run', async ({ page }) => {
-  await page.setViewportSize({ width: 1400, height: 700 })
+  // Tall enough for the four open runs, each with its machine builder.
+  await page.setViewportSize({ width: 1400, height: 760 })
   await page.goto('/incidents')
   const items = page.locator('.run-list__link')
   await items.nth(2).click()

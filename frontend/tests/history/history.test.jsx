@@ -19,6 +19,8 @@ import userEvent from '@testing-library/user-event'
 import { paths } from '../../src/app/router'
 import { store } from '../../src/data/sources/mock'
 import { renderApp, renderAppWith } from '../helpers'
+import { dataspace } from '../../src/data'
+import { DataError } from '../../src/data/errors'
 
 const controls = { authEnabled: false, speed: 50 }
 const open = (path) => renderApp({ path, controls })
@@ -88,6 +90,49 @@ describe('incident list', () => {
     await user.click(within(region).getByRole('button', { name: 'Clear filters' }))
     await waitFor(async () => expect(await rows()).toHaveLength(12))
     expect(window.location.search).toBe('')
+  })
+})
+
+describe('machine builders in the list', () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  test('each past incident names its machine\'s builder from the registry, when it knows one', async () => {
+    vi.spyOn(dataspace, 'resolveBuilders').mockImplementation(async (ids) => Object.fromEntries(ids.filter((id) => id.endsWith('coating-01')).map((id) => [id, 'Coating Systems GmbH'])))
+    open('/history')
+    const items = await rows()
+    const coating = items.find((li) => li.textContent.includes('coating-01'))
+    expect(await within(coating).findByTestId('incident-builder')).toHaveTextContent('Machine builder: Coating Systems GmbH')
+    const other = items.find((li) => !li.textContent.includes('coating-01'))
+    expect(within(other).queryByTestId('incident-builder')).toBeNull()
+  })
+
+  test('a filter change keeps the builders and asks the registry nothing', async () => {
+    const user = userEvent.setup()
+    const spy = vi.spyOn(dataspace, 'resolveBuilders').mockImplementation(async (machines) => Object.fromEntries(machines.map((id) => [id, 'Builder AG'])))
+    open('/history')
+    await waitFor(async () => expect(within(await list()).getAllByTestId('incident-builder').length).toBeGreaterThan(1))
+    const calls = spy.mock.calls.length
+    await user.selectOptions(screen.getByLabelText('Outcome'), 'failed')
+    await waitFor(async () => expect((await rows()).map((li) => li.textContent)).toEqual([expect.stringContaining('Powder output fluctuates')]))
+    expect(within((await rows())[0]).getByTestId('incident-builder')).toHaveTextContent('Machine builder: Builder AG')
+    expect(spy.mock.calls.length).toBe(calls)
+  })
+
+  test('the builders are looked up once for the list; while the registry fails none are shown, and they appear when the list is opened again', async () => {
+    const spy = vi.spyOn(dataspace, 'resolveBuilders').mockRejectedValue(new DataError('dataspace', 'unavailable', 'No registry.'))
+    const view = open('/history')
+    const items = await rows()
+    await waitFor(() => expect(spy).toHaveBeenCalled())
+    expect(spy).toHaveBeenCalledTimes(1)
+    const [ids] = spy.mock.calls[0]
+    expect(ids).toEqual([...new Set(ids)].sort())
+    expect(ids.length).toBeLessThan(items.length)
+    expect(within(await list()).queryAllByTestId('incident-builder')).toHaveLength(0)
+    expect(items.length).toBeGreaterThan(1)
+    view.unmount()
+    spy.mockImplementation(async (machines) => Object.fromEntries(machines.map((id) => [id, 'Builder AG'])))
+    open('/history')
+    await waitFor(async () => expect(within(await list()).getAllByTestId('incident-builder').length).toBeGreaterThan(1))
   })
 })
 

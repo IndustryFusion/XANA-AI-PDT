@@ -14,7 +14,7 @@
 // limitations under the License.
 //
 
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { render, renderHook, screen, waitFor, within } from '@testing-library/react'
 import App from '../../src/App'
 import userEvent from '@testing-library/user-event'
 import { store } from '../../src/data/sources/mock'
@@ -23,6 +23,7 @@ import { paths } from '../../src/app/router'
 import { renderApp, resetMock } from '../helpers'
 import { dataspace } from '../../src/data'
 import { DataError } from '../../src/data/errors'
+import { useBuilderNames } from '../../src/app/machineNames'
 
 const controls = { authEnabled: false, speed: 50 }
 const open = (path) => renderApp({ path, controls })
@@ -170,17 +171,59 @@ describe('new incident form', () => {
 })
 
 describe('builder, filter and archive in the list', () => {
+  afterEach(() => vi.restoreAllMocks())
+
   const arrange = (change) => {
     resetMock({ path: '/incidents', controls })
     store.update((s) => { change(s); return s })
     render(<App />)
   }
 
-  test('an escalated run names its machine builder, and others show none', async () => {
+  test('while the builders of other machines load, the builders already known stay', async () => {
+    const spy = vi.spyOn(dataspace, 'resolveBuilders')
+    spy.mockResolvedValueOnce({ 'urn:m:a': 'Builder AG' })
+    spy.mockReturnValueOnce(new Promise(() => {}))
+    const { result, rerender } = renderHook(({ ids }) => useBuilderNames(ids), { initialProps: { ids: ['urn:m:a'] } })
+    await waitFor(() => expect(result.current).toEqual({ 'urn:m:a': 'Builder AG' }))
+    rerender({ ids: ['urn:m:a', 'urn:m:b'] })
+    await waitFor(() => expect(spy).toHaveBeenCalledTimes(2))
+    expect(spy.mock.calls[1][0]).toEqual(['urn:m:a', 'urn:m:b'])
+    expect(result.current).toEqual({ 'urn:m:a': 'Builder AG' })
+  })
+
+  test('an escalated run names its recipient; another run names its machine builder from the registry, or none', async () => {
+    const machineOf = (i) => store.get().runs[i].machineId
+    const spy = vi.spyOn(dataspace, 'resolveBuilders')
     arrange((s) => { s.runs[0].escalation = { ref: 'r1', recipient: { id: 'urn:x:builder', name: 'Builder GmbH' } } })
+    spy.mockImplementation(async () => ({ [machineOf(1)]: 'Registry Builder AG' }))
     const rows = await items()
     expect(within(rows[0]).getByTestId('run-builder')).toHaveTextContent('Machine builder: Builder GmbH')
-    expect(within(rows[1]).queryByTestId('run-builder')).toBeNull()
+    expect(await within(rows[1]).findByTestId('run-builder')).toHaveTextContent('Machine builder: Registry Builder AG')
+    // Neither escalated nor known to the registry: no builder.
+    const plain = rows.find((r) => r.textContent.includes('coating-01'))
+    expect(within(plain).queryByTestId('run-builder')).toBeNull()
+    spy.mockRestore()
+  })
+
+  test('the builders are looked up once for the list; while the registry fails none are shown, and they appear when the list is opened again', async () => {
+    const spy = vi.spyOn(dataspace, 'resolveBuilders').mockRejectedValue(new DataError('dataspace', 'unavailable', 'No registry.'))
+    const view = open('/incidents')
+    const rows = await items()
+    await waitFor(() => expect(spy).toHaveBeenCalled())
+    expect(spy).toHaveBeenCalledTimes(1)
+    const [ids] = spy.mock.calls[0]
+    expect(ids).toEqual([...new Set(store.get().runs.map((r) => r.machineId))].sort())
+    // Only the escalated run names a builder, its recipient: none from the registry.
+    const escalated = rows.filter((r) => within(r).queryByTestId('run-builder'))
+    expect(escalated.length).toBeLessThan(4)
+    for (const r of escalated) expect(r).not.toHaveTextContent('Builder AG')
+    expect(rows).toHaveLength(4)
+    expect(rows[0]).toHaveTextContent('burr formation')
+    view.unmount()
+    spy.mockImplementation(async (machines) => Object.fromEntries(machines.map((id) => [id, 'Builder AG'])))
+    open('/incidents')
+    await waitFor(async () => expect(within(await list()).getAllByTestId('run-builder')).toHaveLength(4))
+    spy.mockRestore()
   })
 
   test('machine names from the registry are shown in the rows, and IDs when it is unavailable', async () => {
@@ -202,9 +245,12 @@ describe('builder, filter and archive in the list', () => {
   })
 
   test('a builder without a name shows its ID', async () => {
+    const spy = vi.spyOn(dataspace, 'resolveBuilders').mockResolvedValue({})
     arrange((s) => { s.runs[1].escalation = { ref: 'r1', recipient: { id: 'urn:x:builder', name: '' } } })
     const rows = await items()
+    await waitFor(() => expect(spy).toHaveBeenCalled())
     expect(within(rows[1]).getByTestId('run-builder')).toHaveTextContent('urn:x:builder')
+    spy.mockRestore()
   })
 
   test('typing part of a machine ID, in any case, narrows the list, and clearing it shows all again', async () => {

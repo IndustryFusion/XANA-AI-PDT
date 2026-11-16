@@ -22,7 +22,7 @@ import { Link, paths, useRoute } from '../../app/router'
 import { Button, Card, DataView, EmptyState, StatusBadge, useToast } from '../../ui/components'
 import { ConfirmDialog } from '../../ui/structured'
 import { FINISHED_STATES } from './runModel'
-import { useMachineNames } from '../../app/machineNames'
+import { useBuilderNames, useMachineNames } from '../../app/machineNames'
 import { formatAge, triggeredBy } from '../../ui/format'
 import { useRevealOnChange } from '../../app/reveal'
 import { toneOf } from '../../ui/status'
@@ -54,6 +54,7 @@ export function RunList({ selected, machine, refreshKey, onArchived }) {
   useEffect(() => { setText(machine ?? '') }, [machine])
   const filter = (list) => filterRuns(list, text, machine)
   const names = useMachineNames(result.data?.map((r) => r.machineId))
+  const builders = useBuilderNames(result.data?.map((r) => r.machineId))
 
   async function archive(run) {
     try {
@@ -104,7 +105,9 @@ export function RunList({ selected, machine, refreshKey, onArchived }) {
                     <span>{r.incidentId != null ? `#${r.incidentId}` : 'No incident number yet'}</span>
                     <span>{formatAge(r.startedAt)}</span>
                     {triggeredBy(r.source) && <span data-testid="run-source">{triggeredBy(r.source)}</span>}
-                    {r.machineBuilder && <span data-testid="run-builder">Machine builder: {r.machineBuilder.name || r.machineBuilder.id}</span>}
+                    {(r.machineBuilder || builders[r.machineId]) && (
+                      <span data-testid="run-builder">Machine builder: {r.machineBuilder?.name || builders[r.machineId] || r.machineBuilder?.id}</span>
+                    )}
                   </span>
                 </Link>
                 <div className="run-list__side">

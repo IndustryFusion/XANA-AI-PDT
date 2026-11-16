@@ -14,7 +14,7 @@
 // limitations under the License.
 //
 
-import { useMachineNames } from '../../app/machineNames'
+import { useBuilderNames, useMachineNames } from '../../app/machineNames'
 import { useId, useRef, useState } from 'react'
 import { incidents as incidentsApi } from '../../data'
 import { useData } from '../../data/useData'
@@ -49,6 +49,8 @@ export function IncidentList({ selected, machine }) {
   const all = useData('incidents', 'listIncidents', [{}])
   const result = useData('incidents', 'listIncidents', [{ machineId: machine || undefined, status: outcome || undefined, from: from || undefined, to: to || undefined }])
   const machines = [...new Set((all.data ?? []).map((i) => i.machineId))].sort()
+  // The machines of every past incident, not of the filtered ones: a filter change asks the registry nothing.
+  const builders = useBuilderNames(machines)
   const filtered = (list) => list.filter((i) => matchesText(i, text))
   const filtering = !!(text || outcome || from || to || machine)
 
@@ -118,6 +120,7 @@ export function IncidentList({ selected, machine }) {
                       <span>#{i.number}</span>
                       <span>{entityLabel(i.machineId)}</span>
                       <span><time dateTime={i.closedAt}>{formatDate(i.closedAt)}</time></span>
+                      {builders[i.machineId] && <span data-testid="incident-builder">Machine builder: {builders[i.machineId]}</span>}
                       {triggeredBy(i.source) && <span data-testid="run-source">{triggeredBy(i.source)}</span>}
                     </span>
                   </Link>

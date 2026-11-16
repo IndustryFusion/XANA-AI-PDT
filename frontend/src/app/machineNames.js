@@ -25,3 +25,14 @@ export function useMachineNames(machineIds) {
   const result = useData('dataspace', 'resolveMachines', [ids], { enabled: ids.length > 0 })
   return result.status === 'success' && result.data ? result.data : {}
 }
+
+/**
+ * Machine builders of machines from the registry, `{ [machineId]: builderName }`. Empty until the first
+ * answer, and when the registry is unavailable: screens then show no builder. While a lookup for other
+ * machines loads, the builders already known stay, keyed by machine, so rows don't lose them meanwhile.
+ */
+export function useBuilderNames(machineIds) {
+  const ids = [...new Set((machineIds ?? []).filter(Boolean))].sort()
+  const result = useData('dataspace', 'resolveBuilders', [ids], { enabled: ids.length > 0 })
+  return result.status !== 'error' && result.data ? result.data : {}
+}
