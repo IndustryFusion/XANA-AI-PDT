@@ -26,7 +26,7 @@ import { ConfirmDialog } from '../../ui/structured'
 import { attributesOf, displayName, sameValue, statusOf } from './attributes'
 import AttributeLine, { datasetLabel } from './AttributeLine'
 import AddAttributeForm from './AddAttributeForm'
-import { Iri, nameItems, shortenText, useCopy, useFullIri, useRegistry } from './Iri'
+import { abbreviate, Iri, nameItems, shortenText, useCopy, useFullIri, useRegistry } from './Iri'
 import { isHttpIri, registry } from './prefixes'
 import { entityPath, readFocus } from './query'
 import { applyChanges } from './rawEdit'
@@ -43,7 +43,12 @@ const TINTS = 5
 const count = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`
 
 /** The title of an entity: its name, or its ID as the explorer shows IDs. */
-export const entityTitle = (entity, id) => (entity && displayName(entity)) ?? (isHttpIri(id) ? registry.shorten(id) : entityLabel(id))
+/** What an entity without a name is called: its ID's short name, or its last segment. */
+const unnamedTitle = (id) => (isHttpIri(id) ? registry.shorten(id) : entityLabel(id))
+// A long one, such as an OPC UA node's, is shortened in the middle; the ID is then the heading's tooltip.
+export const entityTitle = (entity, id) => (entity && displayName(entity)) ?? (abbreviate(unnamedTitle(id)) ?? unnamedTitle(id))
+/** Whether the entity's title is its ID shortened in the middle. */
+export const entityTitleShortened = (entity, id) => !(entity && displayName(entity)) && abbreviate(unnamedTitle(id)) !== null
 
 /** Moves focus to an entity shown on its own (unnested or pinned) and brings it into view. */
 export function goToEntity(id) {
@@ -307,7 +312,7 @@ export default function EntityNode({
             aria-controls={expanded ? ids.body : undefined} onClick={() => setExpanded(!expanded)}
           >
             <Icon name={expanded ? 'chevronDown' : 'chevronRight'} className="entity-node__caret" />
-            <span>{title}</span>
+            <span title={entityTitleShortened(entity, id) ? id : undefined}>{title}</span>
           </button>
         </Heading>
         {entity && <span className="kind-tag entity-node__type"><Iri value={entity.type} /></span>}

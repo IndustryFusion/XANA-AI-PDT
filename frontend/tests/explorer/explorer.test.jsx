@@ -27,6 +27,7 @@ import ValueEditor from '../../src/features/explorer/ValueEditor'
 import { HIGHLIGHT_MS } from '../../src/features/explorer/EntityNode'
 import { renderApp, renderAppWith } from '../helpers'
 import { entities } from '../../src/data'
+import { abbreviate } from '../../src/features/explorer/Iri'
 
 const controls = { authEnabled: false }
 const FACTORY = 'urn:ngsi-ld:Factory:plant-north'
@@ -422,6 +423,60 @@ describe('relationship and IRI navigation', () => {
     menu = contextMenu(link)
     await user.click(within(menu).getByRole('menuitem', { name: 'Start new incident' }))
     expect(`${window.location.pathname}${window.location.search}`).toBe(paths.newIncident(iri))
+  })
+
+  test('an entity without a name under a long ID has its heading shortened, with the ID as its tooltip', async () => {
+    const long = `urn:uaentity:${'c3Z1PXVybjpleGFtcGxlOm9wY3VhLXNlcnZlcjtuc3U9'.repeat(2)}MDE4`
+    const http = `http://example.org/instances/${'x'.repeat(70)}`
+    const add = (entity) => store.update((s) => { s.entities.push(entity); return s })
+    openEntity(long)
+    add({ id: long, type: 'Sensor', note: { type: 'Property', value: 'here' } })
+    const heading = await screen.findByRole('heading', { name: abbreviate(long.split(':').pop()) })
+    expect(within(heading).getByText(abbreviate(long.split(':').pop()))).toHaveAttribute('title', long)
+    await waitFor(() => expect(attribute('note')).toHaveTextContent('here'))
+    // An http ID's short name is shortened the same way.
+    openEntity(http)
+    add({ id: http, type: 'Sensor', note: { type: 'Property', value: 'here' } })
+    const short = await screen.findByRole('heading', { name: /^[\w.-]+:x{6}…x{6}$/ })
+    expect(within(short).getByText(/^[\w.-]+:x{6}…x{6}$/)).toHaveAttribute('title', http)
+    // A name is never taken for a shortened ID, even with an ellipsis in it.
+    openEntity('urn:x:named')
+    add({ id: 'urn:x:named', type: 'Sensor', name: { type: 'Property', value: 'Pump 3 … spare' } })
+    const named = await screen.findByRole('heading', { name: 'Pump 3 … spare' })
+    expect(within(named).getByText('Pump 3 … spare')).not.toHaveAttribute('title')
+  })
+
+  test('a long ID is shortened in the middle, in full in its tooltip, and shown in full and back from its menu', async () => {
+    const handlers = []
+    const real = entities.subscribeEntities
+    const spy = vi.spyOn(entities, 'subscribeEntities').mockImplementation((params, onEvent) => { handlers.push(onEvent); return real(params, () => {}) })
+    const user = userEvent.setup()
+    const long = `urn:uaentity:${'c3Z1PXVybjpleGFtcGxlOm9wY3VhLXNlcnZlcjtuc3U9'.repeat(2)}MDE4`
+    const short = abbreviate(long)
+    expect(short).toBe('urn:uaentity:c3Z1PX…U9MDE4')
+    openEntity(SENSOR)
+    store.update((s) => { s.entities.find((e) => e.id === SENSOR).feeds = { type: 'Relationship', object: long }; return s })
+    await waitFor(() => expect(attribute('feeds')).not.toBeNull())
+    const link = within(attribute('feeds')).getByRole('link', { name: short })
+    expect(link).toHaveAttribute('title', long)
+    let menu = contextMenu(link)
+    expect(within(menu).getAllByRole('menuitem').map((l) => l.textContent).slice(0, 2)).toEqual(['Show in full', 'Copy identifier'])
+    await user.click(within(menu).getByRole('menuitem', { name: 'Show in full' }))
+    const whole = within(attribute('feeds')).getByRole('link', { name: long })
+    menu = contextMenu(whole)
+    await user.click(within(menu).getByRole('menuitem', { name: 'Abbreviate' }))
+    expect(within(attribute('feeds')).getByRole('link', { name: short })).toBeVisible()
+    // Shown in full is for that name: another value in its place, here in a list, is shortened again.
+    const iri = (end) => `http://example.org/instances/${'x'.repeat(60)}${end}`
+    const send = (list) => act(() => handlers.forEach((on) => on({ type: 'update', entityId: SENSOR, attributes: { kinds: { type: 'Property', value: list } } })))
+    store.update((s) => { s.entities.find((e) => e.id === SENSOR).kinds = { type: 'Property', value: [iri('A')] }; return s })
+    send([iri('A')])
+    const kind = await within(attribute('kinds')).findByText(/^[\w.-]+:x{6}…xxxxxA$/)
+    await user.click(within(contextMenu(kind)).getByRole('menuitem', { name: 'Show in full' }))
+    expect(within(attribute('kinds')).getByText(/^[\w.-]+:x{60}A$/)).toBeVisible()
+    send([iri('B')])
+    expect(await within(attribute('kinds')).findByText(/^[\w.-]+:x{6}…xxxxxB$/)).toBeVisible()
+    spy.mockRestore()
   })
 })
 

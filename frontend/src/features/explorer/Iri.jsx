@@ -22,6 +22,24 @@ import { useToast } from '../../ui/components'
 import { Popover } from '../../ui/icons'
 import { isHttpIri, registry } from './prefixes'
 
+/** Names whose part after the scheme and namespace (`urn:nid:`) or the prefix (`prefix:`) is longer are shortened. */
+export const ABBREVIATE_OVER = 48
+const KEEP = 6
+
+/**
+ * A long name shortened in the middle, keeping what tells it apart: `urn:uaentity:c3Z1PX…01MDE4`, or
+ * `instanceExam:c3Z1PX…01MDE4` for a prefixed name, or `c3Z1PX…01MDE4` for a bare one. Null when the name
+ * is short enough to show as it is, and for an http IRI, which is shown by its short name instead.
+ */
+export function abbreviate(text) {
+  const value = String(text ?? '')
+  if (isHttpIri(value)) return null
+  const lead = /^urn:[^:\s]+:/i.exec(value)?.[0] ?? /^[A-Za-z][\w.-]*:/.exec(value)?.[0] ?? ''
+  const rest = value.slice(lead.length)
+  if (rest.length <= ABBREVIATE_OVER) return null
+  return `${lead}${rest.slice(0, KEEP)}…${rest.slice(-KEEP)}`
+}
+
 /** Renders again when the registry's names change (the configured context's prefixes arrived). */
 export function useRegistry() {
   useSyncExternalStore(registry.subscribe, () => registry.version)
@@ -81,26 +99,35 @@ export function Iri({ value, to, className = '', items = [] }) {
   const copy = useCopy()
   const ref = useRef(null)
   const [showFull, popover] = useFullIri(ref)
+  // A long name is shortened in the middle; its menu shows it in full, and abbreviates it again. That
+  // holds for the name it was chosen for: another value in the same place is shortened again.
+  const [wholeFor, setWholeFor] = useState(null)
   const text = String(value ?? '')
   const parts = reg.parts(text)
   const shown = parts?.text ?? text
-  const own = [...nameItems(text, { copy, showFull }), ...items]
+  const short = abbreviate(shown)
+  const whole = wholeFor === shown
+  const visible = short && !whole ? short : shown
+  const toggle = short ? [{ label: whole ? 'Abbreviate' : 'Show in full', onSelect: () => setWholeFor(whole ? null : shown) }] : []
+  const own = [...toggle, ...nameItems(text, { copy, showFull }), ...items]
   const menu = useContextMenu({ label: `Actions for ${shown}`, items: () => own })
+  // The tooltip has the IRI behind a prefixed name, and a shortened name in full above it.
+  const title = [short ? shown : null, parts ? text : null].filter(Boolean).join('\n') || undefined
 
   if (to) {
     return (
       <span ref={ref} className={`iri${className ? ` ${className}` : ''}`}>
-        <EntityRef id={text} label={shown} to={to} menu="context" items={own} title={text} />
+        <EntityRef id={text} label={visible} to={to} menu="context" items={own} title={title ?? text} />
         {popover}
       </span>
     )
   }
   return (
     <span
-      ref={ref} className={`iri${className ? ` ${className}` : ''}`} title={parts ? text : undefined}
+      ref={ref} className={`iri${className ? ` ${className}` : ''}`} title={title}
       tabIndex={0} {...menu.triggerProps}
     >
-      {shown}
+      {visible}
       {menu.menu}
       {popover}
     </span>

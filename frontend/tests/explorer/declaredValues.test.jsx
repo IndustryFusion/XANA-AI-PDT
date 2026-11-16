@@ -19,6 +19,7 @@ import { render, screen } from '@testing-library/react'
 import { describe, expect, test } from 'vitest'
 
 import AttributeValue from '../../src/features/explorer/AttributeValue'
+import { abbreviate } from '../../src/features/explorer/Iri'
 import { attributeKind, editableValue, effectiveDatatype, isNumberText, isValueObject, literalOf, parseInput, sameValue, valueOfDatatype } from '../../src/features/explorer/attributes'
 
 const DOUBLE = 'http://www.w3.org/2001/XMLSchema#double'
@@ -116,5 +117,19 @@ describe('the datatype of a value and its form', () => {
   test.each([['tomorrow', 'dateTime'], ['yes', 'boolean'], ['six', 'double'], ['1.5', 'integer']])('%s is not a value of xsd:%s, and saved anyway it is declared as entered', (text, local) => {
     expect(() => valueOfDatatype(text, XSD + local)).toThrow(`“${text}” is not a value of xsd:${local}.`)
     expect(valueOfDatatype(text, XSD + local, { anyway: true })).toStrictEqual({ '@value': text, '@type': XSD + local })
+  })
+})
+
+describe('long names shortened in the middle', () => {
+  test.each([
+    ['urn:uaentity:' + 'x'.repeat(60) + 'MDE4', 'urn:uaentity:xxxxxx…xxMDE4'],
+    ['instanceExam:' + 'y'.repeat(60) + 'abcdef', 'instanceExam:yyyyyy…abcdef'],
+    ['z'.repeat(70), 'zzzzzz…zzzzzz'],
+    ['urn:ngsi-ld:Component:chiller-01-coolant-pump', null],
+    ['pumps:hasDifferentialPressure', null],
+    // An http IRI is shown by its short name, which is what may be shortened.
+    ['https://example.org/' + 'a'.repeat(80), null],
+  ])('%s', (name, shown) => {
+    expect(abbreviate(name)).toBe(shown)
   })
 })
