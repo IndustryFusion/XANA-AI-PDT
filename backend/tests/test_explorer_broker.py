@@ -576,7 +576,8 @@ def test_changing_at_depth_two_keeps_everything_else(client, broker):
     body = {attrs("deep"): {"value": 25}}
     answer = client.patch(f"{ENTITY}/attrs", params=at("limit", "max", dataset_id="urn:d:2"), json=body)
     assert answer.status_code == 204
-    one, two = stored
+    assert len(stored) == 2
+    one, two = broker.entities[MACHINE][attrs("deep")]
     assert two[attrs("limit")][attrs("max")]["value"] == 25
     assert two[attrs("limit")][attrs("max")]["unitCode"] == "CEL"
     assert two[attrs("limit")][attrs("max")]["observedAt"].endswith("Z")
@@ -585,10 +586,12 @@ def test_changing_at_depth_two_keeps_everything_else(client, broker):
     assert two["value"] == 2
     assert two[attrs("note")]["value"] == "kept"
     assert one[attrs("limit")][attrs("max")]["value"] == 10
+    # With datasets, the attribute is written whole, every instance in it: the broker's attribute-level
+    # PATCH skips an instance with a dataset, or mixes them up.
     written = broker.requests[-1]
-    assert written.method == "PATCH"
-    assert written.url.raw_path.decode().endswith(f"/attrs/{quote(attrs('deep'), safe='')}")
-    assert json.loads(written.content)["datasetId"] == "urn:d:2"
+    assert written.method == "POST" and written.url.raw_path.decode().endswith("/attrs")
+    sent = json.loads(written.content)[attrs("deep")]
+    assert [i["datasetId"] for i in sent] == ["urn:d:1", "urn:d:2"]
 
 
 def test_adding_at_depth_two(client, broker):
@@ -596,7 +599,8 @@ def test_adding_at_depth_two(client, broker):
     body = {attrs("deep"): {attrs("step"): {"type": "Property", "value": 5}}}
     answer = client.post(f"{ENTITY}/attrs", params=at("limit", "max", dataset_id="urn:d:1"), json=body)
     assert answer.status_code == 204
-    one, two = stored
+    assert len(stored) == 2
+    one, two = broker.entities[MACHINE][attrs("deep")]
     assert one[attrs("limit")][attrs("max")][attrs("step")]["value"] == 5
     assert one[attrs("limit")][attrs("max")]["value"] == 10
     assert one[attrs("limit")][attrs("min")]["value"] == 0
@@ -705,7 +709,8 @@ def test_deleting_at_depth_two_removes_it_from_each_dataset(client, broker):
     assert one[attrs("limit")][attrs("max")]["value"] == 10
     assert two[attrs("limit")][attrs("max")]["value"] == 20
     assert three == {"type": "Property", "value": 3, "datasetId": "urn:d:3"}
-    assert [r.method for r in broker.requests].count("PATCH") == 1
+    # One write of the whole attribute, every instance kept.
+    assert [r.method for r in broker.requests if r.method != "GET"] == ["POST"]
 
 
 def test_deleting_at_depth_two_from_every_dataset(client, broker):
@@ -1202,6 +1207,53 @@ def test_a_plain_number_is_edited_as_before(client, broker):
     assert _sent_value(broker) == 80
 
 
+def _last_write(broker):
+    return next(r for r in reversed(broker.requests) if r.method in ("PATCH", "POST") and r.content)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "2.7",  # a declared double made a plain string: its datatype goes
+        80,  # made a plain integer: not declared again as the stored double
+        {"@value": "2.7", "@type": "http://www.w3.org/2001/XMLSchema#string"},
+        {"@value": "abc", "@type": DOUBLE},  # a value not of its datatype, on purpose
+    ],
+)
+def test_an_exact_value_is_written_whole_as_given(client, broker, value):
+    """With `exact`, the value's form is the operator's choice of datatype: the stored datatype is not
+    kept, and the attribute is written whole, as the broker's merge would keep the stored type."""
+    _declare_temp(broker)
+    params = {"exact": "true", "force": "true"}
+    assert client.patch(f"{ENTITY}/attrs", params=params, json={attrs(): {"value": value}}).status_code == 204
+    write = _last_write(broker)
+    assert write.method == "POST" and write.url.path.endswith("/attrs")
+    assert _sent_value(broker) == value
+    assert json.loads(write.content)[attrs()]["unitCode"] == "CEL"
+    assert broker.entities[MACHINE][attrs()]["value"] == value
+
+
+def test_a_plain_value_is_declared_when_written_exact(client, broker):
+    value = {"@value": 80, "@type": DOUBLE}
+    params = {"exact": "true"}
+    assert client.patch(f"{ENTITY}/attrs", params=params, json={attrs(): {"value": value}}).status_code == 204
+    assert _sent_value(broker) == value
+    assert _last_write(broker).method == "POST"
+
+
+def test_an_exact_value_of_an_instance_and_at_a_path_is_not_declared_again(client, broker):
+    deep(broker)
+    instances = broker.entities[MACHINE][attrs("deep")]
+    instances[1][attrs("limit")][attrs("max")]["value"] = {"type": DOUBLE, "@value": 5}
+    params = {**at("limit", "max", dataset_id="urn:d:2"), "exact": "true"}
+    assert client.patch(f"{ENTITY}/attrs", params=params, json={attrs("deep"): {"value": 7}}).status_code == 204
+    assert broker.entities[MACHINE][attrs("deep")][1][attrs("limit")][attrs("max")]["value"] == 7
+    broker.entities[MACHINE][attrs("many")][0]["value"] = {"type": DOUBLE, "@value": 1}
+    body = {attrs("many"): {"value": 3, "datasetId": "urn:d:1"}}
+    assert client.patch(f"{ENTITY}/attrs", params={"exact": "true"}, json=body).status_code == 204
+    assert broker.entities[MACHINE][attrs("many")][0]["value"] == 3
+
+
 def test_a_declared_sub_attribute_keeps_its_datatype_when_edited_at_its_path(client, broker):
     """A path-addressed edit writes the whole instance; the declared datatype goes with it."""
     broker.entities[MACHINE][attrs()][attrs("limit")]["value"] = {"type": DOUBLE, "@value": 99}
@@ -1213,3 +1265,118 @@ def test_a_declared_sub_attribute_keeps_its_datatype_when_edited_at_its_path(cli
     stored = broker.entities[MACHINE][attrs()]
     assert stored[attrs("limit")]["value"] == {"@value": 100, "@type": DOUBLE}
     assert stored["value"] == 42, "the attribute's own value is untouched"
+
+
+# Instances with a dataset ----------------------------------------------------
+
+
+def test_updating_the_only_instance_with_a_dataset_keeps_its_dataset(client, broker):
+    broker.entities[MACHINE][attrs("vib")] = {"type": "Relationship", "object": "urn:s:1", "datasetId": "urn:d:s1"}
+    body = {attrs("vib"): {"object": "urn:s:2", "datasetId": "urn:d:s1"}}
+    assert client.patch(f"{ENTITY}/attrs", json=body).status_code == 204
+    stored = broker.entities[MACHINE][attrs("vib")]
+    stored = stored if isinstance(stored, list) else [stored]
+    assert [(i.get("datasetId"), i["object"]) for i in stored] == [("urn:d:s1", "urn:s:2")]
+
+
+def test_an_update_without_the_dataset_of_the_only_instance_adds_no_default_instance(client, broker):
+    broker.entities[MACHINE][attrs("vib")] = {"type": "Property", "value": 1, "datasetId": "urn:d:s1"}
+    answer = client.patch(f"{ENTITY}/attrs", json={attrs("vib"): {"value": 2}})
+    assert answer.status_code == 404
+    assert broker.entities[MACHINE][attrs("vib")] == {"type": "Property", "value": 1, "datasetId": "urn:d:s1"}
+    assert [r.method for r in broker.requests if r.method != "GET"] == []
+
+
+def test_updating_one_instance_keeps_the_others(client, broker):
+    broker.entities[MACHINE][attrs("vib")] = [
+        {"type": "Property", "value": 1},
+        {"type": "Property", "value": 10, "datasetId": "urn:d:a", attrs("note"): {"type": "Property", "value": "n"}},
+    ]
+    body = {attrs("vib"): {"value": 11, "datasetId": "urn:d:a"}}
+    assert client.patch(f"{ENTITY}/attrs", json=body).status_code == 204
+    default, other = broker.entities[MACHINE][attrs("vib")]
+    assert default == {"type": "Property", "value": 1}
+    assert other["value"] == 11 and other[attrs("note")]["value"] == "n"
+    written = [r for r in broker.requests if r.method != "GET"]
+    assert [r.method for r in written] == ["POST"]
+    assert [i.get("datasetId") for i in json.loads(written[0].content)[attrs("vib")]] == [None, "urn:d:a"]
+
+
+def test_deleting_a_sub_attribute_keeps_the_instances_without_it(client, broker):
+    broker.entities[MACHINE][attrs("vib")] = [
+        {"type": "Property", "value": 1, attrs("note"): {"type": "Property", "value": "n"}},
+        {"type": "Property", "value": 10, "datasetId": "urn:d:a"},
+    ]
+    answer = client.delete(f"{ENTITY}/attrs", params={"name": attrs("vib"), "sub_attribute": attrs("note")})
+    assert answer.status_code == 204
+    assert broker.entities[MACHINE][attrs("vib")] == [
+        {"type": "Property", "value": 1},
+        {"type": "Property", "value": 10, "datasetId": "urn:d:a"},
+    ]
+
+
+def test_a_value_the_checks_refuse_is_written_when_forced(client, broker):
+    broker.entities[MACHINE][attrs("speed")] = {"type": "Property", "value": 12.5}
+    body = {attrs("speed"): {"value": "fast"}}
+    refused = client.patch(f"{ENTITY}/attrs", json=body)
+    assert refused.status_code == 422 and "must be a number" in refused.json()["error"]["message"]
+    assert client.patch(f"{ENTITY}/attrs", params={"force": "true"}, json=body).status_code == 204
+    assert broker.entities[MACHINE][attrs("speed")]["value"] == "fast"
+
+
+def test_a_forced_value_at_a_path_is_written_too(client, broker):
+    deep(broker)
+    body = {attrs("deep"): {"value": "high"}}
+    refused = client.patch(f"{ENTITY}/attrs", params=at("limit", "max", dataset_id="urn:d:2"), json=body)
+    assert refused.status_code == 422
+    params = {**at("limit", "max", dataset_id="urn:d:2"), "force": "true"}
+    assert client.patch(f"{ENTITY}/attrs", params=params, json=body).status_code == 204
+    assert broker.entities[MACHINE][attrs("deep")][1][attrs("limit")][attrs("max")]["value"] == "high"
+
+
+def test_an_attribute_with_several_instances_can_be_added(client, broker):
+    body = {
+        attrs("vib"): [
+            {"type": "Property", "value": 1},
+            {"type": "Property", "value": 10, "datasetId": "urn:d:a"},
+        ]
+    }
+    assert client.post(f"{ENTITY}/attrs", json=body).status_code == 204
+    assert broker.entities[MACHINE][attrs("vib")] == body[attrs("vib")]
+    refused = client.post(f"{ENTITY}/attrs", json={attrs("w"): [{"type": "Property", "value": 1}, {"value": 2}]})
+    assert refused.status_code == 422
+
+
+def test_one_instance_is_deleted_and_the_others_kept(client, broker):
+    broker.entities[MACHINE][attrs("vib")] = [
+        {"type": "Relationship", "object": "urn:s:9", "datasetId": "urn:d:s1"},
+        {"type": "Relationship", "object": "urn:s:9"},
+    ]
+    answer = client.delete(f"{ENTITY}/attrs", params={"name": attrs("vib"), "dataset_id": "@none"})
+    assert answer.status_code == 204
+    stored = broker.entities[MACHINE][attrs("vib")]
+    stored = stored if isinstance(stored, list) else [stored]
+    assert stored == [{"type": "Relationship", "object": "urn:s:9", "datasetId": "urn:d:s1"}]
+    answer = client.delete(f"{ENTITY}/attrs", params={"name": attrs("vib"), "dataset_id": "urn:d:s1"})
+    assert answer.status_code == 204
+    assert attrs("vib") not in broker.entities[MACHINE]
+
+
+def test_a_sub_attribute_of_the_default_instance_is_deleted_from_it_alone(client, broker):
+    unit = {"type": "Property", "value": "CEL"}
+    broker.entities[MACHINE][attrs("vib")] = [
+        {"type": "Property", "value": 1, attrs("unit"): dict(unit)},
+        {"type": "Property", "value": 2, "datasetId": "urn:d:live", attrs("unit"): dict(unit)},
+    ]
+    params = {"name": attrs("vib"), "path": attrs("unit"), "dataset_id": "@none"}
+    assert client.delete(f"{ENTITY}/attrs", params=params).status_code == 204
+    default, live = broker.entities[MACHINE][attrs("vib")]
+    assert attrs("unit") not in default
+    assert live[attrs("unit")] == unit
+
+
+def test_deleting_an_instance_that_isnt_there_changes_nothing(client, broker):
+    broker.entities[MACHINE][attrs("vib")] = {"type": "Property", "value": 1}
+    answer = client.delete(f"{ENTITY}/attrs", params={"name": attrs("vib"), "dataset_id": "urn:d:nope"})
+    assert answer.status_code == 404
+    assert broker.entities[MACHINE][attrs("vib")] == {"type": "Property", "value": 1}

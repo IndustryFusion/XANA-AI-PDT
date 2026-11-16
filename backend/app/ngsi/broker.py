@@ -139,6 +139,10 @@ def _problem(item: Any) -> str:
     return "The broker rejected this entity."
 
 
+# How a request names an attribute's default instance, the one without a dataset (as NGSI-LD does).
+DEFAULT_INSTANCE = "@none"
+
+
 def check_document(document: Any) -> None:
     """Refuses a document too deeply nested to handle, or holding text JSON can't carry to the broker.
 
@@ -449,12 +453,19 @@ class ContextBroker:
 
     # Editing -----------------------------------------------------------------
 
-    async def update_attributes(self, entity_id: str, attributes: dict[str, Any]) -> None:
+    async def update_attributes(
+        self, entity_id: str, attributes: dict[str, Any], force: bool = False, exact: bool = False
+    ) -> None:
+        """`force` writes a value the checks would refuse, such as text for a number: for tests on purpose.
+        `exact` writes each value in the form given, as the datatype the operator chose: a stored datatype
+        is not kept, and the attribute is written whole, as the broker's merge would keep it."""
         self._refuse_contexts(attributes)
         async with self._editing(entity_id):
-            await self._update_attributes(entity_id, attributes)
+            await self._update_attributes(entity_id, attributes, force, exact)
 
-    async def _update_attributes(self, entity_id: str, attributes: dict[str, Any]) -> None:
+    async def _update_attributes(
+        self, entity_id: str, attributes: dict[str, Any], force: bool = False, exact: bool = False
+    ) -> None:
         current = await self._existing(entity_id)
         merge: dict[str, Any] = {}
         overwrite: dict[str, Any] = {}
@@ -465,20 +476,25 @@ class ContextBroker:
             if not isinstance(fragment, dict):
                 raise invalid(f"Attribute {name} needs a value.")
             existing = current[name]
-            if isinstance(existing, list):
-                overwrite[name] = _merged_instance(name, existing, fragment)
+            if _has_datasets(existing) or fragment.get("datasetId") is not None:
+                # An instance with a dataset: the broker's merge and its attribute-level update both
+                # lose or mix up instances, so the attribute is written whole, every instance kept.
+                overwrite[name] = _with_instance_merged(name, existing, fragment, force, exact)
+            elif exact:
+                _check_value(name, existing, fragment, force)
+                overwrite[name] = {**existing, **_stamped(existing, fragment)}
             elif is_value_object(_keep_datatype(existing, fragment).get("value")):
                 # The broker's merge fails on a value object (Scorpio: "cannot get array length of a
                 # scalar", 22023), so a declared value is written as the whole attribute (gh-84, D3).
-                _check_value(name, existing, fragment)
+                _check_value(name, existing, fragment, force)
                 overwrite[name] = {**existing, **_stamped(existing, _keep_datatype(existing, fragment))}
             elif isinstance(existing, dict) and _new_sub_attributes(name, existing, fragment):
                 # Some brokers' merge stores its own result object as a new sub-attribute (#95), so
                 # an attribute that gains one is written back whole, as an edit at a path is.
-                _check_value(name, existing, fragment)
+                _check_value(name, existing, fragment, force)
                 rewrite[name] = {**existing, **_stamped(existing, _keep_datatype(existing, fragment))}
             else:
-                merge[name] = _merge_fragment(name, existing, fragment)
+                merge[name] = _merge_fragment(name, existing, fragment, force)
         if merge:
             await self.send("PATCH", f"/entities/{_segment(entity_id)}", body=merge)
         if overwrite:
@@ -500,7 +516,10 @@ class ContextBroker:
         for name, attribute in attributes.items():
             if name in current:
                 raise conflict(f"{entity_id} already has an attribute {name}.")
-            if name in RESERVED or not isinstance(attribute, dict) or not isinstance(attribute.get("type"), str):
+            # An attribute is one instance, or several in a list, one per dataset.
+            instances = attribute if isinstance(attribute, list) else [attribute]
+            typed = all(isinstance(i, dict) and isinstance(i.get("type"), str) for i in instances)
+            if name in RESERVED or not instances or not typed:
                 raise invalid(f"Attribute {name} needs a type and a value.")
         await self.send(
             "POST", f"/entities/{_segment(entity_id)}/attrs", params={"options": "noOverwrite"}, body=attributes
@@ -526,23 +545,35 @@ class ContextBroker:
         # A member of the attribute itself (its value, dataset, times, unit…) is never a sub-attribute.
         if not holders or not _sub_attribute_name(sub_attribute):
             raise not_found(f"{name} has no sub-attribute {sub_attribute}.")
-        changed = [{k: v for k, v in item.items() if k != sub_attribute} for item in holders]
+        # Every instance is written, so those without the sub-attribute are kept.
+        changed = [
+            {k: v for k, v in item.items() if k != sub_attribute} if isinstance(item, dict) else item
+            for item in instances
+        ]
         await self.send("POST", path, body={name: changed[0] if len(changed) == 1 else changed})
 
     # Sub-attributes at a path ---------------------------------------------------
 
     async def update_at_path(
-        self, entity_id: str, name: str, path: list[str], fragment: Any, dataset_id: str | None = None
+        self,
+        entity_id: str,
+        name: str,
+        path: list[str],
+        fragment: Any,
+        dataset_id: str | None = None,
+        force: bool = False,
+        exact: bool = False,
     ) -> None:
-        """Merges the fragment into the sub-attribute at the path below the attribute."""
+        """Merges the fragment into the sub-attribute at the path below the attribute; `exact` as for
+        `update_attributes`."""
         if not isinstance(fragment, dict) or not fragment:
             raise invalid(f"Attribute {_level_name(name, path)} needs a value.")
         self._refuse_contexts(fragment)
 
         def change(level: dict[str, Any]) -> None:
-            _check_value(path[-1], level, fragment)
+            _check_value(path[-1], level, fragment, force)
             # A declared value keeps its datatype here too (gh-84, D3); the whole instance is written.
-            level.update(_stamped(level, _keep_datatype(level, fragment)))
+            level.update(_stamped(level, fragment if exact else _keep_datatype(level, fragment)))
 
         await self._edit_at_path(entity_id, name, path, dataset_id, change)
 
@@ -567,13 +598,33 @@ class ContextBroker:
 
         await self._edit_at_path(entity_id, name, path, dataset_id, add)
 
+    async def delete_instance(self, entity_id: str, name: str, dataset_id: str) -> None:
+        """Deletes one instance of the attribute, `@none` its default one. The others are written back
+        as the whole attribute, as the broker's own ways lose or mix up instances; the last one goes
+        with the attribute."""
+        async with self._editing(entity_id):
+            every = await self._instances(entity_id, name, None)
+            gone = _of_dataset(every, dataset_id)
+            rest = [i for i in every if all(i is not g for g in gone)]
+            if not gone:
+                raise not_found(f"{name} has no instance with that dataset.")
+            path = f"/entities/{_segment(entity_id)}/attrs"
+            if rest:
+                await self.send("POST", path, body={name: rest})
+            else:
+                await self.send("DELETE", f"{path}/{_attribute_segment(name)}", params={"deleteAll": "true"})
+
     async def delete_at_path(self, entity_id: str, name: str, path: list[str], dataset_id: str | None = None) -> None:
-        """Removes the sub-attribute at the path from each dataset that has it, or from the one named."""
+        """Removes the sub-attribute at the path from each dataset that has it, or from the one named,
+        `@none` the default instance."""
         if len(path) == 1 and dataset_id is None:
             await self.delete_attribute(entity_id, name, path[0])
             return
         async with self._editing(entity_id):
-            instances = await self._instances(entity_id, name, dataset_id)
+            every = await self._instances(entity_id, name, None)
+            instances = _of_dataset(every, dataset_id)
+            if not instances:
+                raise not_found(f"{name} has no instance with that dataset.")
             holders = []
             reached = 0
             for instance in instances:
@@ -584,18 +635,19 @@ class ContextBroker:
                     reached = max(reached, depth if found is None else len(path) - 1)
             if not holders:
                 raise not_found(f"{_level_name(name, path[:reached])} has no sub-attribute {path[reached]}.")
+            # The holders are instances of `every`, changed in place; every instance is written, so
+            # the others are kept.
+            for _, level in holders:
+                del level[path[-1]]
             if len(path) == 1:
                 # The broker's attribute-level PATCH can't take a top-level member away.
-                changed = [{k: v for k, v in instance.items() if k != path[0]} for instance, _ in holders]
                 await self.send(
                     "POST",
                     f"/entities/{_segment(entity_id)}/attrs",
-                    body={name: changed[0] if len(changed) == 1 else changed},
+                    body={name: every[0] if len(every) == 1 else every},
                 )
                 return
-            for instance, level in holders:
-                del level[path[-1]]
-                await self._write_attribute(entity_id, name, instance)
+            await self._write_attribute(entity_id, name, every)
 
     async def _edit_at_path(
         self,
@@ -606,7 +658,10 @@ class ContextBroker:
         apply: Callable[[dict[str, Any]], None],
     ) -> None:
         async with self._editing(entity_id):
-            instances = await self._instances(entity_id, name, dataset_id)
+            every = await self._instances(entity_id, name, None)
+            instances = _of_dataset(every, dataset_id)
+            if dataset_id is not None and not instances:
+                raise not_found(f"{name} has no instance with that dataset.")
             if dataset_id is None and len(instances) > 1:
                 instances = [i for i in instances if i.get("datasetId") is None]
             if len(instances) != 1:
@@ -616,7 +671,8 @@ class ContextBroker:
             if level is None:
                 raise not_found(f"{_level_name(name, path[:depth])} has no sub-attribute {path[depth]}.")
             apply(level)
-            await self._write_attribute(entity_id, name, instance)
+            # `instance` is one of `every`, changed in place, so `every` carries the change.
+            await self._write_attribute(entity_id, name, every)
 
     async def _instances(self, entity_id: str, name: str, dataset_id: str | None) -> list[dict[str, Any]]:
         """The attribute's instances, every dataset, or the one named."""
@@ -631,9 +687,18 @@ class ContextBroker:
                 raise not_found(f"{name} has no instance with that dataset.")
         return instances
 
-    async def _write_attribute(self, entity_id: str, name: str, instance: dict[str, Any]) -> None:
-        """The whole instance, written back with an attribute-level PATCH: its `datasetId` says which."""
-        await self.send("PATCH", f"/entities/{_segment(entity_id)}/attrs/{_attribute_segment(name)}", body=instance)
+    async def _write_attribute(
+        self, entity_id: str, name: str, instances: dict[str, Any] | list[dict[str, Any]]
+    ) -> None:
+        """The attribute written back. A lone default instance goes with an attribute-level PATCH. With a
+        dataset, every instance goes as the whole attribute: the broker's attribute-level PATCH skips an
+        instance with a dataset, and mixes them up beside the default one."""
+        every = instances if isinstance(instances, list) else [instances]
+        if len(every) == 1 and every[0].get("datasetId") is None:
+            path = f"/entities/{_segment(entity_id)}/attrs/{_attribute_segment(name)}"
+            await self.send("PATCH", path, body=every[0])
+            return
+        await self.send("POST", f"/entities/{_segment(entity_id)}/attrs", body={name: every})
 
     async def delete_entity(self, entity_id: str) -> None:
         try:
@@ -830,8 +895,9 @@ def _import_problem(index: int, entity: Any) -> str | None:
     return None
 
 
-def _check_value(name: str, existing: dict[str, Any], fragment: dict[str, Any]) -> None:
-    if "value" not in fragment:
+def _check_value(name: str, existing: dict[str, Any], fragment: dict[str, Any], force: bool = False) -> None:
+    """Refuses an empty value, or text for a number. `force` lets such a value through, on purpose."""
+    if "value" not in fragment or force:
         return
     if fragment["value"] in ("", None):
         raise invalid(f"{name} cannot be empty.")
@@ -857,10 +923,10 @@ def _stamped(existing: dict[str, Any], fragment: dict[str, Any]) -> dict[str, An
     return fragment
 
 
-def _merge_fragment(name: str, existing: Any, fragment: dict[str, Any]) -> dict[str, Any]:
+def _merge_fragment(name: str, existing: Any, fragment: dict[str, Any], force: bool = False) -> dict[str, Any]:
     if not isinstance(existing, dict):
         raise invalid(f"{name} cannot be changed this way.")
-    _check_value(name, existing, fragment)
+    _check_value(name, existing, fragment, force)
     fragment = _keep_datatype(existing, fragment)
     # The broker's merge needs the type, and keeps the value only if it is there.
     kept = {m: existing[m] for m in VALUE_MEMBERS if m in existing and m not in fragment}
@@ -906,10 +972,28 @@ def _level_name(name: str, path: list[str]) -> str:
     return ".".join([name, *path])
 
 
-def _merged_instance(name: str, instances: list[Any], fragment: dict[str, Any]) -> dict[str, Any]:
+def _of_dataset(instances: list[dict[str, Any]], dataset_id: str | None) -> list[dict[str, Any]]:
+    """The instances of the dataset named, `@none` the default one; every instance without a name."""
+    if dataset_id is None:
+        return instances
+    wanted = None if dataset_id == DEFAULT_INSTANCE else dataset_id
+    return [i for i in instances if i.get("datasetId") == wanted]
+
+
+def _has_datasets(existing: Any) -> bool:
+    """Whether the attribute has several instances, or one with a dataset."""
+    return isinstance(existing, list) or (isinstance(existing, dict) and existing.get("datasetId") is not None)
+
+
+def _with_instance_merged(
+    name: str, existing: Any, fragment: dict[str, Any], force: bool, exact: bool = False
+) -> list[dict[str, Any]]:
+    """Every instance of the attribute, with the fragment merged into the one of its dataset."""
+    instances = [i for i in (existing if isinstance(existing, list) else [existing]) if isinstance(i, dict)]
     wanted = fragment.get("datasetId")
-    for instance in instances:
-        if isinstance(instance, dict) and instance.get("datasetId") == wanted:
-            _check_value(name, instance, fragment)
-            return {**instance, **_stamped(instance, _keep_datatype(instance, fragment))}
+    for index, instance in enumerate(instances):
+        if instance.get("datasetId") == wanted:
+            _check_value(name, instance, fragment, force)
+            merged = {**instance, **_stamped(instance, fragment if exact else _keep_datatype(instance, fragment))}
+            return [*instances[:index], merged, *instances[index + 1 :]]
     raise not_found(f"{name} has no instance with that dataset.")

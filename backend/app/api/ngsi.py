@@ -140,12 +140,17 @@ async def update_attributes(
     name: str | None = None,
     path: Annotated[list[str] | None, Query()] = None,
     dataset_id: str | None = None,
+    force: bool = False,
+    exact: bool = False,
 ) -> Response:
+    """`force` writes a value the checks refuse, such as text for a number, when the operator insists.
+    `exact` writes the value in the form given -- plain, or declared with the datatype the operator
+    chose -- instead of keeping the stored datatype."""
     broker = request.app.state.broker
     if path:
-        await broker.update_at_path(entity_id, name, path, _at_path(name, path, body), dataset_id)
+        await broker.update_at_path(entity_id, name, path, _at_path(name, path, body), dataset_id, force, exact)
     else:
-        await broker.update_attributes(entity_id, _attributes(body))
+        await broker.update_attributes(entity_id, _attributes(body), force, exact)
     return Response(status_code=204)
 
 
@@ -178,7 +183,8 @@ async def delete_attribute(
     path: Annotated[list[str] | None, Query()] = None,
     dataset_id: str | None = None,
 ) -> Response:
-    """`sub_attribute=x` is the same as one `path=x`."""
+    """`sub_attribute=x` is the same as one `path=x`. `dataset_id` without a path deletes that instance of the
+    attribute alone, `@none` its default instance; without either, the attribute goes with every instance."""
     broker = request.app.state.broker
     levels = path or ([sub_attribute] if sub_attribute else [])
     if path and sub_attribute:
@@ -186,7 +192,7 @@ async def delete_attribute(
     if levels:
         await broker.delete_at_path(entity_id, name, levels, dataset_id)
     elif dataset_id is not None:
-        raise invalid("A dataset is named only with a path: an attribute is deleted with every dataset.")
+        await broker.delete_instance(entity_id, name, dataset_id)
     else:
         await broker.delete_attribute(entity_id, name)
     return Response(status_code=204)
