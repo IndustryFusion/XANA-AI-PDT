@@ -81,7 +81,7 @@ const VALUE_LABEL = {
  * typed as `prefix:local`, a full IRI or a plain term; picking a prefix fills
  * in `prefix:`. Errors keep the form open.
  */
-export default function AddAttributeForm({ entityId, parent, path = [], label, onAdded, onCancel }) {
+export default function AddAttributeForm({ entityId, parent, path = [], datasetId, label, onAdded, onCancel }) {
   const reg = useRegistry()
   const [form, setForm] = useState({ name: '', kind: 'Property', value: '', unit: '', lon: '', lat: '', lang: 'en' })
   const [busy, setBusy] = useState(false)
@@ -118,7 +118,7 @@ export default function AddAttributeForm({ entityId, parent, path = [], label, o
     }
     setBusy(true)
     try {
-      if (parent) await entities.appendAttributes(entityId, { [parent]: { [name]: attr } }, { path, sub: true })
+      if (parent) await entities.appendAttributes(entityId, { [parent]: { [name]: attr } }, { path, sub: true, datasetId })
       else await entities.appendAttributes(entityId, { [name]: attr })
       onAdded(parent ?? name)
     } catch (err) {

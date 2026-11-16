@@ -45,6 +45,22 @@ describe('parse edited text', () => {
 })
 
 describe('plan changes', () => {
+  test('an instance with a dataset keeps it: its change goes to that instance, and a list of instances is written as a list', () => {
+    const lone = { ...entity, flow: { type: 'Property', value: 1, datasetId: 'urn:ngsi-ld:Dataset:live' } }
+    const changed = structuredClone(lone)
+    changed.flow.value = 2
+    expect(planChanges(lone, changed)).toEqual([
+      { op: 'update', name: 'flow', fragment: { value: 2, datasetId: 'urn:ngsi-ld:Dataset:live' } },
+    ])
+    const several = { ...entity, flow: [{ type: 'Property', value: 1 }, { type: 'Property', value: 5, datasetId: 'urn:ngsi-ld:Dataset:live' }] }
+    const next = structuredClone(several)
+    next.flow[1].value = 6
+    expect(planChanges(several, next)).toEqual([
+      { op: 'delete', name: 'flow' },
+      { op: 'append', attrs: { flow: next.flow } },
+    ])
+  })
+
   test('nothing changed', () => {
     expect(planChanges(entity, structuredClone(entity))).toEqual([])
   })

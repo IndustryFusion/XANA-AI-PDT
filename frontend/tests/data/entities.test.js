@@ -106,9 +106,20 @@ describe('edit', () => {
     expect((await entities.getEntity(MACHINE)).status).toMatchObject({ value: 'idle', observedAt })
   })
 
-  test('rejects a text for a numeric value and unknown attributes', async () => {
-    await expect(entities.updateAttributes(SENSOR, { value: { value: 'high' } })).rejects.toMatchObject({ kind: 'invalid', message: 'value must be a number.' })
+  test('rejects a text for a numeric value unless forced, and unknown attributes', async () => {
+    const live = { datasetId: 'urn:ngsi-ld:Dataset:live' }
+    await expect(entities.updateAttributes(SENSOR, { value: { value: 'high', ...live } })).rejects.toMatchObject({ kind: 'invalid', message: 'value must be a number.' })
+    await entities.updateAttributes(SENSOR, { value: { value: 'high', ...live } }, { force: true })
+    expect((await entities.getEntity(SENSOR)).value.value).toBe('high')
     await expect(entities.updateAttributes(SENSOR, { nope: { value: 1 } })).rejects.toMatchObject({ kind: 'not_found' })
+  })
+
+  test('an update names its instance by its dataset; without it, the instance of a dataset is not found', async () => {
+    await expect(entities.updateAttributes(SENSOR, { value: { value: 21 } })).rejects.toMatchObject({ kind: 'not_found' })
+    await entities.updateAttributes(SENSOR, { value: { value: 21, datasetId: 'urn:ngsi-ld:Dataset:live' } })
+    const value = (await entities.getEntity(SENSOR)).value
+    expect(Array.isArray(value)).toBe(false)
+    expect(value).toMatchObject({ value: 21, datasetId: 'urn:ngsi-ld:Dataset:live' })
   })
 
   test('appends attributes, refusing existing names and invalid input', async () => {

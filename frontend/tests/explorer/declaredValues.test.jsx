@@ -19,7 +19,7 @@ import { render, screen } from '@testing-library/react'
 import { describe, expect, test } from 'vitest'
 
 import AttributeValue from '../../src/features/explorer/AttributeValue'
-import { attributeKind, editableValue, isValueObject, literalOf, parseInput, sameValue } from '../../src/features/explorer/attributes'
+import { attributeKind, editableValue, effectiveDatatype, isNumberText, isValueObject, literalOf, parseInput, sameValue, valueOfDatatype } from '../../src/features/explorer/attributes'
 
 const DOUBLE = 'http://www.w3.org/2001/XMLSchema#double'
 const declared = (value) => ({ type: DOUBLE, '@value': value })
@@ -77,5 +77,44 @@ describe('live updates of a declared value', () => {
 
   test('a changed value is a change', () => {
     expect(sameValue({ type: 'Property', value: declared(42.5) }, { type: 'Property', value: declared(43) })).toBe(false)
+  })
+})
+
+const XSD = 'http://www.w3.org/2001/XMLSchema#'
+
+describe('the datatype of a value and its form', () => {
+  test.each([
+    [80, 'integer'],
+    [2.5, 'double'],
+    [true, 'boolean'],
+    ['on', 'string'],
+    [declared(80), 'double'],
+    [{ '@value': '2026-11-15T10:00:00Z', '@type': 'xsd:dateTime' }, 'dateTime'],
+  ])('%j reads as xsd:%s', (value, local) => {
+    expect(effectiveDatatype(value)).toBe(XSD + local)
+  })
+
+  test('a string that reads as a number is marked', () => {
+    expect(isNumberText('2.7')).toBe(true)
+    expect(isNumberText('2.7x')).toBe(false)
+    expect(isNumberText(2.7)).toBe(false)
+  })
+
+  test.each([
+    ['2.5', 'double', { '@value': 2.5, '@type': `${XSD}double` }],
+    ['6', 'double', { '@value': 6, '@type': `${XSD}double` }],
+    ['2026-11-15T10:00:00Z', 'dateTime', { '@value': '2026-11-15T10:00:00Z', '@type': `${XSD}dateTime` }],
+    ['1.25', 'decimal', { '@value': 1.25, '@type': `${XSD}decimal` }],
+    ['7', 'integer', 7],
+    ['true', 'boolean', true],
+    ['on', 'string', 'on'],
+    ['ab', 'token', { '@value': 'ab', '@type': `${XSD}token` }],
+  ])('%s as xsd:%s is written as %j', (text, local, written) => {
+    expect(valueOfDatatype(text, XSD + local)).toStrictEqual(written)
+  })
+
+  test.each([['tomorrow', 'dateTime'], ['yes', 'boolean'], ['six', 'double'], ['1.5', 'integer']])('%s is not a value of xsd:%s, and saved anyway it is declared as entered', (text, local) => {
+    expect(() => valueOfDatatype(text, XSD + local)).toThrow(`“${text}” is not a value of xsd:${local}.`)
+    expect(valueOfDatatype(text, XSD + local, { anyway: true })).toStrictEqual({ '@value': text, '@type': XSD + local })
   })
 })

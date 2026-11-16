@@ -21,7 +21,7 @@ import { formatTime } from '../../ui/format'
 import { useContextMenu } from '../../ui/ContextMenu'
 import { Icon, IconButton } from '../../ui/icons'
 import {
-  attributeKind, editableValue, hasHistory, instancesOf, iriOf, kindInfo, literalOf, parseInput, subAttributesOf, targetsOf, timeSeriesAhead,
+  attributeKind, datatypeLabel, editableValue, effectiveDatatype, fitsDatatype, hasHistory, instancesOf, iriOf, isNumberText, kindInfo, literalOf, parseInput, subAttributesOf, targetsOf, timeSeriesAhead, valueOfDatatype,
 } from './attributes'
 import AttributeValue from './AttributeValue'
 import AddAttributeForm from './AddAttributeForm'
@@ -29,7 +29,7 @@ import HistoryPane from './HistoryPane'
 import { Iri, nameItems, useCopy, useFullIri, useRegistry } from './Iri'
 import { isHttpIri, registry } from './prefixes'
 import { useKept, useUnnested } from './store'
-import ValueEditor from './ValueEditor'
+import ValueEditor, { NUMBER_TEXT_HINT } from './ValueEditor'
 
 /** Deepest nesting of relationship targets expanded in place. */
 export const MAX_DEPTH = 5
@@ -61,6 +61,9 @@ function TimeSeriesAhead({ ahead }) {
   const text = AHEAD[ahead]
   return <span className="attr-line__behind" role="img" tabIndex={0} title={text} aria-label={text}>⚠</span>
 }
+
+/** A dataset ID as it is shown after an attribute's name, in brackets: short when it is an IRI. */
+export const datasetLabel = (id) => (isHttpIri(id) ? registry.shorten(id) : entityLabel(id))
 
 /** `name.sub.sub2`, only to mark lines in the page; IRIs contain dots, so keys use `levelKey`. */
 export const dotted = (name, path = []) => [name, ...path].join('.')
@@ -139,7 +142,12 @@ function valueText(inst) {
  * below the top-level attribute `name`; it is empty for the attribute itself.
  * Selecting an editable value edits it in place.
  */
-function Line({ name, path, inst, ctx, actions, multi = false }) {
+/**
+ * One line of an attribute or a sub-attribute. `dataset` is the dataset of the attribute's instance the line
+ * belongs to, so every edit goes to that instance. `first` marks the first instance, which carries what
+ * applies to the attribute as a whole: its history and deleting it.
+ */
+function Line({ name, path, inst, ctx, actions, multi = false, dataset = null, first = true }) {
   useRegistry()
   const key = `${ctx.nodeKey}#${levelKey(name, path)}`
   const [editing, setEditing] = useState(false)
@@ -152,8 +160,10 @@ function Line({ name, path, inst, ctx, actions, multi = false }) {
   const [showFull, popover] = useFullIri(lineRef)
   const kind = attributeKind(inst)
   const own = path.length ? path.at(-1) : name
-  const label = path.length ? `sub-attribute ${shortDotted(own)} of ${shortDotted(name, path.slice(0, -1))}` : registry.shorten(name)
-  const readOnly = ctx.readOnly || multi
+  // In accessible names the dataset tells instances apart; a lone instance keeps its plain name there.
+  const instanceName = dataset && multi ? `${registry.shorten(name)}[${datasetLabel(dataset)}]` : registry.shorten(name)
+  const label = path.length ? `sub-attribute ${shortDotted(own)} of ${[instanceName, ...path.slice(0, -1).map((level) => shortDotted(level))].join('.')}` : instanceName
+  const readOnly = ctx.readOnly
   const editable = actions && !readOnly && editableValue(inst)
   const subs = subAttributesOf(inst)
   const changed = path.length === 0 && ctx.changed
@@ -178,13 +188,37 @@ function Line({ name, path, inst, ctx, actions, multi = false }) {
     items: () => [...nameItems(own, { copy, showFull }), { label: 'Copy value', onSelect: () => copy(valueText(inst), 'the value') }],
   })
 
-  async function save(text) {
+  /**
+   * Saves into the line's instance. `datatype` is the datatype chosen for the value: the value is written
+   * in that datatype's form, exactly (plain or declared), and a datatype other than the stored one is a
+   * deliberate change, so the backend's number check is skipped for it. `force` writes a value the checks
+   * refuse, when the operator insists -- one not of its datatype then goes declared as it was entered.
+   */
+  async function save(text, { force = false, datatype: chosen = null, from = datatype } = {}) {
     const [member] = editable
     const typed = iriMember ? registry.expand(text, { identifier: true }) : text
     // Parsed against the plain value: a declared number is edited as a number (gh-84).
-    const value = parseInput(typed, literalOf(inst[member]), member)
-    if (path.length) await entities.updateAttributes(ctx.entityId, { [name]: { [member]: value } }, { path })
-    else await entities.updateAttributes(ctx.entityId, { [name]: { [member]: value } })
+    let value = parseInput(typed, literalOf(inst[member]), member)
+    let exact = false
+    if (chosen) {
+      // `from` is the datatype the editing started from: a live update meanwhile is no change by the operator.
+      const changed = chosen !== from
+      // A plain number's datatype is JSON-LD's reading of it, not a choice: kept, any number will do.
+      const fits = !changed && typeof inst[member] === 'number' ? isNumberText(typed) : fitsDatatype(typed, chosen)
+      if (!fits && !force) {
+        throw Object.assign(new Error(`“${typed.trim()}” is not a value of ${datatypeLabel(chosen)}.`), { kind: 'datatype' })
+      }
+      // Another datatype, or a value saved anyway though not of its datatype: written in exactly that form.
+      // The same datatype: written as before, a declared value keeping its datatype and a plain one plain.
+      if (changed || !fits) {
+        value = valueOfDatatype(typed, chosen, { anyway: !fits })
+        exact = true
+        if (changed) force = true
+      }
+    }
+    const options = { force, ...(exact ? { exact } : {}) }
+    if (path.length) await entities.updateAttributes(ctx.entityId, { [name]: { [member]: value } }, { path, datasetId: dataset, ...options })
+    else await entities.updateAttributes(ctx.entityId, { [name]: { [member]: value, ...(dataset ? { datasetId: dataset } : {}) } }, options)
     setEditing(false)
     ctx.onSaved([name, ...path])
   }
@@ -192,6 +226,9 @@ function Line({ name, path, inst, ctx, actions, multi = false }) {
   const toggleNested = (target) => setNested((list) => (list.includes(target) ? list.filter((t) => t !== target) : [...list, target]))
   const linkValue = kind === 'relationship' || kind === 'iri'
   const [member, current] = editable || []
+  // A property's value has a datatype as the platform reads it, shown beside it and chosen when editing.
+  const datatype = kind === 'property' ? effectiveDatatype(inst.value) : null
+  const numberText = isNumberText(inst.value)
   const raw = member === 'value' && iriOf(inst.value) ? iriOf(inst.value) : current
   const initial = iriMember && typeof raw === 'string' ? registry.shorten(raw) : raw
   const unnested = useUnnested().filter((u) => u.origin?.key === key).map((u) => u.id)
@@ -201,7 +238,7 @@ function Line({ name, path, inst, ctx, actions, multi = false }) {
     value = (
       <ValueEditor
         label={path.length ? `${shortDotted(own)} of ${shortDotted(name, path.slice(0, -1))}` : label} initial={initial}
-        entityType={ctx.entityType} attribute={own} iri={!!iriMember}
+        entityType={ctx.entityType} attribute={own} iri={!!iriMember} datatype={datatype} numberText={numberText}
         onSave={save} onCancel={() => setEditing(false)}
       />
     )
@@ -226,12 +263,17 @@ function Line({ name, path, inst, ctx, actions, multi = false }) {
         style={{ '--depth': path.length }} {...menu.triggerProps}
       >
         <KindBadge kind={kind} /><Space />
-        <span className="attr-line__name mono" title={own !== registry.shorten(own) ? own : undefined}>{registry.shorten(own)}</span><Space />
+        <span className="attr-line__name mono" title={[own !== registry.shorten(own) ? own : null, path.length === 0 && dataset ? `dataset ${dataset}` : null].filter(Boolean).join('\n') || undefined}>
+          {registry.shorten(own)}
+          {path.length === 0 && dataset && <span className="attr-line__dataset" data-testid="dataset">[{datasetLabel(dataset)}]</span>}
+        </span><Space />
         <span className="tok tok--punct" aria-hidden="true">=</span><Space />
         <div className="attr-line__value mono">{value}</div><Space />
         {ahead && <><TimeSeriesAhead ahead={ahead} /><Space /></>}
         {inst.unitCode && !editing && <><span className="attr-line__unit">{inst.unitCode}</span><Space /></>}
-        {inst.datasetId && <><span className="attr-line__meta" title={inst.datasetId}>dataset {isHttpIri(inst.datasetId) ? registry.shorten(inst.datasetId) : entityLabel(inst.datasetId)}</span><Space /></>}
+        {datatype && !editing && (
+          <><span className="attr-line__datatype mono" data-testid="datatype" title={numberText ? NUMBER_TEXT_HINT : 'The datatype the platform reads the value as'}>{datatypeLabel(datatype)}{numberText && ' · number text'}</span><Space /></>
+        )}
         {inst.lang && <><span className="attr-line__meta">lang {inst.lang}</span><Space /></>}
         {changed && <><span className="attr-line__changed">Updated</span><Space /></>}
         {subs.length > 0 && (
@@ -246,15 +288,21 @@ function Line({ name, path, inst, ctx, actions, multi = false }) {
           )}
           {actions && (
             <span className="attr-line__actions">
-              {hasHistory(inst, path.length === 0 && !!ctx.recorded) && (
+              {first && hasHistory(inst, path.length === 0 && !!ctx.recorded) && (
                 <IconButton icon="history" tone="muted" label={`History of ${label}`} aria-pressed={historyOpen} onClick={() => ctx.onHistory(pathKey)} />
               )}
               {editable && !editing && <IconButton icon="edit" tone="muted" label={`Edit ${label}`} onClick={() => setEditing(true)} />}
               {!readOnly && (
                 <IconButton icon="addSub" tone="muted" label={`Add sub-attribute to ${label}`} aria-expanded={addingSub} onClick={() => setAddingSub((a) => !a)} />
               )}
-              {!ctx.readOnly && (!multi || path.length === 0) && (
-                <IconButton icon="delete" tone="muted" className="icon-button--danger-hover" label={`Delete ${label}`} onClick={() => ctx.onDelete(name, path)} />
+              {/* Each instance of a multi-attribute is deleted alone (its last one takes the attribute along);
+                  a lone attribute is deleted whole; a sub-attribute in its own instance. */}
+              {!ctx.readOnly && (
+                <IconButton
+                  icon="delete" tone="muted" className="icon-button--danger-hover"
+                  label={path.length === 0 && multi ? `Delete the instance ${registry.shorten(name)}[${dataset ? datasetLabel(dataset) : 'default'}]` : `Delete ${label}`}
+                  onClick={() => (path.length === 0 && multi ? ctx.onDelete(name, [], null, dataset ?? '@none') : ctx.onDelete(name, path, path.length ? (dataset ?? (multi ? '@none' : null)) : null))}
+                />
               )}
             </span>
           )}
@@ -269,12 +317,12 @@ function Line({ name, path, inst, ctx, actions, multi = false }) {
       )}
       {addingSub && (
         <AddAttributeForm
-          entityId={ctx.entityId} parent={name} path={path} label={`Add a sub-attribute to ${label}`}
+          entityId={ctx.entityId} parent={name} path={path} datasetId={dataset} label={`Add a sub-attribute to ${label}`}
           onCancel={() => setAddingSub(false)}
           onAdded={() => { setAddingSub(false); setSubsOpen(true); ctx.onSaved([name, ...path]) }}
         />
       )}
-      {historyOpen && actions && (
+      {historyOpen && actions && first && (
         <HistoryPane
           entityId={ctx.entityId} name={name} path={path} unit={inst.unitCode} headingLevel={ctx.headingLevel + 1}
           onClose={() => ctx.onHistory(pathKey)}
@@ -284,8 +332,7 @@ function Line({ name, path, inst, ctx, actions, multi = false }) {
         <ul id={subsId} className="attr-subs" aria-label={`Sub-attributes of ${label}`}>
           {subs.map(([subName, subAttr]) => (
             <li key={subName} data-attribute={dotted(name, [...path, subName])}>
-              {/* Sub-attributes of a multi-attribute are read-only, as its instances are: they are edited in the raw JSON. */}
-              <Line name={name} path={[...path, subName]} inst={subAttr} ctx={ctx} actions={!multi} multi={multi} />
+              <Line name={name} path={[...path, subName]} inst={subAttr} ctx={ctx} actions multi={multi} dataset={dataset} first={first} />
             </li>
           ))}
         </ul>
@@ -304,14 +351,10 @@ export default function AttributeLine({ name, attr, ctx }) {
 
   return (
     <li className="attr-item" data-attribute={name}>
+      {/* Each instance is a line of its own, named with its dataset, and edited in that dataset. */}
       {instances.map((inst, i) => (
-        <Line key={inst.datasetId ?? i} name={name} path={[]} inst={inst} ctx={ctx} actions={i === 0} multi={multi} />
+        <Line key={inst.datasetId ?? i} name={name} path={[]} inst={inst} ctx={ctx} actions multi={multi} dataset={inst.datasetId ?? null} first={i === 0} />
       ))}
-      {multi && !ctx.readOnly && (
-        <div className="attr-line attr-line--note">
-          <span className="muted">{instances.length} instances; edit them in the raw JSON.</span>
-        </div>
-      )}
     </li>
   )
 }

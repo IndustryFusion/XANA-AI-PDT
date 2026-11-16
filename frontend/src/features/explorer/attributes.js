@@ -140,7 +140,82 @@ export function editableValue(attr) {
   return null
 }
 
-/** Converts editor text to a value of the same type as the current one. */
+/**
+ * The datatypes a value can be edited as. The operator picks a datatype only; how it is written
+ * follows the platform's typed-literals contract: a double, float or decimal -- and a dateTime, or
+ * any other datatype -- is declared, `{"@value": 80, "@type": xsd:double}`, so that a whole double
+ * stays a double; an integer, a boolean and a string are written as plain JSON values.
+ */
+export const DATATYPES = ['string', 'double', 'integer', 'boolean', 'dateTime'].map((local) => ({ id: XSD + local, label: `xsd:${local}` }))
+/** The choice that lets the operator name any other datatype by its IRI. */
+export const OTHER_DATATYPE = 'other'
+
+const PLAIN = new Set(['string', 'integer', 'boolean'])
+const NUMBER_TEXT = /^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$/
+const LEXICAL = {
+  double: NUMBER_TEXT,
+  float: NUMBER_TEXT,
+  decimal: /^[+-]?(\d+(\.\d*)?|\.\d+)$/,
+  boolean: /^(true|false)$/,
+  dateTime: /^-?\d{4,}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})?$/,
+}
+const lexicalOf = (local) => (INTEGERS.has(local) ? /^[+-]?\d+$/ : LEXICAL[local])
+
+/** `xsd:double` for the XSD double; any other datatype IRI as it is. */
+export const datatypeLabel = (iri) => (localDatatype(iri) ? `xsd:${localDatatype(iri)}` : iri)
+
+/** A datatype as its full IRI: `xsd:double` expanded, anything else as given. */
+export const datatypeIri = (text) => (localDatatype(text) ? XSD + localDatatype(text) : text.trim())
+
+/** The datatype a declared value names, such as `xsd:double`; null for a plain value. */
+export function declaredDatatype(value) {
+  if (!isValueObject(value)) return null
+  const declared = value['@type'] ?? value.type
+  return declared ? datatypeLabel(declared) : null
+}
+
+/**
+ * The datatype the platform reads a value as, as a full IRI: a declared value's own, else that of
+ * the plain JSON value as JSON-LD types it -- a whole number an integer, any other number a double.
+ */
+export function effectiveDatatype(value) {
+  if (isValueObject(value)) {
+    const declared = value['@type'] ?? value.type
+    if (declared) return datatypeIri(declared)
+    value = value['@value']
+  }
+  if (typeof value === 'number') return XSD + (Number.isInteger(value) ? 'integer' : 'double')
+  if (typeof value === 'boolean') return `${XSD}boolean`
+  if (typeof value === 'string') return `${XSD}string`
+  return null
+}
+
+/** Whether the value is a plain string that reads as a number: a double's check accepts it as one. */
+export const isNumberText = (value) => typeof value === 'string' && NUMBER_TEXT.test(value.trim())
+
+/**
+ * The text as a value of the datatype, in the form the platform's writers use (see DATATYPES).
+ * A text that isn't of the datatype throws, saying why; `anyway` writes it declared as it is, to
+ * test how the platform takes a value that isn't of its datatype.
+ */
+/** Whether the text is a value of the datatype (any text is, of a datatype without a known form). */
+export function fitsDatatype(text, iri) {
+  const lexical = lexicalOf(localDatatype(iri))
+  return !lexical || lexical.test(text.trim())
+}
+
+export function valueOfDatatype(text, iri, { anyway = false } = {}) {
+  const trimmed = text.trim()
+  const local = localDatatype(iri)
+  if (!fitsDatatype(trimmed, iri)) {
+    if (anyway) return { '@value': trimmed, '@type': iri }
+    throw new TypeError(`“${trimmed}” is not a value of ${datatypeLabel(iri)}.`)
+  }
+  const numeric = INTEGERS.has(local) || DECIMALS.has(local)
+  const value = numeric ? Number(trimmed) : local === 'boolean' ? trimmed === 'true' : trimmed
+  return PLAIN.has(local) || INTEGERS.has(local) ? value : { '@value': value, '@type': iri }
+}
+
 export function parseInput(text, current, member) {
   const trimmed = text.trim()
   if (member === 'value' && typeof current === 'object' && current && '@id' in current) return { '@id': trimmed }

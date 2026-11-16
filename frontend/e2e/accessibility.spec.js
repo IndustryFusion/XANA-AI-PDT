@@ -113,7 +113,7 @@ const EXPLORER_ALERT_STATES = [
     await page.getByRole('button', { name: 'Edit value' }).click()
     await page.getByRole('combobox', { name: 'New value of value' }).fill('high')
     await page.getByRole('button', { name: 'Save value' }).click()
-    await expect(page.getByText('Not saved: value must be a number.')).toBeVisible()
+    await expect(page.getByText('Not saved: “high” is not a value of xsd:double.')).toBeVisible()
   }],
   ['explorer nested relationship and sub-attributes', async (page) => {
     await page.goto(SENSOR)

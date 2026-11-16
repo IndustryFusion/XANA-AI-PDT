@@ -24,7 +24,7 @@ import { useContextMenu } from '../../ui/ContextMenu'
 import { Icon, IconButton } from '../../ui/icons'
 import { ConfirmDialog } from '../../ui/structured'
 import { attributesOf, displayName, sameValue, statusOf } from './attributes'
-import AttributeLine from './AttributeLine'
+import AttributeLine, { datasetLabel } from './AttributeLine'
 import AddAttributeForm from './AddAttributeForm'
 import { Iri, nameItems, shortenText, useCopy, useFullIri, useRegistry } from './Iri'
 import { isHttpIri, registry } from './prefixes'
@@ -69,6 +69,9 @@ export function goToEntity(id) {
  * itself. `summary` is the entity from the result list, shown until the node
  * has loaded its own copy.
  */
+/** `name[dataset]`, or `name[default]` for the default instance (`@none`). */
+const instanceText = (name, dataset) => `${registry.shorten(name)}[${dataset === '@none' ? 'default' : datasetLabel(dataset)}]`
+
 export default function EntityNode({
   id, summary, depth = 0, chain = [], query, expanded: expandedProp, onExpandedChange,
   current = false, listen, onChanged, onDeleted, standalone = false, refreshKey = 0,
@@ -219,9 +222,11 @@ export default function EntityNode({
       else refresh()
       return
     }
-    const { name, path } = deleting
-    await entities.deleteAttribute(id, name, path.length ? { path } : {})
-    notify(path.length ? `Sub-attribute ${short(path.at(-1))} of ${shortPath(name, path.slice(0, -1))} deleted.` : `${short(name)} deleted.`, 'success')
+    const { name, path, instance } = deleting
+    const options = path.length ? { path, datasetId: deleting.datasetId } : instance ? { datasetId: instance } : {}
+    await entities.deleteAttribute(id, name, options)
+    notify(path.length ? `Sub-attribute ${short(path.at(-1))} of ${shortPath(name, path.slice(0, -1))} deleted.`
+      : instance ? `${instanceText(name, instance)} deleted.` : `${short(name)} deleted.`, 'success')
     // The history of what was deleted, or of anything below it, closes.
     const gone = [name, ...path]
     const open = historyOf ? JSON.parse(historyOf) : null
@@ -233,7 +238,8 @@ export default function EntityNode({
   const short = (n) => registry.shorten(n)
   const shortPath = (name, path) => [name, ...path].map(short).join('.')
   const deleteTitle = deleting?.entity ? 'Delete this entity?'
-    : deleting?.path?.length ? `Delete the sub-attribute ${short(deleting.path.at(-1))}?` : `Delete the attribute ${short(deleting?.name ?? '')}?`
+    : deleting?.path?.length ? `Delete the sub-attribute ${short(deleting.path.at(-1))}?`
+      : deleting?.instance ? `Delete the instance ${instanceText(deleting.name, deleting.instance)}?` : `Delete the attribute ${short(deleting?.name ?? '')}?`
 
   const renderNested = (target, from) => (
     <EntityNode
@@ -249,7 +255,8 @@ export default function EntityNode({
     stored: statusOf(states.data, name),
     onSaved: saved,
     onHistory: (key) => setHistoryOf((h) => (h === key ? null : key)),
-    onDelete: (n, path = []) => setDeleting({ name: n, path }),
+    // `instance`: the dataset of one instance to delete alone (`@none` for the default one), at the attribute itself.
+    onDelete: (n, path = [], datasetId = null, instance = null) => setDeleting({ name: n, path, datasetId, instance }),
     renderNested,
     goTo: goToEntity,
   })
@@ -343,7 +350,9 @@ export default function EntityNode({
           ? <p>The entity <span className="mono" title={isHttpIri(id) ? id : undefined}>{short(id)}</span> and all its attributes are deleted.</p>
           : deleting?.path?.length
             ? <p>Only the sub-attribute <strong>{short(deleting.path.at(-1))}</strong> is removed; <strong>{shortPath(deleting.name, deleting.path.slice(0, -1))}</strong> and its other sub-attributes remain.</p>
-            : <p>The attribute <strong>{short(deleting?.name ?? '')}</strong> and its sub-attributes are removed from this entity.</p>}
+            : deleting?.instance
+              ? <p>Only the instance <strong>{instanceText(deleting.name, deleting.instance)}</strong> and its sub-attributes are removed; the attribute’s other instances remain.</p>
+              : <p>The attribute <strong>{short(deleting?.name ?? '')}</strong> and its sub-attributes are removed from this entity.</p>}
       </ConfirmDialog>
     </article>
   )

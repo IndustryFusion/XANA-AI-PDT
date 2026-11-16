@@ -80,7 +80,7 @@ test('edit a value in place, and it stays after a reload', async ({ page }) => {
     await attribute(node(page, id), 'level').getByRole('button', { name: /3/ }).first().click()
     await page.getByLabel('New value of level').fill('abc')
     await page.getByLabel('New value of level').press('Enter')
-    await expect(page.getByRole('alert').filter({ hasText: 'Not saved' })).toContainText('must be a number')
+    await expect(page.getByRole('alert').filter({ hasText: 'Not saved' })).toContainText('“abc” is not a value of xsd:integer.')
   } finally {
     await page.request.delete(`/api/ngsi/entities/${encodeURIComponent(id)}`)
   }
@@ -175,7 +175,7 @@ test('a declared double is shown as its value and keeps its datatype when edited
     await attribute(node(page, id), 'temp').getByRole('button', { name: /80/ }).first().click()
     await page.getByLabel('New value of temp').fill('hot')
     await page.getByLabel('New value of temp').press('Enter')
-    await expect(page.getByRole('alert').filter({ hasText: 'Not saved' })).toContainText('must be a number')
+    await expect(page.getByRole('alert').filter({ hasText: 'Not saved' })).toContainText('“hot” is not a value of xsd:double.')
   } finally {
     await page.request.delete(`/api/ngsi/entities/${encodeURIComponent(id)}`)
   }

@@ -381,7 +381,7 @@ describe('the same row at every depth', () => {
     await user.clear(input)
     await user.type(input, 'model{Enter}')
     await waitFor(() => expect(stored(PUMP)[F('FlowRate')][F('Quality')][F('Source')].value).toBe('model'))
-    expect(spy.update).toHaveBeenCalledWith(PUMP, { [F('FlowRate')]: { value: 'model' } }, { path: [F('Quality'), F('Source')] })
+    expect(spy.update).toHaveBeenCalledWith(PUMP, { [F('FlowRate')]: { value: 'model' } }, { path: [F('Quality'), F('Source')], datasetId: null, force: false })
     expect(stored(PUMP)[F('FlowRate')].value).toBe(12)
     expect(stored(PUMP)[F('FlowRate')][F('Quality')].value).toBe('good')
 
@@ -391,7 +391,7 @@ describe('the same row at every depth', () => {
     await user.type(within(form).getByLabelText('Value'), 'checked')
     await user.click(within(form).getByRole('button', { name: 'Add' }))
     await waitFor(() => expect(stored(PUMP)[F('FlowRate')][F('Quality')][F('Source')][F('Note')]).toEqual({ type: 'Property', value: 'checked' }))
-    expect(spy.append).toHaveBeenCalledWith(PUMP, { [F('FlowRate')]: { [F('Note')]: { type: 'Property', value: 'checked' } } }, { path: [F('Quality'), F('Source')], sub: true })
+    expect(spy.append).toHaveBeenCalledWith(PUMP, { [F('FlowRate')]: { [F('Note')]: { type: 'Property', value: 'checked' } } }, { path: [F('Quality'), F('Source')], sub: true, datasetId: null })
 
     await user.click(within(line()).getByRole('button', { name: /^History of sub-attribute pumps:Source/ }))
     expect(await screen.findByRole('heading', { name: 'History of pumps:FlowRate.pumps:Quality.pumps:Source' })).toBeVisible()
@@ -402,7 +402,7 @@ describe('the same row at every depth', () => {
     expect(within(dialog).getByRole('button', { name: 'Delete' })).toHaveTextContent('Delete')
     await user.click(within(dialog).getByRole('button', { name: 'Delete' }))
     await waitFor(() => expect(stored(PUMP)[F('FlowRate')][F('Quality')][F('Source')]).toBeUndefined())
-    expect(spy.del).toHaveBeenCalledWith(PUMP, F('FlowRate'), { path: [F('Quality'), F('Source')] })
+    expect(spy.del).toHaveBeenCalledWith(PUMP, F('FlowRate'), { path: [F('Quality'), F('Source')], datasetId: null })
     expect(stored(PUMP)[F('FlowRate')][F('Quality')].value).toBe('good')
     vi.restoreAllMocks()
   })
@@ -464,7 +464,7 @@ describe('review fixes', () => {
     expect(fullIrisShown()).toEqual([])
   })
 
-  test('sub-attributes of a multi-attribute are read-only, and their history opens once', async () => {
+  test('sub-attributes of a multi-attribute are edited in their own instance, and the history is offered once', async () => {
     const multi = { ...pump(), [F('Temp')]: [
       { type: 'Property', value: 1, datasetId: 'urn:ngsi-ld:Dataset:a', [F('Acc')]: { type: 'Property', value: 0.1, observedAt: now } },
       { type: 'Property', value: 2, datasetId: 'urn:ngsi-ld:Dataset:b', [F('Acc')]: { type: 'Property', value: 0.2, observedAt: now } },
@@ -476,7 +476,18 @@ describe('review fixes', () => {
     await user.click(within(attr(F('Temp'))).getAllByRole('button', { name: /^1 sub-attribute/ })[0])
     const subs = attr(F('Temp')).querySelectorAll('.attr-subs .attr-line')
     expect(subs).toHaveLength(2)
-    for (const line of subs) expect(within(line).queryAllByRole('button', { name: /^(History|Edit|Delete|Add sub-attribute)/ })).toHaveLength(0)
+    // Only the first instance offers the history, which is the attribute's.
+    const tops = [...attr(F('Temp')).children].filter((el) => el.classList.contains('attr-line'))
+    expect(tops).toHaveLength(2)
+    expect(within(tops[1]).queryByRole('button', { name: /^History/ })).toBeNull()
+    expect(within(subs[1]).queryByRole('button', { name: /^History/ })).toBeNull()
+    await user.click(within(subs[1]).getByRole('button', { name: /^Edit sub-attribute pumps:Acc of pumps:Temp\[b\]/ }))
+    const input = screen.getByRole('combobox', { name: /^New value of pumps:Acc/ })
+    await user.clear(input)
+    await user.type(input, '0.3{Enter}')
+    await waitFor(() => expect(stored(PUMP)[F('Temp')][1][F('Acc')].value).toBe(0.3))
+    expect(stored(PUMP)[F('Temp')][0][F('Acc')].value).toBe(0.1)
+    expect(stored(PUMP)[F('Temp')]).toHaveLength(2)
   })
 
   test('an expanded ID pattern is shown as the short name again, in the field and its chip', async () => {

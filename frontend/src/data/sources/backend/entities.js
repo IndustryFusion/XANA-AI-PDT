@@ -57,7 +57,16 @@ function subscribeEntities({ type, ids } = {}, onEvent) {
 }
 
 /** `name` and `path` for an edit at a path of sub-attributes; none without one. */
-const pathParams = (attrs, path, sub = false) => (path?.length || sub ? { name: Object.keys(attrs)[0], path } : undefined)
+/** The attribute, the path below it and the instance's dataset, for an edit at a path; `force` for a value the checks refuse. */
+function editParams(attrs, { path, sub = false, datasetId, force, exact } = {}) {
+  const params = {
+    ...(path?.length || sub ? { name: Object.keys(attrs)[0], path } : {}),
+    ...((path?.length || sub) && datasetId ? { dataset_id: datasetId } : {}),
+    ...(force ? { force: true } : {}),
+    ...(exact ? { exact: true } : {}),
+  }
+  return Object.keys(params).length ? params : undefined
+}
 
 const queryParams = ({ type, id, idPattern, q, limit } = {}) => ({ type, id, id_pattern: idPattern, q, limit })
 const pagedParams = ({ offset, attrs, hasAttr, ...query } = {}) => ({ ...queryParams(query), offset, attrs, has_attr: hasAttr })
@@ -68,14 +77,19 @@ export const entities = {
   listAttributes: () => request(AREA, 'GET', '/api/ngsi/attributes', raw),
   queryEntities: (query) => request(AREA, 'GET', '/api/ngsi/entities', { ...raw, params: pagedParams(query) }),
   getEntity: (id) => request(AREA, 'GET', `/api/ngsi/entities/${seg(id)}`, raw),
-  // With `path`, `attrs` holds one attribute whose fragment applies at that path of sub-attributes below it.
-  updateAttributes: (id, attrs, { path } = {}) =>
-    request(AREA, 'PATCH', `/api/ngsi/entities/${seg(id)}/attrs`, { ...raw, body: attrs, params: pathParams(attrs, path) }),
+  // With `path`, `attrs` holds one attribute whose fragment applies at that path of sub-attributes below it, in the
+  // instance of `datasetId`. A fragment without a path names its instance by its own `datasetId`. `force` writes a
+  // value the checks refuse, when the operator insists. `exact` writes the value in the form given, as the datatype
+  // the operator chose, instead of keeping the stored datatype.
+  updateAttributes: (id, attrs, { path, datasetId, force, exact } = {}) =>
+    request(AREA, 'PATCH', `/api/ngsi/entities/${seg(id)}/attrs`, { ...raw, body: attrs, params: editParams(attrs, { path, datasetId, force, exact }) }),
   // With `sub`, `attrs` holds one attribute and the sub-attributes to add to it (at `path` below it, if given).
-  appendAttributes: (id, attrs, { path, sub = false } = {}) =>
-    request(AREA, 'POST', `/api/ngsi/entities/${seg(id)}/attrs`, { ...raw, body: attrs, params: pathParams(attrs, path, sub) }),
-  deleteAttribute: (id, name, { subAttribute, path } = {}) =>
-    request(AREA, 'DELETE', `/api/ngsi/entities/${seg(id)}/attrs`, { params: { name, ...(path?.length ? { path } : { sub_attribute: subAttribute }) } }),
+  appendAttributes: (id, attrs, { path, sub = false, datasetId } = {}) =>
+    request(AREA, 'POST', `/api/ngsi/entities/${seg(id)}/attrs`, { ...raw, body: attrs, params: editParams(attrs, { path, sub, datasetId }) }),
+  deleteAttribute: (id, name, { subAttribute, path, datasetId } = {}) =>
+    request(AREA, 'DELETE', `/api/ngsi/entities/${seg(id)}/attrs`, {
+      params: { name, ...(path?.length ? { path } : { sub_attribute: subAttribute }), ...(datasetId ? { dataset_id: datasetId } : {}) },
+    }),
   deleteEntity: (id) => request(AREA, 'DELETE', `/api/ngsi/entities/${seg(id)}`),
   importEntities: (list) => request(AREA, 'POST', '/api/ngsi/import', { ...raw, body: list }),
   fetchImportDocument: (url) => request(AREA, 'POST', '/api/ngsi/import/fetch', { ...raw, body: { url } }),

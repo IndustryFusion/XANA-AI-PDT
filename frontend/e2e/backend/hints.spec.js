@@ -46,7 +46,7 @@ test('the editor shows an allowed range', async ({ page }) => {
 test('without hints the editor still works', async ({ page }) => {
   await page.route('**/api/shacl/hints**', (route) => route.fulfill({ json: { hint_type: 'none', values: [], minimum: null, maximum: null, minimum_exclusive: false, maximum_exclusive: false, datatype: null, detail: 'The ontology service cannot be reached (ConnectError).' } }))
   const editor = await edit(page, MACHINE, 'status')
-  await expect(editor.getByRole('combobox')).toBeVisible()
+  await expect(editor.getByRole('combobox', { name: 'New value of status' })).toBeVisible()
   await expect(editor.getByRole('alert')).toHaveCount(0)
   await expect(editor.getByRole('listbox')).toHaveCount(0)
   await expect(editor).toContainText('No suggestions: The ontology service cannot be reached')

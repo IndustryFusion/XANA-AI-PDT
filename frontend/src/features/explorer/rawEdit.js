@@ -53,6 +53,8 @@ export function parseEntityText(text, current) {
 function changeOf(name, before, after) {
   const replace = [{ op: 'delete', name }, { op: 'append', attrs: { [name]: after } }]
   if (!isObject(before) || !isObject(after) || before.type !== after.type) return replace
+  // Another dataset is another instance: the old one goes, the new one comes.
+  if ((before.datasetId ?? null) !== (after.datasetId ?? null)) return replace
   const subs = new Set(subAttributesOf(before).map(([sub]) => sub))
   if (Object.keys(before).some((key) => !subs.has(key) && !(key in after))) return replace
 
@@ -60,6 +62,8 @@ function changeOf(name, before, after) {
   const fragment = Object.fromEntries(Object.entries(after).filter(([key, value]) => !same(before[key], value)))
   if (Object.keys(fragment).length > 0) {
     if ('observedAt' in after) fragment.observedAt = after.observedAt
+    // The fragment names its instance by its dataset, so the update goes to that instance.
+    if (after.datasetId) fragment.datasetId = after.datasetId
     steps.push({ op: 'update', name, fragment })
   }
   return steps

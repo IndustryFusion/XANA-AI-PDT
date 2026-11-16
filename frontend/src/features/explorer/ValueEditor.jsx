@@ -16,9 +16,14 @@
 
 import { useEffect, useId, useRef, useState } from 'react'
 import { useData } from '../../data/useData'
+import { Button } from '../../ui/components'
 import { IconButton } from '../../ui/icons'
+import { DATATYPES, OTHER_DATATYPE, datatypeIri, datatypeLabel } from './attributes'
 import { shortenText } from './Iri'
 import { isHttpIri, registry } from './prefixes'
+
+/** Said of a plain string that reads as a number. */
+export const NUMBER_TEXT_HINT = 'A number written as text: the platform’s check of a double accepts it, as a value without a datatype counts as the one expected.'
 
 /** The allowed range in words, saying whether each limit is included; null without one. */
 export function rangeText(hint) {
@@ -34,14 +39,25 @@ export function rangeText(hint) {
  * and says what range is allowed. Without hints it works just the same.
  * Enter or ✓ saves, Escape or ✗ cancels. A rejected change keeps the
  * editor open with the entered value and shows the reason.
+ *
+ * `datatype` is the value's datatype as the platform reads it (a full IRI), preset in a choice of
+ * datatypes; picking another one changes it. `numberText` marks a plain string that reads as a number.
  */
-export default function ValueEditor({ label, initial, entityType, attribute, iri = false, onSave, onCancel }) {
+export default function ValueEditor({ label, initial, entityType, attribute, iri = false, datatype = null, numberText = false, onSave, onCancel }) {
   const [text, setText] = useState(initial == null ? '' : String(initial))
+  // The datatype the editing started from: a live update while the editor is open changes nothing here.
+  const [from] = useState(datatype)
+  const known = DATATYPES.some((d) => d.id === from)
+  const choices = from && !known ? [...DATATYPES, { id: from, label: datatypeLabel(from) }] : DATATYPES
+  const [choice, setChoice] = useState(from)
+  const [otherIri, setOtherIri] = useState('')
+  const chosen = choice === OTHER_DATATYPE ? (otherIri.trim() ? datatypeIri(otherIri) : null) : choice
+  const typeChanged = from && chosen && chosen !== from
   const [active, setActive] = useState(-1)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
   const inputRef = useRef(null)
-  const ids = { input: useId(), list: useId(), error: useId() }
+  const ids = { input: useId(), list: useId(), error: useId(), type: useId(), other: useId() }
   const hints = useData('entities', 'getValueHints', [{ entityType, attribute }])
   // Suggested IRIs are offered and entered as short names; saving expands them again.
   const shown = (h) => (iri || isHttpIri(h) ? registry.shorten(h) : h)
@@ -57,11 +73,16 @@ export default function ValueEditor({ label, initial, entityType, attribute, iri
     setActive(-1)
   }
 
-  async function save() {
+  /** `force`: the operator insists on a value the checks refused, for example to test how the system reacts. */
+  async function save(force = false) {
+    if (from && !chosen) {
+      setError({ message: 'Enter the IRI of the datatype.' })
+      return
+    }
     setBusy(true)
     setError(null)
     try {
-      await onSave(!iri && fullOf[text] ? fullOf[text] : text)
+      await onSave(!iri && fullOf[text] ? fullOf[text] : text, { ...(force ? { force: true } : {}), ...(from ? { datatype: chosen, from } : {}) })
     } catch (err) {
       setError(err)
       setBusy(false)
@@ -104,7 +125,22 @@ export default function ValueEditor({ label, initial, entityType, attribute, iri
           onChange={(e) => changeText(e.target.value)}
           onKeyDown={onKeyDown}
         />
-        <IconButton icon="save" tone="primary" onClick={save} disabled={busy} label={`Save ${label}`} tooltip="Save" />
+        {from && (
+          <>
+            <label className="visually-hidden" htmlFor={ids.type}>Datatype of {label}</label>
+            <select id={ids.type} className="value-editor__type mono" value={choice} disabled={busy} onChange={(e) => { setChoice(e.target.value); setError(null) }}>
+              {choices.map((d) => <option key={d.id} value={d.id}>{d.label}</option>)}
+              <option value={OTHER_DATATYPE}>Other IRI…</option>
+            </select>
+            {choice === OTHER_DATATYPE && (
+              <>
+                <label className="visually-hidden" htmlFor={ids.other}>Datatype IRI of {label}</label>
+                <input id={ids.other} className="value-editor__other mono" value={otherIri} placeholder="xsd:anyURI" disabled={busy} autoComplete="off" onChange={(e) => { setOtherIri(e.target.value); setError(null) }} />
+              </>
+            )}
+          </>
+        )}
+        <IconButton icon="save" tone="primary" onClick={() => save()} disabled={busy} label={`Save ${label}`} tooltip="Save" />
         <IconButton icon="cancel" onClick={onCancel} disabled={busy} label={`Cancel editing ${label}`} tooltip="Cancel" />
         {busy && <span className="muted">Saving…</span>}
       </div>
@@ -123,9 +159,25 @@ export default function ValueEditor({ label, initial, entityType, attribute, iri
           ))}
         </ul>
       )}
+      {typeChanged && (
+        <p className="muted value-editor__range" role="status">
+          Changes the datatype from {datatypeLabel(from)} to {datatypeLabel(chosen)}.
+        </p>
+      )}
+      {numberText && !typeChanged && <p className="muted value-editor__range">{NUMBER_TEXT_HINT}</p>}
       {range && <p className="muted value-editor__range">{range}</p>}
       {hints.data?.hintType === 'none' && hints.data.detail && <p className="muted value-editor__range">No suggestions: {hints.data.detail}</p>}
-      {error && <p id={ids.error} className="form-error value-editor__error" role="alert">Not saved: {shortenText(error.message)}</p>}
+      {error && (error.kind === 'invalid' || error.kind === 'datatype') ? (
+        <div id={ids.error} className="value-editor__warning" role="alert">
+          <p className="form-error">Not saved: {shortenText(error.message)}</p>
+          <p className="muted">
+            {error.kind === 'datatype'
+              ? `You can save it anyway, as a value declared ${datatypeLabel(chosen)}, for example to test how alerts and the system react to a value not of its datatype.`
+              : 'You can save it anyway, for example to test how alerts and the system react to a wrong value.'}
+          </p>
+          <Button size="sm" variant="danger" disabled={busy} onClick={() => save(true)}>Save anyway</Button>
+        </div>
+      ) : error && <p id={ids.error} className="form-error value-editor__error" role="alert">Not saved: {shortenText(error.message)}</p>}
     </div>
   )
 }

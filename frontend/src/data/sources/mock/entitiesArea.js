@@ -97,7 +97,16 @@ function parseMoment(at) {
   return t
 }
 
-function validateAttribute(name, attr, existing) {
+/** The instance of an attribute in the dataset (none: the default instance), or null. */
+function instanceIn(attribute, datasetId) {
+  const instances = Array.isArray(attribute) ? attribute : attribute ? [attribute] : []
+  return instances.find((i) => (i.datasetId ?? null) === (datasetId ?? null)) ?? null
+}
+
+/** Whether a value is a number, plain or declared (`{"@value": 42.5, "@type": "…#double"}`). */
+const isNumber = (value) => typeof value === 'number' || (!!value && typeof value === 'object' && typeof value['@value'] === 'number')
+
+function validateAttribute(name, attr, existing, force = false) {
   if (!NAME.test(name) || RESERVED.includes(name)) throw err('invalid', `"${name}" is not a valid attribute name.`)
   if (!isAttribute(attr) && !existing) throw err('invalid', `Attribute ${name} needs a type and a value.`)
   if (attr.type !== undefined && !ATTRIBUTE_TYPES.includes(attr.type)) throw err('invalid', `${attr.type} is not an NGSI-LD attribute type.`)
@@ -107,10 +116,12 @@ function validateAttribute(name, attr, existing) {
   }
   if (!existing && type === 'Property' && (attr.value === undefined || attr.value === '')) throw err('invalid', `Enter a value for ${name}.`)
   if (!existing && type === 'Relationship' && !attr.object) throw err('invalid', `Enter the target entity of ${name}.`)
-  if (existing && 'value' in attr && typeof existing.value === 'number' && typeof attr.value !== 'number') {
+  // Like the backend, `force` lets a value through that these checks refuse.
+  // Plain values compared, as the backend does: a declared number is a number.
+  if (!force && existing && 'value' in attr && isNumber(existing.value) && !isNumber(attr.value)) {
     throw err('invalid', `${name} must be a number.`)
   }
-  if (existing && 'value' in attr && (attr.value === '' || attr.value === null)) throw err('invalid', `${name} cannot be empty.`)
+  if (!force && existing && 'value' in attr && (attr.value === '' || attr.value === null)) throw err('invalid', `${name} cannot be empty.`)
 }
 
 export function createEntitiesArea(store) {
@@ -240,15 +251,16 @@ export function createEntitiesArea(store) {
     queryEntities: withControls((params = {}) => query(store.get().entities, params)),
     getEntity: withControls((id) => structuredClone(requireEntity(id))),
 
-    updateAttributes: withControls((id, attrs = {}, { path } = {}) => {
+    updateAttributes: withControls((id, attrs = {}, { path, datasetId, force = false } = {}) => {
       const entity = requireEntity(id)
       if (path?.length) {
         const [[name, fragment]] = Object.entries(attrs)
-        if (!entity[name] || Array.isArray(entity[name])) throw err('not_found', `${id} has no attribute ${name}.`)
-        const target = walk(entity[name], name, path)
-        validateAttribute(path.at(-1), fragment, target)
+        const instance = instanceIn(entity[name], datasetId)
+        if (!instance) throw err('not_found', `${id} has no attribute ${name} in that dataset.`)
+        const target = walk(instance, name, path)
+        validateAttribute(path.at(-1), fragment, target, force)
         store.update((state) => {
-          const node = walk(state.entities.find((x) => x.id === id)[name], name, path)
+          const node = walk(instanceIn(state.entities.find((x) => x.id === id)[name], datasetId), name, path)
           Object.assign(node, structuredClone(fragment))
           if (node.observedAt && ('value' in fragment || 'vocab' in fragment) && !('observedAt' in fragment)) node.observedAt = now()
           return state
@@ -258,35 +270,40 @@ export function createEntitiesArea(store) {
       for (const [name, fragment] of Object.entries(attrs)) {
         if (!entity[name]) throw err('not_found', `${id} has no attribute ${name}.`)
         if (!fragment || typeof fragment !== 'object') throw err('invalid', `Attribute ${name} needs a value.`)
-        validateAttribute(name, fragment, entity[name])
+        // Like the backend: the fragment names its instance by its dataset; without one, the default instance.
+        const instance = instanceIn(entity[name], fragment.datasetId)
+        if (!instance) throw err('not_found', `${name} has no instance with that dataset.`)
+        validateAttribute(name, fragment, instance, force)
         for (const [sub, value] of Object.entries(fragment)) {
-          if (isAttribute(value)) validateAttribute(sub, value, entity[name][sub])
+          if (isAttribute(value)) validateAttribute(sub, value, instance[sub])
         }
       }
       store.update((state) => {
         const e = state.entities.find((x) => x.id === id)
         for (const [name, fragment] of Object.entries(attrs)) {
-          Object.assign(e[name], structuredClone(fragment))
+          const instance = instanceIn(e[name], fragment.datasetId)
+          Object.assign(instance, structuredClone(fragment))
           // A new value is observed now, unless the fragment names its own observation time.
-          if (e[name].observedAt && ('value' in fragment || 'vocab' in fragment) && !('observedAt' in fragment)) e[name].observedAt = now()
+          if (instance.observedAt && ('value' in fragment || 'vocab' in fragment) && !('observedAt' in fragment)) instance.observedAt = now()
         }
         return state
       })
     }),
 
-    appendAttributes: withControls((id, attrs = {}, { path = [], sub: toAttribute = false } = {}) => {
+    appendAttributes: withControls((id, attrs = {}, { path = [], sub: toAttribute = false, datasetId } = {}) => {
       const entity = requireEntity(id)
       if (path.length || toAttribute) {
         const [[name, fragment]] = Object.entries(attrs)
-        if (!entity[name] || Array.isArray(entity[name])) throw err('not_found', `${id} has no attribute ${name}.`)
-        const target = walk(entity[name], name, path)
+        const instance = instanceIn(entity[name], datasetId)
+        if (!instance) throw err('not_found', `${id} has no attribute ${name} in that dataset.`)
+        const target = walk(instance, name, path)
         for (const [sub, attr] of Object.entries(fragment)) {
           if (OWN_MEMBERS.includes(sub)) throw err('invalid', `${sub} is a member of the attribute itself, not a name for a sub-attribute.`)
           if (target[sub] !== undefined) throw err('conflict', `${[name, ...path].join('.')} already has a sub-attribute ${sub}.`)
           validateAttribute(sub, attr, null)
         }
         store.update((state) => {
-          Object.assign(walk(state.entities.find((x) => x.id === id)[name], name, path), structuredClone(fragment))
+          Object.assign(walk(instanceIn(state.entities.find((x) => x.id === id)[name], datasetId), name, path), structuredClone(fragment))
           return state
         })
         return
@@ -301,18 +318,34 @@ export function createEntitiesArea(store) {
       })
     }),
 
-    deleteAttribute: withControls((id, name, { subAttribute: sub, path: given } = {}) => {
+    deleteAttribute: withControls((id, name, { subAttribute: sub, path: given, datasetId } = {}) => {
       const entity = requireEntity(id)
       if (!entity[name] || RESERVED.includes(name)) throw err('not_found', `${id} has no attribute ${name}.`)
       const path = given?.length ? given : sub ? [sub] : []
-      const subAttribute = path.length === 1 ? path[0] : sub
-      if (path.length > 1 || (path.length === 1 && Array.isArray(entity[name]))) {
-        // Removed from each dataset that has it.
+      if (!path.length && datasetId) {
+        // One instance alone, `@none` the default one; the last one takes the attribute along.
+        const wanted = datasetId === '@none' ? null : datasetId
         const instances = [].concat(entity[name])
+        if (!instances.some((i) => (i.datasetId ?? null) === wanted)) throw err('not_found', `${name} has no instance with that dataset.`)
+        store.update((state) => {
+          const e = state.entities.find((x) => x.id === id)
+          const rest = [].concat(e[name]).filter((i) => (i.datasetId ?? null) !== wanted)
+          if (rest.length === 0) delete e[name]
+          else e[name] = rest.length === 1 ? rest[0] : rest
+          return state
+        })
+        return
+      }
+      const subAttribute = path.length === 1 ? path[0] : sub
+      if (path.length > 1 || (path.length === 1 && (Array.isArray(entity[name]) || datasetId))) {
+        // Removed from the dataset named, or from each dataset that has it.
+        // `@none` names the default instance, as in the backend.
+        const mine = (inst) => !datasetId || (inst.datasetId ?? '@none') === datasetId
+        const instances = [].concat(entity[name]).filter(mine)
         const holders = instances.filter((inst) => { try { walk(inst, name, path); return true } catch { return false } })
         if (!holders.length) walk(instances[0], name, path)
         store.update((state) => {
-          for (const inst of [].concat(state.entities.find((x) => x.id === id)[name])) {
+          for (const inst of [].concat(state.entities.find((x) => x.id === id)[name]).filter(mine)) {
             try { delete walk(inst, name, path.slice(0, -1))[path.at(-1)] } catch { /* this dataset doesn't have it */ }
           }
           return state

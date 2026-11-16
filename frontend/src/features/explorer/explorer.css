@@ -181,6 +181,7 @@
 .attr-line__value { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
 .attr-line__value .entity-ref__link { white-space: normal; word-break: break-all; }
 .attr-line__unit { color: var(--text-muted); }
+.attr-line__datatype { font-size: var(--text-xs); color: var(--text-muted); }
 .attr-line__meta, .attr-line__time, .attr-line__marker { font-size: var(--text-xs); color: var(--text-muted); }
 .attr-line__marker { font-style: italic; }
 .attr-line__changed { font-size: var(--text-xs); font-weight: 700; }
@@ -415,3 +416,10 @@
 .attr-line--behind .attr-line__value, .attr-line--behind .attr-line__unit, .attr-line--behind .attr-line__time { opacity: 0.4; }
 .attr-line__behind { color: var(--tone-warning); font-size: var(--text-sm); line-height: 1; cursor: help; border-radius: var(--radius); }
 .attr-line__behind:focus-visible { outline: 2px solid var(--tone-warning); outline-offset: 2px; }
+
+/* The dataset of an attribute's instance, right after its name: name[dataset]. */
+.attr-line__dataset { color: var(--text-muted); }
+
+/* The type a plain value is saved as, beside its input; a declared datatype is shown instead. */
+.value-editor__type { font-size: var(--text-sm); height: var(--control-height-sm); }
+.value-editor__other { font-size: var(--text-sm); width: 14ch; height: var(--control-height-sm); }

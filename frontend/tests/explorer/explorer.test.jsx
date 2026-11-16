@@ -53,6 +53,8 @@ const moreFilters = async (user) => user.click(await screen.findByRole('button',
 /** Opens the context menu of an element, as a right-click does. */
 const contextMenu = (element) => { fireEvent.contextMenu(element, { clientX: 10, clientY: 10 }); return screen.getByRole('menu') }
 
+const XSD = 'http://www.w3.org/2001/XMLSchema#'
+
 describe('query entities', () => {
   test('by type: entities as nodes with ID, type and name, and the URL reflects the query', async () => {
     const user = userEvent.setup()
@@ -217,7 +219,8 @@ describe('entity view', () => {
     const value = attribute('value')
     expect(value).toHaveTextContent(/\d+(\.\d)? l\/min/)
     expect(value).toHaveTextContent('Observed')
-    expect(value).toHaveTextContent('dataset live')
+    // The dataset follows the name in brackets.
+    expect(within(value).getByTestId('dataset')).toHaveTextContent('[live]')
     const toggle = within(value).getByRole('button', { name: '2 sub-attributes of value' })
     expect(toggle).toHaveAttribute('aria-expanded', 'false')
     expect(attribute('value.accuracy')).toBeNull()
@@ -229,7 +232,8 @@ describe('entity view', () => {
     expect(within(lineOf('value.accuracy')).getByText('Property')).toHaveClass('kind-tag')
   })
 
-  test('multi-attributes show one line per instance with its dataset', async () => {
+  test('multi-attributes show one line per instance, named with its dataset, and each instance is edited in its dataset', async () => {
+    const user = userEvent.setup()
     openEntity(SENSOR)
     store.update((s) => {
       s.entities.find((e) => e.id === SENSOR).temperature = [
@@ -241,9 +245,23 @@ describe('entity view', () => {
     await waitFor(() => expect(attribute('temperature')).not.toBeNull())
     const lines = attribute('temperature').querySelectorAll('.attr-line:not(.attr-line--note)')
     expect(lines).toHaveLength(2)
-    expect(lines[0]).toHaveTextContent('temperature = 21.5 CEL dataset inlet')
-    expect(lines[1]).toHaveTextContent('temperature = 24 CEL dataset outlet')
-    expect(attribute('temperature')).toHaveTextContent('2 instances; edit them in the raw JSON.')
+    expect(lines[0]).toHaveTextContent(/temperature\[inlet\] = .*21\.5 CEL/)
+    expect(lines[1]).toHaveTextContent(/temperature\[outlet\] = .*24 CEL/)
+    // Editing the second instance changes it alone, and adds no instance.
+    await user.click(within(lines[1]).getByRole('button', { name: 'Edit temperature[outlet]' }))
+    const input = screen.getByRole('combobox', { name: 'New value of temperature[outlet]' })
+    await user.clear(input)
+    await user.type(input, '25{Enter}')
+    await waitFor(() => expect(entityStored(SENSOR).temperature.map((i) => [i.datasetId, i.value])).toEqual([
+      ['urn:ngsi-ld:Dataset:inlet', 21.5], ['urn:ngsi-ld:Dataset:outlet', 25],
+    ]))
+    // Each instance is deleted alone; the other one stays.
+    expect(within(attribute('temperature')).getAllByRole('button', { name: /^Delete the instance temperature/ })).toHaveLength(2)
+    await user.click(within(attribute('temperature')).getByRole('button', { name: 'Delete the instance temperature[inlet]' }))
+    const dialog = screen.getByRole('dialog', { name: 'Delete the instance temperature[inlet]?' })
+    expect(dialog).toHaveTextContent('the attribute’s other instances remain')
+    await user.click(within(dialog).getByRole('button', { name: 'Delete' }))
+    await waitFor(() => expect(entityStored(SENSOR).temperature).toMatchObject({ datasetId: 'urn:ngsi-ld:Dataset:outlet', value: 25 }))
   })
 
   test('raw JSON can be shown and copied, and the URL names the entity', async () => {
@@ -451,7 +469,7 @@ describe('edit attributes', () => {
     within(attribute('status')).getByRole('button', { name: /^Value of status:/ }).focus()
     await user.keyboard('{Enter}')
     const input = within(attribute('status')).getByRole('combobox', { name: 'New value of status' })
-    const options = await within(attribute('status')).findAllByRole('option')
+    const options = await within(await within(attribute('status')).findByRole('listbox', { name: 'Suggested values' })).findAllByRole('option')
     await user.keyboard('{ArrowDown}')
     expect(input).toHaveAttribute('aria-activedescendant', options[0].id)
     expect(options[0]).toHaveAttribute('aria-selected', 'true')
@@ -467,6 +485,185 @@ describe('edit attributes', () => {
     expect(screen.queryByRole('combobox', { name: 'New value of status' })).not.toBeInTheDocument()
   })
 
+  test('a sub-attribute added to one instance goes to that instance only', async () => {
+    const user = userEvent.setup()
+    openEntity(SENSOR)
+    store.update((s) => {
+      s.entities.find((e) => e.id === SENSOR).temperature = [
+        { type: 'Property', value: 21.5, datasetId: 'urn:ngsi-ld:Dataset:inlet' },
+        { type: 'Property', value: 24, datasetId: 'urn:ngsi-ld:Dataset:outlet' },
+      ]
+      return s
+    })
+    await waitFor(() => expect(attribute('temperature')).not.toBeNull())
+    await user.click(within(attribute('temperature')).getByRole('button', { name: 'Add sub-attribute to temperature[outlet]' }))
+    const form = screen.getByRole('form', { name: 'Add a sub-attribute to temperature[outlet]' })
+    await user.type(within(form).getByLabelText('Name'), 'sensor')
+    await user.type(within(form).getByLabelText('Value'), 'PT100')
+    await user.click(within(form).getByRole('button', { name: 'Add' }))
+    await waitFor(() => expect(entityStored(SENSOR).temperature[1].sensor).toMatchObject({ type: 'Property', value: 'PT100' }))
+    expect(entityStored(SENSOR).temperature[0]).not.toHaveProperty('sensor')
+  })
+
+  test('a sub-attribute of the default instance is deleted from that instance alone', async () => {
+    const user = userEvent.setup()
+    openEntity(SENSOR)
+    store.update((s) => {
+      s.entities.find((e) => e.id === SENSOR).temperature = [
+        { type: 'Property', value: 21.5, note: { type: 'Property', value: 'a' } },
+        { type: 'Property', value: 24, datasetId: 'urn:ngsi-ld:Dataset:live', note: { type: 'Property', value: 'b' } },
+      ]
+      return s
+    })
+    await waitFor(() => expect(attribute('temperature')).not.toBeNull())
+    await user.click(within(attribute('temperature')).getAllByRole('button', { name: /^1 sub-attribute/ })[0])
+    await user.click(screen.getByRole('button', { name: 'Delete sub-attribute note of temperature' }))
+    await user.click(within(screen.getByRole('dialog', { name: 'Delete the sub-attribute note?' })).getByRole('button', { name: 'Delete' }))
+    await waitFor(() => expect(entityStored(SENSOR).temperature[0]).not.toHaveProperty('note'))
+    expect(entityStored(SENSOR).temperature[1].note).toMatchObject({ value: 'b' })
+  })
+
+  test('a plain whole number takes a fraction while its datatype is kept', async () => {
+    const user = userEvent.setup()
+    openEntity(SENSOR)
+    store.update((s) => { s.entities.find((e) => e.id === SENSOR).value.value = 80; return s })
+    await waitFor(() => expect(within(attribute('value')).getByTestId('datatype')).toHaveTextContent('xsd:integer'))
+    await user.click(within(attribute('value')).getByRole('button', { name: 'Edit value' }))
+    const input = screen.getByRole('combobox', { name: 'New value of value' })
+    await user.clear(input)
+    await user.type(input, '80.5{Enter}')
+    await waitFor(() => expect(entityStored(SENSOR).value.value).toBe(80.5))
+  })
+
+  test('a live update while the editor is open is no datatype change', async () => {
+    const handlers = []
+    const real = entities.subscribeEntities
+    const spy = vi.spyOn(entities, 'subscribeEntities').mockImplementation((params, onEvent) => { handlers.push(onEvent); return real(params, () => {}) })
+    try {
+      const user = userEvent.setup()
+      openEntity(SENSOR)
+      store.update((s) => { s.entities.find((e) => e.id === SENSOR).value.value = 80; return s })
+      await waitFor(() => expect(within(attribute('value')).getByTestId('datatype')).toHaveTextContent('xsd:integer'))
+      await user.click(within(attribute('value')).getByRole('button', { name: 'Edit value' }))
+      expect(screen.getByRole('combobox', { name: 'Datatype of value' })).toHaveDisplayValue('xsd:integer')
+      // A live update brings a fractional value: the value read is now an xsd:double.
+      await waitFor(() => expect(handlers.length).toBeGreaterThan(0))
+      const value = { ...structuredClone(entityStored(SENSOR).value), value: 80.5 }
+      act(() => handlers.forEach((on) => on({ type: 'update', entityId: SENSOR, attributes: { value } })))
+      await waitFor(() => expect(within(attribute('value')).getByRole('combobox', { name: 'Datatype of value' })).toBeVisible())
+      expect(screen.queryByText(/^Changes the datatype/)).toBeNull()
+      const input = screen.getByRole('combobox', { name: 'New value of value' })
+      await user.clear(input)
+      await user.type(input, '81{Enter}')
+      await waitFor(() => expect(entityStored(SENSOR).value.value).toBe(81))
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  test('the default instance beside one with a dataset can be deleted alone', async () => {
+    const user = userEvent.setup()
+    openEntity(SENSOR)
+    store.update((s) => {
+      s.entities.find((e) => e.id === SENSOR).vibration = [
+        { type: 'Relationship', object: MACHINE, datasetId: 'urn:ngsi-ld:Dataset:hasSensor1' },
+        { type: 'Relationship', object: MACHINE },
+      ]
+      return s
+    })
+    await waitFor(() => expect(attribute('vibration')).not.toBeNull())
+    await user.click(within(attribute('vibration')).getByRole('button', { name: 'Delete the instance vibration[default]' }))
+    await user.click(within(screen.getByRole('dialog', { name: 'Delete the instance vibration[default]?' })).getByRole('button', { name: 'Delete' }))
+    await waitFor(() => expect(entityStored(SENSOR).vibration).toEqual({ type: 'Relationship', object: MACHINE, datasetId: 'urn:ngsi-ld:Dataset:hasSensor1' }))
+  })
+
+  test('the datatype is chosen beside the value, and written in its form: an integer plain, a double declared', async () => {
+    const user = userEvent.setup()
+    openEntity(SENSOR)
+    store.update((s) => { s.entities.find((e) => e.id === SENSOR).value.value = 'sensor fault'; return s })
+    await waitFor(() => expect(attribute('value')).toHaveTextContent('sensor fault'))
+    expect(within(attribute('value')).getByTestId('datatype')).toHaveTextContent('xsd:string')
+    await user.click(within(attribute('value')).getByRole('button', { name: 'Edit value' }))
+    const type = screen.getByRole('combobox', { name: 'Datatype of value' })
+    expect(type).toHaveDisplayValue('xsd:string')
+    await user.selectOptions(type, 'xsd:integer')
+    expect(screen.getByText('Changes the datatype from xsd:string to xsd:integer.')).toBeVisible()
+    const input = screen.getByRole('combobox', { name: 'New value of value' })
+    await user.clear(input)
+    await user.type(input, '6{Enter}')
+    await waitFor(() => expect(entityStored(SENSOR).value.value).toBe(6))
+    expect(entityStored(SENSOR).value.datasetId).toBe('urn:ngsi-ld:Dataset:live')
+    await user.click(within(attribute('value')).getByRole('button', { name: 'Edit value' }))
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Datatype of value' }), 'xsd:double')
+    await user.type(screen.getByRole('combobox', { name: 'New value of value' }), '{Enter}')
+    await waitFor(() => expect(entityStored(SENSOR).value.value).toEqual({ '@value': 6, '@type': `${XSD}double` }))
+  })
+
+  test('a text not of the datatype is said at once, and can be saved anyway, declared as it is', async () => {
+    const user = userEvent.setup()
+    openEntity(SENSOR)
+    store.update((s) => { s.entities.find((e) => e.id === SENSOR).value.value = 21.5; return s })
+    await waitFor(() => expect(within(attribute('value')).getByTestId('datatype')).toHaveTextContent('xsd:double'))
+    await user.click(within(attribute('value')).getByRole('button', { name: 'Edit value' }))
+    expect(screen.getByRole('combobox', { name: 'Datatype of value' })).toHaveDisplayValue('xsd:double')
+    const input = screen.getByRole('combobox', { name: 'New value of value' })
+    await user.clear(input)
+    await user.type(input, 'six{Enter}')
+    const warning = await within(attribute('value')).findByRole('alert')
+    expect(warning).toHaveTextContent('“six” is not a value of xsd:double.')
+    expect(entityStored(SENSOR).value.value).toBe(21.5)
+    await user.click(within(warning).getByRole('button', { name: 'Save anyway' }))
+    await waitFor(() => expect(entityStored(SENSOR).value.value).toEqual({ '@value': 'six', '@type': `${XSD}double` }))
+    await user.click(within(attribute('value')).getByRole('button', { name: 'Edit value' }))
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Datatype of value' }), 'xsd:boolean')
+    await user.clear(screen.getByRole('combobox', { name: 'New value of value' }))
+    await user.type(screen.getByRole('combobox', { name: 'New value of value' }), 'true{Enter}')
+    await waitFor(() => expect(entityStored(SENSOR).value.value).toBe(true))
+  })
+
+  test('a declared value shows its datatype, and becomes a plain string when that is chosen', async () => {
+    const user = userEvent.setup()
+    openEntity(MACHINE)
+    store.update((s) => {
+      s.entities.find((e) => e.id === MACHINE).power = { type: 'Property', value: { type: `${XSD}double`, '@value': 42.5 } }
+      return s
+    })
+    await waitFor(() => expect(attribute('power')).not.toBeNull())
+    expect(within(attribute('power')).getByTestId('datatype')).toHaveTextContent('xsd:double')
+    await user.click(within(attribute('power')).getByRole('button', { name: /^Value of power:/ }))
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Datatype of power' }), 'xsd:string')
+    await user.type(screen.getByRole('combobox', { name: 'New value of power' }), '{Enter}')
+    await waitFor(() => expect(entityStored(MACHINE).power.value).toBe('42.5'))
+    expect(within(attribute('power')).getByTestId('datatype')).toHaveTextContent('xsd:string · number text')
+  })
+
+  test('any other datatype is named by its IRI, and its value is declared with it', async () => {
+    const user = userEvent.setup()
+    openEntity(MACHINE)
+    await waitFor(() => expect(attribute('status')).not.toBeNull())
+    await user.click(within(attribute('status')).getByRole('button', { name: 'Edit status' }))
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Datatype of status' }), 'Other IRI…')
+    await user.click(screen.getByRole('button', { name: 'Save status' }))
+    expect(await within(attribute('status')).findByRole('alert')).toHaveTextContent('Enter the IRI of the datatype.')
+    await user.type(screen.getByRole('textbox', { name: 'Datatype IRI of status' }), 'xsd:token')
+    await user.click(screen.getByRole('button', { name: 'Save status' }))
+    await waitFor(() => expect(entityStored(MACHINE).status.value).toEqual({ '@value': expect.any(String), '@type': `${XSD}token` }))
+  })
+
+  test('a value the checks refuse can be saved anyway, after the warning', async () => {
+    const user = userEvent.setup()
+    openEntity(MACHINE)
+    await waitFor(() => expect(attribute('status')).not.toBeNull())
+    await user.click(within(attribute('status')).getByRole('button', { name: 'Edit status' }))
+    expect(screen.getByRole('combobox', { name: 'Datatype of status' })).toHaveDisplayValue('xsd:string')
+    await user.clear(screen.getByRole('combobox', { name: 'New value of status' }))
+    await user.click(screen.getByRole('button', { name: 'Save status' }))
+    const warning = await within(attribute('status')).findByRole('alert')
+    expect(warning).toHaveTextContent('Not saved: status cannot be empty.')
+    await user.click(within(warning).getByRole('button', { name: 'Save anyway' }))
+    await waitFor(() => expect(entityStored(MACHINE).status.value).toBe(''))
+  })
+
   test('a rejected change keeps the input open with the entered value and the reason', async () => {
     const user = userEvent.setup()
     openEntity(SENSOR)
@@ -476,7 +673,7 @@ describe('edit attributes', () => {
     await user.clear(input)
     await user.type(input, 'high')
     await user.click(screen.getByRole('button', { name: 'Save value' }))
-    expect(await within(attribute('value')).findByRole('alert')).toHaveTextContent('Not saved: value must be a number.')
+    expect(await within(attribute('value')).findByRole('alert')).toHaveTextContent('Not saved: “high” is not a value of xsd:double.')
     expect(screen.getByRole('combobox', { name: 'New value of value' })).toHaveValue('high')
     expect(input).toHaveAttribute('aria-invalid', 'true')
   })
@@ -742,7 +939,7 @@ describe('live updates', () => {
     await act(() => vi.advanceTimersByTimeAsync(LIVE_UPDATE_MS / 10 + 50))
     const after = entityStored(SENSOR).value.value
     expect(after).not.toBe(before)
-    await waitFor(() => expect(attribute('value')).toHaveTextContent(`value = Value of value: ${after} l/min`))
+    await waitFor(() => expect(attribute('value')).toHaveTextContent(`value[live] = Value of value: ${after} l/min`))
     expect(lineOf('value')).toHaveClass('attr-line--changed')
     expect(within(attribute('value')).getByText('Updated')).toBeVisible()
     writeControls({ liveUpdates: 'unavailable' })
