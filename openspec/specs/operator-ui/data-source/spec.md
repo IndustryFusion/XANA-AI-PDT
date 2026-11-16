@@ -161,11 +161,15 @@ The backend data source SHALL serve `subscribeEntities` and `getLiveUpdateHealth
 - **THEN** the stream is closed, and no more events arrive
 
 ### Requirement: Value hints from the backend
-The backend data source SHALL serve `getValueHints` from the backend, with its result in the documented shape.
+The backend data source SHALL serve `getValueHints` and `getUnits` from the backend, with their results in the documented shapes.
 
 #### Scenario: Hints
 - **WHEN** a screen asks for hints of an attribute
-- **THEN** it receives the kind of hint, the allowed values and the limits
+- **THEN** it receives the kind of hint, the allowed values and the limits, and the units the data model allows
+
+#### Scenario: Units
+- **WHEN** a screen asks for the units to offer
+- **THEN** it receives them with code, symbol and name, and where they come from
 
 ### Requirement: Alerts from the backend
 The backend data source SHALL serve the `alerts` area from the backend, with results in the documented shapes.
