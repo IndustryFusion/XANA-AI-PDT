@@ -52,6 +52,7 @@ export default function AllowedContexts() {
 function ContextList({ list, onChanged }) {
   const notify = useToast()
   const [removing, setRemoving] = useState(null)
+  const changeable = list.editable && list.mayChange
   return (
     <div className="stack">
       {list.detail && <p className="muted" role="status">{list.detail}</p>}
@@ -59,16 +60,20 @@ function ContextList({ list, onChanged }) {
         {list.contexts.map((c) => (
           <li key={`${c.source}:${c.url}`} className="allowed-contexts__item">
             <span className="mono allowed-contexts__url" title={c.url}>{c.url}</span>
-            <span className="muted allowed-contexts__source">{CONTEXT_SOURCES[c.source] ?? c.source}</span>
-            {c.removable && list.editable && (
+            <span className="muted allowed-contexts__source">
+              {c.label && c.source !== 'core' ? `${CONTEXT_SOURCES[c.source] ?? c.source}: ${c.label}` : (CONTEXT_SOURCES[c.source] ?? c.source)}
+            </span>
+            {c.removable && changeable && (
               <Button size="sm" onClick={() => setRemoving(c.url)} aria-label={`Remove ${c.url}`}>Remove…</Button>
             )}
           </li>
         ))}
       </ul>
-      {list.editable
-        ? <AddContext onAdded={onChanged} />
-        : <p className="muted">Contexts can be added on a backend with a memory database; here the list comes from the deployment.</p>}
+      {!list.editable
+        ? <p className="muted">Contexts can be added on a backend with a memory database; here the list comes from the deployment.</p>
+        : list.mayChange
+          ? <AddContext onAdded={onChanged} />
+          : <p className="muted">Only an operator with {list.changeRole} can change this list.</p>}
       <ConfirmDialog
         open={!!removing}
         title="Remove this allowed context?"

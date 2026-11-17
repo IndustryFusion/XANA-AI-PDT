@@ -48,19 +48,45 @@ const unreachable = (address) => {
 }
 
 const err = (kind, message) => new DataError('system', kind, message)
-const BUILT_IN_CONTEXTS = ['https://industryfusion.github.io/contexts/']
+// As the backend has them built in.
+const BUILT_IN_CONTEXTS = {
+  'https://industryfusion.github.io/contexts/': 'IndustryFusion',
+  'https://uri.etsi.org/ngsi-ld/': 'ETSI NGSI-LD',
+  'https://schema.org/': 'schema.org',
+  'https://smartdatamodels.org/context.jsonld': 'Smart Data Models',
+  'https://raw.githubusercontent.com/smart-data-models/data-models/master/context.jsonld': 'Smart Data Models',
+  'https://fiware.github.io/data-models/': 'FIWARE data models',
+  'https://www.w3.org/ns/': 'W3C vocabularies',
+  'https://www.w3.org/2018/credentials/v1': 'W3C Verifiable Credentials 1.1',
+  'https://ref.gs1.org/voc/data/gs1Voc.jsonld': 'GS1 Web Vocabulary',
+}
 const CORE_CONTEXT = 'https://uri.etsi.org/ngsi-ld/v1/ngsi-ld-core-context*.jsonld'
+const CHANGE_ROLE = 'Factory-Admin on client scorpio'
 
-function contextList(added) {
+/** As the backend: only a signed-in operator with the admin role may; with sign-in off, nobody. */
+function mayChangeContexts(store) {
+  const { authEnabled, sessionRevision, contextAdmin } = currentControls()
+  const { session } = store.get()
+  return authEnabled && session.signedIn && session.revision === sessionRevision && contextAdmin
+}
+
+function contextList(store, added) {
   return {
     contexts: [
-      { url: CORE_CONTEXT, source: 'core', removable: false },
-      ...BUILT_IN_CONTEXTS.map((url) => ({ url, source: 'built_in', removable: false })),
-      ...added.map((url) => ({ url, source: 'added', removable: true })),
+      { url: CORE_CONTEXT, source: 'core', removable: false, label: 'NGSI-LD core' },
+      ...Object.entries(BUILT_IN_CONTEXTS).map(([url, label]) => ({ url, source: 'built_in', removable: false, label })),
+      ...added.map((url) => ({ url, source: 'added', removable: true, label: null })),
     ],
     editable: true,
+    mayChange: mayChangeContexts(store),
+    changeRole: CHANGE_ROLE,
     detail: null,
   }
+}
+
+/** As the backend: only an operator with the admin role may check, add or remove a context. */
+function onlyAdmins(store) {
+  if (!mayChangeContexts(store)) throw err('unauthorized', `Only an operator with ${CHANGE_ROLE} can change the allowed contexts.`)
 }
 
 /** What allowing a context risks, as the backend says: plain http, or an address inside the network. */
@@ -129,20 +155,25 @@ export function createSystemArea(store, { connectionState }) {
     getServiceSettings: withControls(settings),
 
     // Allowed contexts, as the backend keeps them: core, built-in, deployment and those added here.
-    listAllowedContexts: withControls(() => contextList(added)),
-    checkContext: withControls((url = '') => ({ risks: contextRisks(url) })),
+    listAllowedContexts: withControls(() => contextList(store, added)),
+    checkContext: withControls((url = '') => {
+      onlyAdmins(store)
+      return { risks: contextRisks(url) }
+    }),
     allowContext: withControls((url = '') => {
+      onlyAdmins(store)
       const clean = String(url).trim()
       if (!/^https?:\/\/[^\s/@]+(\/\S*)?$/.test(clean)) throw err('invalid', 'Enter a complete http or https URL, for example https://…')
-      if (contextList(added).contexts.some((c) => c.url === clean || (c.url.endsWith('/') && clean.startsWith(c.url)))) throw err('invalid', 'That context is allowed already.')
+      if (contextList(store, added).contexts.some((c) => c.url === clean || (c.url.endsWith('/') && clean.startsWith(c.url)))) throw err('invalid', 'That context is allowed already.')
       added.push(clean)
-      return contextList(added)
+      return contextList(store, added)
     }),
     removeAllowedContext: withControls((url = '') => {
+      onlyAdmins(store)
       const at = added.indexOf(url)
       if (at < 0) throw err('not_found', 'That context isn\'t among the ones added here.')
       added.splice(at, 1)
-      return contextList(added)
+      return contextList(store, added)
     }),
 
     saveServiceSettings: withControls((changes = {}) => {

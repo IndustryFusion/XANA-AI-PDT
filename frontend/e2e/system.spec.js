@@ -15,7 +15,7 @@
 //
 
 import { test, expect } from '@playwright/test'
-import { E2E_SPEED, presetControls } from './helpers'
+import { E2E_SPEED, presetControls, setControls, signIn } from './helpers'
 
 test.beforeEach(async ({ page }) => {
   await presetControls(page, { authEnabled: false, speed: E2E_SPEED })
@@ -105,4 +105,30 @@ test('a corrupt document fails with the reason and is removed', async ({ page })
   await row.getByRole('button', { name: 'Delete corrupt-scan.pdf' }).click()
   await page.getByRole('dialog', { name: 'Delete corrupt-scan.pdf?' }).getByRole('button', { name: 'Delete' }).click()
   await expect(row).toHaveCount(0)
+})
+
+test('allowed contexts: a signed-in admin adds one; without the role or sign-in the list is read-only', async ({ page }) => {
+  const list = page.getByRole('list', { name: 'Allowed contexts' })
+  const form = page.getByRole('form', { name: 'Allow a context' })
+  const readOnly = page.getByText('Only an operator with Factory-Admin on client scorpio can change this list.')
+  // With sign-in off, nobody may change the list.
+  await page.goto('/system')
+  await expect(list.getByText('Built in: schema.org')).toBeVisible()
+  await expect(readOnly).toBeVisible()
+  await expect(form).toHaveCount(0)
+
+  await setControls(page, { authEnabled: true })
+  await page.reload()
+  await signIn(page)
+  await form.getByLabel('Context URL').fill('https://contexts.example.net/e2e.jsonld')
+  await form.getByRole('button', { name: 'Allow…' }).click()
+  await page.getByRole('dialog', { name: 'Allow this context?' }).getByRole('button', { name: 'Allow' }).click()
+  await expect(list.getByText('https://contexts.example.net/e2e.jsonld')).toBeVisible()
+
+  await setControls(page, { contextAdmin: false })
+  await page.reload()
+  await expect(list.getByText('Built in: schema.org')).toBeVisible()
+  await expect(readOnly).toBeVisible()
+  await expect(form).toHaveCount(0)
+  await expect(list.getByRole('button', { name: /^Remove / })).toHaveCount(0)
 })

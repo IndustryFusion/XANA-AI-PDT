@@ -220,13 +220,16 @@ describe('session', () => {
 
 describe('allowed contexts', () => {
   const card = () => screen.findByRole('list', { name: 'Allowed contexts' })
+  // Only a signed-in operator with the role may change the list, as on the backend.
+  const openSignedIn = (controls = {}) => renderAppWith(signInMock, { path: '/system', controls: { authEnabled: true, ...controls } })
 
   test('lists each allowed context with where it comes from', async () => {
-    open()
+    openSignedIn()
     const list = await card()
     const lines = within(list).getAllByRole('listitem').map((li) => li.textContent)
     expect(lines[0]).toMatch(/ngsi-ld-core-context.*NGSI-LD core/)
-    expect(lines[1]).toMatch(/industryfusion\.github\.io\/contexts\/.*Built in/)
+    expect(lines[1]).toMatch(/industryfusion\.github\.io\/contexts\/.*Built in: IndustryFusion/)
+    expect(lines.some((l) => /schema\.org\/.*Built in: schema\.org/.test(l))).toBe(true)
     expect(lines.at(-1)).toMatch(/contexts\.example\.org\/factory\/.*Added here.*Remove/)
     // Only added contexts can be removed.
     expect(within(list).getAllByRole('button', { name: /^Remove / })).toHaveLength(1)
@@ -234,7 +237,7 @@ describe('allowed contexts', () => {
 
   test('allowing a context warns about the risk first, and a plain-http one says more', async () => {
     const user = userEvent.setup()
-    open()
+    openSignedIn()
     await card()
     const form = screen.getByRole('form', { name: 'Allow a context' })
     await user.click(within(form).getByRole('button', { name: 'Allow…' }))
@@ -251,7 +254,7 @@ describe('allowed contexts', () => {
 
   test('an https context without other risks is allowed with the general warning only', async () => {
     const user = userEvent.setup()
-    open()
+    openSignedIn()
     await card()
     const form = screen.getByRole('form', { name: 'Allow a context' })
     await user.type(within(form).getByLabelText('Context URL'), 'https://contexts.example.net/c.jsonld')
@@ -264,12 +267,48 @@ describe('allowed contexts', () => {
 
   test('a context added here is removed after confirmation', async () => {
     const user = userEvent.setup()
-    open()
+    openSignedIn()
     const list = await card()
     await user.click(within(list).getByRole('button', { name: 'Remove https://contexts.example.org/factory/' }))
     const dialog = screen.getByRole('dialog', { name: 'Remove this allowed context?' })
     expect(dialog).toHaveTextContent('Entities already in the broker stay as they are.')
     await user.click(within(dialog).getByRole('button', { name: 'Remove' }))
     await waitFor(async () => expect(within(await card()).queryByText('https://contexts.example.org/factory/')).toBeNull())
+  })
+  test('an operator without the admin role sees the list read-only and who may change it', async () => {
+    openSignedIn({ contextAdmin: false })
+    const list = await card()
+    expect(within(list).getByText('https://schema.org/')).toBeVisible()
+    expect(within(list).queryByRole('button', { name: /^Remove / })).toBeNull()
+    expect(screen.queryByRole('form', { name: 'Allow a context' })).toBeNull()
+    expect(screen.getByText('Only an operator with Factory-Admin on client scorpio can change this list.')).toBeVisible()
+  })
+
+  test('the mock refuses changes from an operator without the admin role, as the backend does', async () => {
+    writeControls({ authEnabled: true, contextAdmin: false })
+    signInMock()
+    await expect(areas.system.allowContext('https://contexts.example.net/c.jsonld')).rejects.toMatchObject({ kind: 'unauthorized' })
+    await expect(areas.system.checkContext('https://contexts.example.net/c.jsonld')).rejects.toMatchObject({ kind: 'unauthorized' })
+    await expect(areas.system.removeAllowedContext('https://contexts.example.org/factory/')).rejects.toMatchObject({ kind: 'unauthorized' })
+  })
+
+  test('with sign-in off, nobody may change the list', async () => {
+    open()
+    await card()
+    expect(screen.getByText('Only an operator with Factory-Admin on client scorpio can change this list.')).toBeVisible()
+    expect(screen.queryByRole('form', { name: 'Allow a context' })).toBeNull()
+    await expect(areas.system.allowContext('https://contexts.example.net/c.jsonld')).rejects.toMatchObject({ kind: 'unauthorized' })
+  })
+
+  test('without a memory database, the list says so whatever the role', async () => {
+    const read = vi.spyOn(areas.system, 'listAllowedContexts').mockResolvedValue({
+      contexts: [{ url: 'https://schema.org/', source: 'built_in', removable: false, label: 'schema.org' }],
+      editable: false, mayChange: false, changeRole: 'Factory-Admin on client scorpio', detail: null,
+    })
+    openSignedIn()
+    await card()
+    expect(screen.getByText(/Contexts can be added on a backend with a memory database/)).toBeVisible()
+    expect(screen.queryByText(/Only an operator with/)).toBeNull()
+    read.mockRestore()
   })
 })

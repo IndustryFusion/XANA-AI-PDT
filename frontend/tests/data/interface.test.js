@@ -22,7 +22,7 @@ import { areas, bindArea, DataError } from '../../src/data'
 import { writeControls } from '../../src/data/sources/mock/controls'
 import { store } from '../../src/data/sources/mock'
 import { MOCK_DATASPACE_SECRET } from '../../src/data/sources/mock/dataspaceArea'
-import { addRun, findRun, resetMock } from '../helpers'
+import { addRun, findRun, resetMock, signInMock } from '../helpers'
 
 const SENSOR = 'urn:ngsi-ld:Sensor:chiller-01-flow'
 const MARKDOWN = { name: 'Notes.md', type: 'text/markdown', size: 24, dataUrl: 'data:text/markdown,%23%20Notes%0ACheck%20the%20nozzle.' }
@@ -79,6 +79,8 @@ describe('mock source matches the documented shapes', () => {
     writeControls({ speed: 25 })
   })
 
+  // Changing the allowed contexts takes a signed-in operator with the role, as on the backend.
+  const signedIn = (...values) => () => { signInMock(); return values }
   const escalated = (scenario, more = []) => () => addRun({ scenario, actions: [['escalate'], ...more] })
   /** Arguments per operation; functions arrange the mock state first. */
   const args = {
@@ -145,9 +147,9 @@ describe('mock source matches the documented shapes', () => {
     },
     system: {
       saveServiceSettings: () => [{ messageBroker: 'mqtt://broker-2.example.org:1883' }],
-      checkContext: () => ['http://contexts.example.org/c.jsonld'],
-      allowContext: () => ['https://contexts.example.net/c.jsonld'],
-      removeAllowedContext: () => ['https://contexts.example.org/factory/'],
+      checkContext: signedIn('http://contexts.example.org/c.jsonld'),
+      allowContext: signedIn('https://contexts.example.net/c.jsonld'),
+      removeAllowedContext: signedIn('https://contexts.example.org/factory/'),
     },
   }
   const implemented = Object.entries(SHAPES).filter(([area]) => OPERATIONS[area]).flatMap(([area, ops]) => Object.keys(ops).map((op) => [area, op]))

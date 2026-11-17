@@ -198,6 +198,12 @@ describe('operations served by the backend', () => {
     await expect(backend.session.getSession()).rejects.toMatchObject({ kind: 'unavailable' })
   })
 
+  test('system: a change refused for the role arrives as unauthorized, with the backend\'s message', async () => {
+    const message = 'Only an operator with Factory-Admin on client scorpio can change the allowed contexts.'
+    fakeFetch({ 'POST /api/ngsi/contexts': { status: 403, body: { error: { kind: 'unauthorized', message } } } })
+    await expect(backend.system.allowContext('https://example.org/c.jsonld')).rejects.toMatchObject({ kind: 'unauthorized', message })
+  })
+
   test('session: wrong credentials stay unauthorized', async () => {
     fakeFetch({ 'POST /api/auth/connect': { status: 401, body: { error: { kind: 'unauthorized', message: 'No.' } } } })
     await expect(backend.session.signIn({ username: 'a', password: 'b' })).rejects.toMatchObject({ kind: 'unauthorized' })

@@ -7,20 +7,73 @@
       {
         "url": "https://uri.etsi.org/ngsi-ld/v1/ngsi-ld-core-context*.jsonld",
         "source": "core",
-        "removable": false
+        "removable": false,
+        "label": "NGSI-LD core"
       },
       {
         "url": "https://industryfusion.github.io/contexts/",
         "source": "built_in",
-        "removable": false
+        "removable": false,
+        "label": "IndustryFusion"
+      },
+      {
+        "url": "https://uri.etsi.org/ngsi-ld/",
+        "source": "built_in",
+        "removable": false,
+        "label": "ETSI NGSI-LD"
+      },
+      {
+        "url": "https://schema.org/",
+        "source": "built_in",
+        "removable": false,
+        "label": "schema.org"
+      },
+      {
+        "url": "https://smartdatamodels.org/context.jsonld",
+        "source": "built_in",
+        "removable": false,
+        "label": "Smart Data Models"
+      },
+      {
+        "url": "https://raw.githubusercontent.com/smart-data-models/data-models/master/context.jsonld",
+        "source": "built_in",
+        "removable": false,
+        "label": "Smart Data Models"
+      },
+      {
+        "url": "https://fiware.github.io/data-models/",
+        "source": "built_in",
+        "removable": false,
+        "label": "FIWARE data models"
+      },
+      {
+        "url": "https://www.w3.org/ns/",
+        "source": "built_in",
+        "removable": false,
+        "label": "W3C vocabularies"
+      },
+      {
+        "url": "https://www.w3.org/2018/credentials/v1",
+        "source": "built_in",
+        "removable": false,
+        "label": "W3C Verifiable Credentials 1.1"
+      },
+      {
+        "url": "https://ref.gs1.org/voc/data/gs1Voc.jsonld",
+        "source": "built_in",
+        "removable": false,
+        "label": "GS1 Web Vocabulary"
       },
       {
         "url": "https://example.org/c.jsonld",
         "source": "added",
-        "removable": true
+        "removable": true,
+        "label": null
       }
     ],
     "editable": true,
+    "mayChange": true,
+    "changeRole": "Factory-Admin on client scorpio",
     "detail": null
   }
 }

@@ -44,6 +44,8 @@ export const DEFAULT_CONTROLS = {
   // Live entity updates (available | unavailable) and occasional new alerts.
   liveUpdates: 'available',
   newAlerts: true,
+  // Whether the signed-in operator has the role that may change the allowed contexts.
+  contextAdmin: true,
   // How many items a search looks through before it stops and says so (null: no limit), as the
   // backend does on a large installation.
   searchCap: null,

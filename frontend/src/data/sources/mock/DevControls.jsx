@@ -85,6 +85,10 @@ export default function DevControls() {
             <input type="checkbox" checked={controls.credentialConfigured} onChange={(e) => update({ credentialConfigured: e.target.checked })} />
             Configuration provides the dataspace credential
           </label>
+          <label className="row">
+            <input type="checkbox" checked={controls.contextAdmin} onChange={(e) => update({ contextAdmin: e.target.checked })} />
+            Signed-in operator has Factory-Admin (may change the allowed contexts)
+          </label>
           <div className="field">
             <label className="field__label" htmlFor="dev-scenario">Scenario for the next started run</label>
             <select id="dev-scenario" value={scenario.id} onChange={(e) => update({ scenario: e.target.value })}>

@@ -269,10 +269,15 @@ export const INGEST_STATES = ['queued', 'processing', 'done', 'failed']
 
 const user = { username: 'string', name: 'string', email: 'string' }
 
-/** The contexts an imported entity may name: `core`, `built_in`, `deployment` (configuration) or `added` here. */
+/**
+ * The contexts an imported entity may name: `core`, `built_in`, `deployment` (configuration) or `added` here,
+ * and whether the signed-in operator may change them (`mayChange`, with the role that may, `changeRole`).
+ */
 const allowedContexts = {
-  contexts: [{ url: 'string', source: { $enum: ['core', 'built_in', 'deployment', 'added'] }, removable: 'boolean' }],
+  contexts: [{ url: 'string', source: { $enum: ['core', 'built_in', 'deployment', 'added'] }, removable: 'boolean', label: '?string' }],
   editable: 'boolean',
+  mayChange: 'boolean',
+  changeRole: 'string',
   detail: '?string',
 }
 
