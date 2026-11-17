@@ -38,7 +38,7 @@ import httpx
 
 from app.config import Settings
 from app.errors import Refused, bad_gateway, conflict, invalid, not_found
-from app.ngsi.contexts import ContextAllowList, deployment_contexts, looks_external
+from app.ngsi.contexts import ContextAllowList, change_role, deployment_contexts, looks_external
 from app.ngsi.failures import refusal, scrubbed, unreachable
 from app.ngsi.query import broker_can_evaluate, compile_pattern, matches, parse
 from xana_agent.literals import declared, is_value_object, literal
@@ -68,16 +68,21 @@ CONTEXT_INSIDE = (
     "entity's top level instead."
 )
 
-CONTEXT_REFUSED = (
-    "This entity's @context names an address that isn't allowed here: the broker would fetch it from "
-    "inside the platform. Allowed contexts are listed in the System area, under Allowed contexts."
-)
+
+def context_not_allowed(role: str) -> str:
+    """The reason for a context whose address looks internal, so it isn't repeated."""
+    return (
+        "This entity's @context names an address that isn't allowed here: the broker would fetch it from "
+        f"inside the platform. Allowed contexts are listed in the System area, under Allowed contexts, where "
+        f"an operator with {role} can allow one."
+    )
 
 
-def context_refused(url: str) -> str:
+def context_refused(url: str, role: str) -> str:
     return (
         f"This entity's @context names {url}, which isn't among the allowed contexts: the broker would fetch "
-        "it from inside the platform. It can be allowed in the System area, under Allowed contexts."
+        f"it from inside the platform. An operator with {role} can allow it in the System area, under "
+        "Allowed contexts."
     )
 
 
@@ -203,6 +208,7 @@ class ContextBroker:
         self._url = settings.ngsi_url.rstrip("/")
         self._tenant = settings.ngsi_tenant
         self._context = settings.ngsi_context_url
+        self._client_id = settings.keycloak_client_id
         self.contexts = contexts or ContextAllowList(None, deployment_contexts(settings))
         self._token = token
         self._transport = transport
@@ -246,7 +252,8 @@ class ContextBroker:
             return None
         if not refused:
             return CONTEXT_INSIDE
-        return context_refused(refused) if looks_external(refused) else CONTEXT_REFUSED
+        role = change_role(self._client_id)
+        return context_refused(refused, role) if looks_external(refused) else context_not_allowed(role)
 
     def headers(self, content_type: str | None = None) -> dict[str, str]:
         headers = {"Accept": "application/json"}

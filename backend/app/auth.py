@@ -56,7 +56,9 @@ class _Tokens:
 
 
 def token_claims(token: str) -> dict[str, Any]:
-    """The claims of a JWT, unverified: for display only, from a token the provider just sent us."""
+    """The claims of a JWT, without verifying its signature: only for a token this backend received
+    from the identity provider over its own connection, never one a caller sent. They are shown, and
+    decide who may change the allowed contexts."""
     try:
         payload = token.split(".")[1]
         claims = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
@@ -110,6 +112,21 @@ class KeycloakSession:
 
     def config(self) -> dict[str, Any]:
         return {"enabled": self.enabled, "provider": PROVIDER}
+
+    @property
+    def client_id(self) -> str:
+        return self._s.keycloak_client_id
+
+    def client_roles(self) -> list[str]:
+        """The signed-in operator's roles on the platform's client, from a token this session asked for
+        itself; none when nobody is signed in."""
+        token = self.token()
+        if token is None:
+            return []
+        access = token_claims(token).get("resource_access")
+        client = access.get(self.client_id) if isinstance(access, dict) else None
+        roles = client.get("roles") if isinstance(client, dict) else None
+        return [role for role in roles if isinstance(role, str)] if isinstance(roles, list) else []
 
     def status(self) -> dict[str, Any]:
         token = self.token()

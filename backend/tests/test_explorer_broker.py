@@ -257,6 +257,9 @@ def test_import_never_passes_on_a_context_that_is_not_allowed(client, broker, co
     assert answer.status_code == 207
     assert answer.json()[0]["result"] == "failed"
     assert "internal" not in answer.json()[0]["reason"]
+    reason = answer.json()[0]["reason"]
+    # One that can never be allowed names no role; the others say who may allow them.
+    assert ("can't be allowed" in reason) != ("operator with Factory-Admin on client scorpio can allow" in reason)
     assert "169.254" not in answer.json()[0]["reason"]
     assert not any(r.url.path.endswith("upsert") for r in broker.requests)
 
@@ -270,6 +273,7 @@ def test_an_iff_context_is_allowed_on_import_and_an_external_refused_one_is_name
     )
     reason = refused.json()[0]["reason"]
     assert "https://example.org/c.jsonld" in reason and "System area" in reason
+    assert "An operator with Factory-Admin on client scorpio can allow it in the System area" in reason
 
 
 def test_a_context_that_can_never_be_allowed_has_a_reason_of_its_own(client, broker):

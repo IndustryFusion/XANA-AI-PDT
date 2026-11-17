@@ -41,8 +41,30 @@ log = logging.getLogger(__name__)
 
 CORE_CONTEXT = re.compile(r"https://uri\.etsi\.org/ngsi-ld/v1/ngsi-ld-core-context(-v[0-9.]+)?\.jsonld")
 CORE_LABEL = "https://uri.etsi.org/ngsi-ld/v1/ngsi-ld-core-context*.jsonld"
-# Maintained here: contexts of the IFF platform and its tools.
-BUILT_IN: tuple[str, ...] = ("https://industryfusion.github.io/contexts/",)
+# Maintained here: the contexts of the IFF platform and its tools, and well-known vocabularies whose
+# own host serves the context, with what they are. Left out: redirect services such as w3id.org or
+# purl.org, which can point anywhere, and paths below which others can publish, such as an owner's
+# path on raw.githubusercontent.com, which also serves its forks' commits.
+BUILT_IN: dict[str, str] = {
+    "https://industryfusion.github.io/contexts/": "IndustryFusion",
+    "https://uri.etsi.org/ngsi-ld/": "ETSI NGSI-LD",
+    "https://schema.org/": "schema.org",
+    "https://smartdatamodels.org/context.jsonld": "Smart Data Models",
+    "https://raw.githubusercontent.com/smart-data-models/data-models/master/context.jsonld": "Smart Data Models",
+    "https://fiware.github.io/data-models/": "FIWARE data models",
+    "https://www.w3.org/ns/": "W3C vocabularies",
+    "https://www.w3.org/2018/credentials/v1": "W3C Verifiable Credentials 1.1",
+    "https://ref.gs1.org/voc/data/gs1Voc.jsonld": "GS1 Web Vocabulary",
+}
+# Who may change the list: this role on the platform's client.
+ADMIN_ROLE = "Factory-Admin"
+
+
+def change_role(client_id: str) -> str:
+    """The role that may change the list, as operators read it."""
+    return f"{ADMIN_ROLE} on client {client_id}"
+
+
 MAX_URL = 2000
 # The added ones are read again at most this often, so another backend's change shows up.
 FRESH_S = 30.0
@@ -136,13 +158,22 @@ class ContextAllowList:
 
     # The list -----------------------------------------------------------------------------
 
-    async def entries(self) -> dict[str, Any]:
+    async def entries(self, may_change: bool, change_role: str) -> dict[str, Any]:
+        """The list, and whether the operator asking may change it (`mayChange`, with the role that may)."""
         await self.refresh()
-        listed = [{"url": CORE_LABEL, "source": "core", "removable": False}]
-        listed += [{"url": url, "source": "built_in", "removable": False} for url in BUILT_IN]
-        listed += [{"url": url, "source": "deployment", "removable": False} for url in self._deployment]
-        listed += [{"url": url, "source": "added", "removable": True} for url in self._added]
-        return {"contexts": listed, "editable": self._db is not None, "detail": self._problem}
+        listed = [{"url": CORE_LABEL, "source": "core", "removable": False, "label": "NGSI-LD core"}]
+        listed += [
+            {"url": url, "source": "built_in", "removable": False, "label": label} for url, label in BUILT_IN.items()
+        ]
+        listed += [{"url": url, "source": "deployment", "removable": False, "label": None} for url in self._deployment]
+        listed += [{"url": url, "source": "added", "removable": True, "label": None} for url in self._added]
+        return {
+            "contexts": listed,
+            "editable": self._db is not None,
+            "mayChange": may_change,
+            "changeRole": change_role,
+            "detail": self._problem,
+        }
 
     async def risks(self, url: str) -> list[str]:
         """What allowing the URL risks, beyond trusting whoever controls it."""
@@ -156,7 +187,7 @@ class ContextAllowList:
             found.append(INTERNAL)
         return found
 
-    async def add(self, url: str, by: str | None) -> dict[str, Any]:
+    async def add(self, url: str, by: str | None) -> None:
         url = url.strip()
         _checked(url)
         if self.allowed(url):
@@ -176,9 +207,9 @@ class ContextAllowList:
         log.info("A context was allowed for import.")
         self._changes += 1
         self._read_at = None
-        return await self.entries()
+        await self.refresh()
 
-    async def remove(self, url: str) -> dict[str, Any]:
+    async def remove(self, url: str) -> None:
         if self._db is None:
             raise unavailable("Contexts can't be removed here: the backend has no memory database.")
         try:
@@ -191,9 +222,9 @@ class ContextAllowList:
             raise unavailable("The memory database can't be used right now.") from None
         self._changes += 1
         self._read_at = None
+        await self.refresh()
         if not removed:
             raise not_found("That context isn't among the ones added here.")
-        return await self.entries()
 
 
 _INTERNAL_SUFFIXES = (".local", ".internal", ".svc", ".cluster.local", ".lan", ".home", "localhost")

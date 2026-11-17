@@ -32,8 +32,9 @@ from fastapi import APIRouter, Body, Query, Request, Response, WebSocket, WebSoc
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from app.errors import invalid
+from app.errors import Refused, invalid
 from app.ngsi.broker import check_document
+from app.ngsi.contexts import ADMIN_ROLE, change_role
 from app.ngsi.fetch import fetch_document
 from app.ngsi.live import Watcher
 from app.ngsi.stream import drop_connection, origin_allowed
@@ -89,27 +90,56 @@ class ContextToAllow(BaseModel):
     url: str
 
 
+def _change_role(request: Request) -> str:
+    return change_role(request.app.state.session.client_id)
+
+
+def _may_change_contexts(request: Request) -> bool:
+    """Whether the signed-in operator may change the allowed contexts: the client's admin role, read
+    from the token the backend's session holds, never from the caller."""
+    return ADMIN_ROLE in request.app.state.session.client_roles()
+
+
+def _only_admins(request: Request) -> None:
+    if not _may_change_contexts(request):
+        raise Refused(
+            "unauthorized",
+            f"Only an operator with {_change_role(request)} can change the allowed contexts.",
+            status=403,
+        )
+
+
+async def _listed(request: Request) -> dict:
+    return await request.app.state.contexts.entries(_may_change_contexts(request), _change_role(request))
+
+
 @router.get("/contexts")
 async def allowed_contexts(request: Request) -> dict:
     """The contexts an imported entity may name: the core, built-in, deployment and added ones."""
-    return await request.app.state.contexts.entries()
+    return await _listed(request)
 
 
 @router.get("/contexts/risks")
 async def context_risks(request: Request, url: str) -> dict:
-    """What allowing the context would risk, beyond trusting whoever controls it."""
+    """What allowing the context would risk, beyond trusting whoever controls it: for admins only, as
+    it tells whether a name resolves inside the network."""
+    _only_admins(request)
     return {"risks": await request.app.state.contexts.risks(url)}
 
 
 @router.post("/contexts")
 async def allow_context(body: ContextToAllow, request: Request) -> dict:
+    _only_admins(request)
     user = (request.app.state.session.status().get("user") or {}).get("username") or None
-    return await request.app.state.contexts.add(body.url, user)
+    await request.app.state.contexts.add(body.url, user)
+    return await _listed(request)
 
 
 @router.delete("/contexts")
 async def remove_context(request: Request, url: str) -> dict:
-    return await request.app.state.contexts.remove(url)
+    _only_admins(request)
+    await request.app.state.contexts.remove(url)
+    return await _listed(request)
 
 
 @router.get("/prefixes")

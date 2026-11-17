@@ -88,9 +88,11 @@ def test_core_built_in_and_deployment_contexts_are_allowed():
 async def test_added_contexts_are_allowed_listed_and_removed():
     rows = Rows()
     contexts = allow_list(rows)
-    answer = await contexts.add("https://example.org/mine.jsonld", "alice")
+    await contexts.add("https://example.org/mine.jsonld", "alice")
+    answer = await contexts.entries(True, "Factory-Admin on client scorpio")
     assert contexts.allowed("https://example.org/mine.jsonld")
-    assert {"url": "https://example.org/mine.jsonld", "source": "added", "removable": True} in answer["contexts"]
+    mine = {"url": "https://example.org/mine.jsonld", "source": "added", "removable": True, "label": None}
+    assert mine in answer["contexts"]
     assert [c["source"] for c in answer["contexts"]][:2] == ["core", "built_in"]
     assert rows.urls == {"https://example.org/mine.jsonld": "alice"}
     with pytest.raises(Refused):  # allowed already, by the built-in entry
@@ -118,7 +120,7 @@ async def test_the_risks_of_a_context():
 
 async def test_a_database_that_fails():
     contexts = allow_list(Rows(fail=True))
-    answer = await contexts.entries()
+    answer = await contexts.entries(True, "Factory-Admin on client scorpio")
     assert answer["detail"] and "can't be read" in answer["detail"]
     assert contexts.allowed(IFF)
     with pytest.raises(Refused):
@@ -140,13 +142,18 @@ def test_only_external_looking_contexts_are_named(url, named):
     assert looks_external(url) is named
 
 
-def app_with_contexts(contexts):
+def app_with_contexts(contexts, roles=("Factory-Admin",)):
     app = FastAPI()
     app.state.contexts = contexts
 
     class Session:
+        client_id = "scorpio"
+
         def status(self):
             return {"user": {"username": "alice"}}
+
+        def client_roles(self):
+            return list(roles)
 
     app.state.session = Session()
     errors.install(app)
@@ -242,3 +249,79 @@ def test_dot_segments_dont_reach_past_an_entry(url):
 @pytest.mark.parametrize("url", ["http://10.0.0.5./c", "http://localhost./x", "http://keycloak.svc./x"])
 def test_a_root_dot_doesnt_hide_an_internal_host(url):
     assert not looks_external(url)
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://schema.org/docs/jsonldcontext.jsonld",
+        "https://schema.org/",
+        "https://uri.etsi.org/ngsi-ld/v1.8/ngsi-ld-core-context.jsonld",
+        "https://smartdatamodels.org/context.jsonld",
+        "https://raw.githubusercontent.com/smart-data-models/data-models/master/context.jsonld",
+        "https://fiware.github.io/data-models/context.jsonld",
+        "https://www.w3.org/ns/odrl.jsonld",
+        "https://www.w3.org/2018/credentials/v1",
+        "https://ref.gs1.org/voc/data/gs1Voc.jsonld",
+    ],
+)
+def test_well_known_contexts_are_built_in(url):
+    assert allow_list().allowed(url)
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://w3id.org/security/v2",
+        "https://purl.org/x/c.jsonld",
+        "https://schema.org.evil.example/c.jsonld",
+        "https://www.w3.org/2018/credentials/v2",
+        "https://raw.githubusercontent.com/someone-else/c.jsonld",
+        # The owner's path also serves its forks' commits and pull requests.
+        "https://raw.githubusercontent.com/smart-data-models/data-models/refs/pull/89/head/context.jsonld",
+        "https://raw.githubusercontent.com/smart-data-models/data-models/0123456789abcdef0123456789abcdef01234567/context.jsonld",
+        "https://raw.githubusercontent.com/smart-data-models/dataModel.Device/master/context.jsonld",
+    ],
+)
+def test_redirect_services_and_look_alikes_are_not_built_in(url):
+    assert not allow_list().allowed(url)
+
+
+def test_built_in_contexts_are_listed_with_what_they_are():
+    listed = app_with_contexts(allow_list()).get("/api/ngsi/contexts").json()["contexts"]
+    labels = {c["url"]: c["label"] for c in listed if c["source"] == "built_in"}
+    assert labels["https://schema.org/"] == "schema.org"
+    assert labels["https://industryfusion.github.io/contexts/"] == "IndustryFusion"
+    assert all(labels.values())
+
+
+@pytest.mark.parametrize("roles", [(), ("Factory-Reader",), ("Factory-Writer",), ("factory-admin",)])
+def test_only_a_factory_admin_may_change_the_list(roles):
+    rows = Rows()
+    rows.urls["https://example.org/kept.jsonld"] = "bob"
+    client = app_with_contexts(allow_list(rows), roles=roles)
+    listed = client.get("/api/ngsi/contexts").json()
+    assert listed["mayChange"] is False and listed["changeRole"] == "Factory-Admin on client scorpio"
+    assert any(c["url"] == "https://example.org/kept.jsonld" for c in listed["contexts"])
+    for answer in (
+        client.post("/api/ngsi/contexts", json={"url": "https://example.org/c.jsonld"}),
+        client.delete("/api/ngsi/contexts", params={"url": "https://example.org/kept.jsonld"}),
+        client.get("/api/ngsi/contexts/risks", params={"url": "http://keycloak/x"}),
+    ):
+        assert answer.status_code == 403
+        assert answer.json()["error"]["kind"] == "unauthorized"
+        assert "Factory-Admin on client scorpio" in answer.json()["error"]["message"]
+    assert rows.urls == {"https://example.org/kept.jsonld": "bob"}
+
+
+def test_a_factory_admin_may_change_the_list():
+    client = app_with_contexts(allow_list(Rows()))
+    listed = client.get("/api/ngsi/contexts").json()
+    assert listed["mayChange"] is True
+    # Adding and removing answer with the list as it is asked for.
+    url = "https://example.org/c.jsonld"
+    for answer in (
+        client.post("/api/ngsi/contexts", json={"url": url}),
+        client.delete("/api/ngsi/contexts", params={"url": url}),
+    ):
+        assert answer.json()["mayChange"] is True and answer.json()["changeRole"] == "Factory-Admin on client scorpio"

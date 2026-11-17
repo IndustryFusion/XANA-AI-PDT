@@ -598,3 +598,27 @@ def test_retries_last_for_most_of_the_refresh_margin():
     span = (MAX_REFRESH_FAILURES - 1) * REFRESH_RETRY_S
     assert REFRESH_MARGIN_S * 0.75 <= span < REFRESH_MARGIN_S
     assert PROVIDER_TIMEOUT_S > make_settings().health_timeout_s
+
+
+async def test_the_operators_roles_on_the_platforms_client():
+    s = session(
+        Provider(resource_access={"scorpio": {"roles": ["Factory-Admin"]}, "other": {"roles": ["x"]}}),
+        keycloak_client_id="scorpio",
+    )
+    assert s.client_roles() == []
+    await s.connect("op", PASSWORD)
+    assert s.client_id == "scorpio" and s.client_roles() == ["Factory-Admin"]
+    await s.logout()
+    assert s.client_roles() == []
+    await s.close()
+
+
+@pytest.mark.parametrize(
+    "access",
+    [None, {}, {"scorpio": "x"}, {"scorpio": {"roles": "Factory-Admin"}}, {"other": {"roles": ["Factory-Admin"]}}],
+)
+async def test_no_roles_without_them_on_the_client(access):
+    s = session(Provider(**({"resource_access": access} if access is not None else {})))
+    await s.connect("op", PASSWORD)
+    assert s.client_roles() == []
+    await s.close()
