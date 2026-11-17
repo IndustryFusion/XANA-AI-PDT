@@ -2,6 +2,45 @@
 
 Installs the operator UI and backend next to the [digital twin platform](https://github.com/IndustryFusion/DigitalTwin), with Helm 3 and [Helmfile](https://helmfile.readthedocs.io/) 1.1.9, which `bootstrap.sh` downloads.
 
+## Quick start
+
+The shortest way from a cluster running the platform to the operator UI. The sections below explain each step.
+
+1. **What you need:**
+   - `kubectl` pointing at the platform's cluster, and Docker to build the images.
+   - Helm 3 with the [helm-diff](https://github.com/databus23/helm-diff) plugin, which `helmfile apply` needs: `helm plugin install https://github.com/databus23/helm-diff`. Without it, use `sync` instead of `apply` below.
+   - The platform with the `memory` database in its PostgreSQL chart: DigitalTwin's `main` has it since 2026-09-27, and no release holds it yet. On an older platform, create a database `memory` owned by the platform's database user.
+2. **Images.** No release of XANA is published yet, so build and push your own, from the repository root (see [Images](#images)):
+
+   ```bash
+   REGISTRY=<registry>/<path> IMAGE_TAG=0.1.0 ./build.sh
+   ```
+
+   On the platform's local k3d cluster, the default registry `k3d-iff.localhost:12345` works as it is, once it is listed in Docker's `insecure-registries`.
+3. **Your values,** in a file of your own outside the repository, for example `~/xana/values.yaml`. Every key is described in [`environment/default.yaml`](environment/default.yaml):
+
+   ```yaml
+   imageRegistry: <registry>/<path>        # as in step 2
+   imageTag: "0.1.0"
+   ingressHost: xana.local                 # the address operators open
+   keycloakUrl: http://keycloak.local/auth # Keycloak's external address, as the broker checks tokens
+   fusekiGraphBase: http://fuseki.local/iff
+   ollamaUrl: http://<ollama>:11434        # for the agent; see Language model for others
+   callbackBaseUrl: ""                     # no machine events at first, so no secret is needed
+   ```
+
+4. **Secrets.** For this first start none are needed: the database credentials are read from the platform's Secret when deploying. Machine events, the dataspace, alerts and API models need some; see [Secrets](#secrets).
+5. **Deploy,** from `helm/`:
+
+   ```bash
+   ./bootstrap.sh
+   ./helmfile -e default --state-values-file ~/xana/values.yaml apply   # or sync
+   ```
+
+6. **Open it.** Point `ingressHost` at the platform's Ingress, by DNS or a hosts entry. On k3d, `kubectl -n kube-system get svc traefik` shows the address, for example `172.21.0.2 xana.local` in `/etc/hosts`. Open `http://xana.local` and sign in with a user of realm `iff` that has `Factory-Admin` or `Factory-Reader` on client `scorpio`. The System area shows the health of every service XANA uses.
+
+Then add what you need from [Configuration](#configuration): machine events, the dataspace, IFRIC, alerts, TLS.
+
 ## What it needs
 
 - A cluster running the platform, and `kubectl` pointing at it.

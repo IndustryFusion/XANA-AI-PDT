@@ -297,7 +297,7 @@ The workflow reads through three protocols (`sources/base.py`), so a program can
 
 > **Not part of the current system.** This section describes a possible later addition. Nothing in this repository provides this service.
 
-[`rag-tool-microservice`](rag-tool-microservice/README.md) is a
+`rag-tool-microservice` would be a
 separately-deployed service that gives the agent a document-grounded
 knowledge base — e.g. equipment manuals, maintenance procedures, spec
 sheets — instead of relying on the LLM's parametric knowledge alone. It is
@@ -319,9 +319,7 @@ Agent node ──MCP──► rag-tool `mcp` gateway ──┬─► ingestion-s
   deployed alongside `xana-pdt` — see "Deployment Architecture" below) a
   dedicated `rag` database on the **same** Postgres cluster as this app's
   `tsdb`/`memory` databases.
-* Full design, API surface, and deployment instructions:
-  [`rag-tool-microservice/README.md`](rag-tool-microservice/README.md) and
-  [`rag-tool-microservice/docs/kubernetes.md`](rag-tool-microservice/docs/kubernetes.md).
+* Its design, API and deployment would live with that service; it isn't in this repository.
 
 #### Event Layer (`app/events/`)
 
