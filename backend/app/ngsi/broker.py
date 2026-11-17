@@ -38,6 +38,7 @@ import httpx
 
 from app.config import Settings
 from app.errors import Refused, bad_gateway, conflict, invalid, not_found
+from app.ngsi.contexts import ContextAllowList, deployment_contexts, looks_external
 from app.ngsi.failures import refusal, scrubbed, unreachable
 from app.ngsi.query import broker_can_evaluate, compile_pattern, matches, parse
 from xana_agent.literals import declared, is_value_object, literal
@@ -57,15 +58,27 @@ CONCURRENT_COUNTS = 8
 RESERVED = {"id", "type", "@context", "scope", "createdAt", "modifiedAt", "deletedAt"}
 VALUE_MEMBERS = ("value", "object", "objectList", "json", "languageMap", "valueList", "vocab")
 _URI = re.compile(r"[A-Za-z][A-Za-z0-9+.\-]*:\S+")
-_CORE_CONTEXT = re.compile(r"https://uri\.etsi\.org/ngsi-ld/v1/ngsi-ld-core-context(-v[0-9.]+)?\.jsonld")
 JSON_TYPE = "application/json"
 LD_TYPE = "application/ld+json"
 
 
+CONTEXT_INSIDE = (
+    "This entity names a context inside an attribute, or a context that names another: the broker would "
+    "fetch it from inside the platform, and such a context can't be allowed. Name the context at the "
+    "entity's top level instead."
+)
+
 CONTEXT_REFUSED = (
     "This entity's @context names an address that isn't allowed here: the broker would fetch it from "
-    "inside the platform. Allowed contexts are set with NGSI_ALLOWED_CONTEXTS."
+    "inside the platform. Allowed contexts are listed in the System area, under Allowed contexts."
 )
+
+
+def context_refused(url: str) -> str:
+    return (
+        f"This entity's @context names {url}, which isn't among the allowed contexts: the broker would fetch "
+        "it from inside the platform. It can be allowed in the System area, under Allowed contexts."
+    )
 
 
 class Limited(list):
@@ -185,13 +198,12 @@ class ContextBroker:
         settings: Settings,
         token: Callable[[], str | None],
         transport: httpx.AsyncBaseTransport | None = None,
+        contexts: ContextAllowList | None = None,
     ) -> None:
         self._url = settings.ngsi_url.rstrip("/")
         self._tenant = settings.ngsi_tenant
         self._context = settings.ngsi_context_url
-        self._allowed_contexts = {
-            url.strip() for url in (settings.ngsi_allowed_contexts or "").split(",") if url.strip()
-        } | ({self._context} if self._context else set())
+        self.contexts = contexts or ContextAllowList(None, deployment_contexts(settings))
         self._token = token
         self._transport = transport
         self._entity_locks: dict[str, tuple[asyncio.Lock, int]] = {}
@@ -216,19 +228,25 @@ class ContextBroker:
             else:
                 self._entity_locks[entity_id] = (lock, users - 1)
 
-    def _context_allowed(self, context: Any) -> bool:
-        """Only known addresses: the broker fetches a context from inside the platform, unchecked."""
+    def _refused_context(self, context: Any) -> str | None:
+        """The first part of a context that isn't allowed: a URL, or `""` for an object that names one.
+        The broker fetches a context from inside the platform, unchecked, so only allowed ones pass."""
         if isinstance(context, str):
-            return bool(_CORE_CONTEXT.fullmatch(context)) or context in self._allowed_contexts
+            return None if self.contexts.allowed(context) else context
         if isinstance(context, list):
-            return all(self._context_allowed(item) for item in context)
-        return isinstance(context, dict) and not _inner_context(context)
+            return next((found for item in context if (found := self._refused_context(item)) is not None), None)
+        return None if isinstance(context, dict) and not _inner_context(context) else ""
 
     def _context_problem(self, entity: dict[str, Any]) -> str | None:
         rest = {key: value for key, value in entity.items() if key != "@context"}
-        if _inner_context(rest) or ("@context" in entity and not self._context_allowed(entity["@context"])):
-            return CONTEXT_REFUSED
-        return None
+        if _inner_context(rest):
+            return CONTEXT_INSIDE
+        refused = self._refused_context(entity["@context"]) if "@context" in entity else None
+        if refused is None:
+            return None
+        if not refused:
+            return CONTEXT_INSIDE
+        return context_refused(refused) if looks_external(refused) else CONTEXT_REFUSED
 
     def headers(self, content_type: str | None = None) -> dict[str, str]:
         headers = {"Accept": "application/json"}
@@ -506,7 +524,7 @@ class ContextBroker:
 
     def _refuse_contexts(self, attributes: dict[str, Any]) -> None:
         if _inner_context(attributes):
-            raise invalid(CONTEXT_REFUSED)
+            raise invalid(CONTEXT_INSIDE)
 
     async def append_attributes(self, entity_id: str, attributes: dict[str, Any]) -> None:
         self._refuse_contexts(attributes)
@@ -728,6 +746,7 @@ class ContextBroker:
     async def import_entities(self, entities: list[Any]) -> list[dict[str, Any]]:
         """Creates or replaces entities. The result has one line per entry, in order."""
         results: list[dict[str, Any]] = [{"id": None, "result": "failed", "reason": None} for _ in entities]
+        await self.contexts.refresh()
         ready: list[int] = []
         for index, entity in enumerate(entities):
             problem = _import_problem(index, entity) or self._context_problem(entity)

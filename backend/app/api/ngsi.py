@@ -85,6 +85,33 @@ async def attributes(request: Request) -> list[str]:
     return await request.app.state.broker.attributes()
 
 
+class ContextToAllow(BaseModel):
+    url: str
+
+
+@router.get("/contexts")
+async def allowed_contexts(request: Request) -> dict:
+    """The contexts an imported entity may name: the core, built-in, deployment and added ones."""
+    return await request.app.state.contexts.entries()
+
+
+@router.get("/contexts/risks")
+async def context_risks(request: Request, url: str) -> dict:
+    """What allowing the context would risk, beyond trusting whoever controls it."""
+    return {"risks": await request.app.state.contexts.risks(url)}
+
+
+@router.post("/contexts")
+async def allow_context(body: ContextToAllow, request: Request) -> dict:
+    user = (request.app.state.session.status().get("user") or {}).get("username") or None
+    return await request.app.state.contexts.add(body.url, user)
+
+
+@router.delete("/contexts")
+async def remove_context(request: Request, url: str) -> dict:
+    return await request.app.state.contexts.remove(url)
+
+
 @router.get("/prefixes")
 async def prefixes(request: Request) -> dict:
     """The configured context's prefixes. The caller's parameters are ignored: no context is named here."""

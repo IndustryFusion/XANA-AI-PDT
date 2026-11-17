@@ -57,6 +57,7 @@ from app.ifric import RegistryClient
 from app.memory.migrate import Migrator
 from app.memory.store import Database, IncidentStore, RunStore
 from app.ngsi.broker import ContextBroker
+from app.ngsi.contexts import ContextAllowList, deployment_contexts
 from app.ngsi.history import AttributeHistory
 from app.ngsi.live import LiveUpdates
 from app.ngsi.prefixes import ContextPrefixes
@@ -272,7 +273,8 @@ def create_app(
     app.state.health = health
     app.state.runs = manager
     app.state.incidents = incident_store
-    app.state.broker = ContextBroker(settings, session.token)
+    app.state.contexts = ContextAllowList(db, deployment_contexts(settings), schema_ready)
+    app.state.broker = ContextBroker(settings, session.token, contexts=app.state.contexts)
     live = LiveUpdates(settings, session.token, session.enabled, app.state.broker)
     app.state.live = live
     app.state.broker.on_write = live.expect_delivery

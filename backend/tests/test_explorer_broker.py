@@ -261,6 +261,27 @@ def test_import_never_passes_on_a_context_that_is_not_allowed(client, broker, co
     assert not any(r.url.path.endswith("upsert") for r in broker.requests)
 
 
+def test_an_iff_context_is_allowed_on_import_and_an_external_refused_one_is_named(client, broker):
+    iff = "https://industryfusion.github.io/contexts/staging/opcua/v0.2/context.jsonld"
+    answer = client.post("/api/ngsi/import", json=[{"@context": iff, "id": "urn:c:iff", "type": "T"}])
+    assert answer.json()[0]["result"] != "failed"
+    refused = client.post(
+        "/api/ngsi/import", json=[{"@context": "https://example.org/c.jsonld", "id": "urn:c:2", "type": "T"}]
+    )
+    reason = refused.json()[0]["reason"]
+    assert "https://example.org/c.jsonld" in reason and "System area" in reason
+
+
+def test_a_context_that_can_never_be_allowed_has_a_reason_of_its_own(client, broker):
+    inside = {"type": "Property", "value": 1, "@context": "https://example.org/c.jsonld"}
+    for entity in (
+        {"id": "urn:c:3", "type": "T", "p": inside},
+        {"@context": {"@import": "https://example.org/c.jsonld"}, "id": "urn:c:4", "type": "T"},
+    ):
+        reason = client.post("/api/ngsi/import", json=[entity]).json()[0]["reason"]
+        assert "can't be allowed" in reason and "System area" not in reason
+
+
 def test_a_context_inside_an_attribute_is_refused_on_import_and_on_edits(client, broker):
     inner = {"type": "Property", "value": 1, "@context": "http://internal/c"}
     assert client.post("/api/ngsi/import", json=[{"id": "urn:c:1", "type": "T", "a": inner}]).status_code == 207
