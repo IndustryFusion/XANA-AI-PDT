@@ -1,0 +1,10 @@
+{
+  "method": "GET",
+  "path": "/api/ngsi/contexts/risks?url=http%3A%2F%2Fexample.org%2Fc.jsonld",
+  "status": 200,
+  "body": {
+    "risks": [
+      "It is plain http: anyone on the way can change what the broker gets."
+    ]
+  }
+}

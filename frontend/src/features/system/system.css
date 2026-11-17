@@ -99,3 +99,13 @@
 
 .health__models-title { font-size: var(--text-sm); font-weight: 600; margin: 0 0 var(--space-2, 0.5rem); }
 .health__model-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2, 0.5rem); }
+
+/* Allowed contexts: one line per context, its source beside it. */
+.allowed-contexts__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-1); }
+.allowed-contexts__item { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-3); }
+.allowed-contexts__url { overflow-wrap: anywhere; min-width: 0; }
+.allowed-contexts__source { font-size: var(--text-xs); }
+.allowed-contexts__add .field { flex: 1; min-width: 16rem; }
+.allowed-contexts__add input { width: 100%; }
+.allowed-contexts__risks { border-left: 4px solid var(--tone-warning); padding-left: var(--space-2); }
+.allowed-contexts__risks ul { margin: var(--space-1) 0 0; padding-left: var(--space-4); }

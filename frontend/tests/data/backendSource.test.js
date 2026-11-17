@@ -226,7 +226,7 @@ describe('without the mock', () => {
       ],
       alerts: ['listAlerts', 'countAlerts', 'getAlert', 'applyAlertAction', 'listEnvironments', 'listServices', 'getAlertSettings'],
       dataspace: ['getConnection', 'getConnectionConfig', 'getAccessLevels', 'connect', 'disconnect', 'listPeers', 'getPeerCapabilities', 'listCapabilityRequests', 'decideCapabilityRequest', 'setCapabilityPolicy', 'resolveNames', 'resolveBuilders', 'resolveMachines'],
-      system: ['getHealth', 'getServiceSettings', 'saveServiceSettings'],
+      system: ['getHealth', 'getServiceSettings', 'saveServiceSettings', 'listAllowedContexts', 'checkContext', 'allowContext', 'removeAllowedContext'],
     })
     expect(backend.info.signInHint).toBeUndefined()
     expect(backend.session.signIn).not.toBe(mock.session.signIn)

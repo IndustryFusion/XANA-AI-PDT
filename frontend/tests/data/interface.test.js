@@ -145,6 +145,9 @@ describe('mock source matches the documented shapes', () => {
     },
     system: {
       saveServiceSettings: () => [{ messageBroker: 'mqtt://broker-2.example.org:1883' }],
+      checkContext: () => ['http://contexts.example.org/c.jsonld'],
+      allowContext: () => ['https://contexts.example.net/c.jsonld'],
+      removeAllowedContext: () => ['https://contexts.example.org/factory/'],
     },
   }
   const implemented = Object.entries(SHAPES).filter(([area]) => OPERATIONS[area]).flatMap(([area, ops]) => Object.keys(ops).map((op) => [area, op]))

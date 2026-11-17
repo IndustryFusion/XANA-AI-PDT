@@ -47,7 +47,35 @@ const unreachable = (address) => {
   try { return new URL(address).hostname.endsWith('.invalid') } catch { return true }
 }
 
+const err = (kind, message) => new DataError('system', kind, message)
+const BUILT_IN_CONTEXTS = ['https://industryfusion.github.io/contexts/']
+const CORE_CONTEXT = 'https://uri.etsi.org/ngsi-ld/v1/ngsi-ld-core-context*.jsonld'
+
+function contextList(added) {
+  return {
+    contexts: [
+      { url: CORE_CONTEXT, source: 'core', removable: false },
+      ...BUILT_IN_CONTEXTS.map((url) => ({ url, source: 'built_in', removable: false })),
+      ...added.map((url) => ({ url, source: 'added', removable: true })),
+    ],
+    editable: true,
+    detail: null,
+  }
+}
+
+/** What allowing a context risks, as the backend says: plain http, or an address inside the network. */
+function contextRisks(url) {
+  const risks = []
+  if (/^http:\/\//i.test(url)) risks.push('It is plain http: anyone on the way can change what the broker gets.')
+  if (/^https?:\/\/(localhost|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|[^/.:]+(:|\/|$)|[^/]*\.(local|internal|svc)(:|\/|$))/i.test(url)) {
+    risks.push('It is, or resolves to, an address inside the network: the broker would fetch from a service of the platform or the network around it.')
+  }
+  return risks
+}
+
 export function createSystemArea(store, { connectionState }) {
+  // One added before, as on a platform where an operator allowed the factory's own contexts.
+  const added = ['https://contexts.example.org/factory/']
   const withControls = (fn) => async (...args) => {
     await applyControls('system')
     return fn(...args)
@@ -99,6 +127,23 @@ export function createSystemArea(store, { connectionState }) {
     }),
 
     getServiceSettings: withControls(settings),
+
+    // Allowed contexts, as the backend keeps them: core, built-in, deployment and those added here.
+    listAllowedContexts: withControls(() => contextList(added)),
+    checkContext: withControls((url = '') => ({ risks: contextRisks(url) })),
+    allowContext: withControls((url = '') => {
+      const clean = String(url).trim()
+      if (!/^https?:\/\/[^\s/@]+(\/\S*)?$/.test(clean)) throw err('invalid', 'Enter a complete http or https URL, for example https://…')
+      if (contextList(added).contexts.some((c) => c.url === clean || (c.url.endsWith('/') && clean.startsWith(c.url)))) throw err('invalid', 'That context is allowed already.')
+      added.push(clean)
+      return contextList(added)
+    }),
+    removeAllowedContext: withControls((url = '') => {
+      const at = added.indexOf(url)
+      if (at < 0) throw err('not_found', 'That context isn\'t among the ones added here.')
+      added.splice(at, 1)
+      return contextList(added)
+    }),
 
     saveServiceSettings: withControls((changes = {}) => {
       const problems = []

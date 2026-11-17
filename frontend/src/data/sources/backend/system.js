@@ -25,4 +25,8 @@ export const system = {
   saveServiceSettings: async () => {
     throw new DataError('system', 'conflict', 'Service addresses are set at deployment, and can\'t be changed here.')
   },
+  listAllowedContexts: () => request('system', 'GET', '/api/ngsi/contexts'),
+  checkContext: (url) => request('system', 'GET', '/api/ngsi/contexts/risks', { params: { url } }),
+  allowContext: (url) => request('system', 'POST', '/api/ngsi/contexts', { body: { url } }),
+  removeAllowedContext: (url) => request('system', 'DELETE', '/api/ngsi/contexts', { params: { url } }),
 }

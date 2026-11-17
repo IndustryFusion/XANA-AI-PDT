@@ -1,0 +1,21 @@
+{
+  "method": "GET",
+  "path": "/api/ngsi/contexts",
+  "status": 200,
+  "body": {
+    "contexts": [
+      {
+        "url": "https://uri.etsi.org/ngsi-ld/v1/ngsi-ld-core-context*.jsonld",
+        "source": "core",
+        "removable": false
+      },
+      {
+        "url": "https://industryfusion.github.io/contexts/",
+        "source": "built_in",
+        "removable": false
+      }
+    ],
+    "editable": true,
+    "detail": null
+  }
+}

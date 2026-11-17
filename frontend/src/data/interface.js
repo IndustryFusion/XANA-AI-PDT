@@ -54,7 +54,7 @@ export const OPERATIONS = {
     'listCapabilityRequests', 'decideCapabilityRequest', 'setCapabilityPolicy', 'resolveNames', 'resolveBuilders', 'resolveMachines',
   ],
   ...(KNOWLEDGE_BASE_ENABLED ? { knowledgeBase: ['listDocuments', 'uploadDocument', 'getIngestJob', 'updateDescription', 'deleteDocument', 'query'] } : {}),
-  system: ['getHealth', 'getServiceSettings', 'saveServiceSettings'],
+  system: ['getHealth', 'getServiceSettings', 'saveServiceSettings', 'listAllowedContexts', 'checkContext', 'allowContext', 'removeAllowedContext'],
 }
 
 export const AREAS = Object.keys(OPERATIONS)
@@ -269,6 +269,13 @@ export const INGEST_STATES = ['queued', 'processing', 'done', 'failed']
 
 const user = { username: 'string', name: 'string', email: 'string' }
 
+/** The contexts an imported entity may name: `core`, `built_in`, `deployment` (configuration) or `added` here. */
+const allowedContexts = {
+  contexts: [{ url: 'string', source: { $enum: ['core', 'built_in', 'deployment', 'added'] }, removable: 'boolean' }],
+  editable: 'boolean',
+  detail: '?string',
+}
+
 const runSummary = {
   runId: 'string', incidentId: '?number', machineId: 'string', issue: 'string',
   status: { $enum: RUN_STATES }, startedAt: 'date', updatedAt: 'date', escalationRef: '?string', source: { $enum: RUN_SOURCES },
@@ -439,5 +446,10 @@ export const SHAPES = {
     },
     getServiceSettings: [serviceSetting],
     saveServiceSettings: [serviceSetting],
+    // The JSON-LD contexts an imported entity may name, by where they come from.
+    listAllowedContexts: allowedContexts,
+    checkContext: { risks: ['string'] },
+    allowContext: allowedContexts,
+    removeAllowedContext: allowedContexts,
   },
 }

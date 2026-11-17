@@ -217,3 +217,59 @@ describe('session', () => {
     expect(await within(await region('Session')).findByText('Sign-in not required')).toBeVisible()
   })
 })
+
+describe('allowed contexts', () => {
+  const card = () => screen.findByRole('list', { name: 'Allowed contexts' })
+
+  test('lists each allowed context with where it comes from', async () => {
+    open()
+    const list = await card()
+    const lines = within(list).getAllByRole('listitem').map((li) => li.textContent)
+    expect(lines[0]).toMatch(/ngsi-ld-core-context.*NGSI-LD core/)
+    expect(lines[1]).toMatch(/industryfusion\.github\.io\/contexts\/.*Built in/)
+    expect(lines.at(-1)).toMatch(/contexts\.example\.org\/factory\/.*Added here.*Remove/)
+    // Only added contexts can be removed.
+    expect(within(list).getAllByRole('button', { name: /^Remove / })).toHaveLength(1)
+  })
+
+  test('allowing a context warns about the risk first, and a plain-http one says more', async () => {
+    const user = userEvent.setup()
+    open()
+    await card()
+    const form = screen.getByRole('form', { name: 'Allow a context' })
+    await user.click(within(form).getByRole('button', { name: 'Allow…' }))
+    expect(within(form).getByRole('alert')).toHaveTextContent('Enter the context’s URL.')
+    await user.type(within(form).getByLabelText('Context URL'), 'http://contexts.example.net/c.jsonld')
+    await user.click(within(form).getByRole('button', { name: 'Allow…' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Allow this context?' })
+    expect(dialog).toHaveTextContent('the context broker fetches it from inside the platform, without checks')
+    expect(within(dialog).getByRole('alert')).toHaveTextContent('It is plain http')
+    await user.click(within(dialog).getByRole('button', { name: 'Allow anyway' }))
+    await waitFor(async () => expect(within(await card()).getByText('http://contexts.example.net/c.jsonld')).toBeVisible())
+    expect(await screen.findByText('Allowed: http://contexts.example.net/c.jsonld')).toBeVisible()
+  })
+
+  test('an https context without other risks is allowed with the general warning only', async () => {
+    const user = userEvent.setup()
+    open()
+    await card()
+    const form = screen.getByRole('form', { name: 'Allow a context' })
+    await user.type(within(form).getByLabelText('Context URL'), 'https://contexts.example.net/c.jsonld')
+    await user.click(within(form).getByRole('button', { name: 'Allow…' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Allow this context?' })
+    expect(within(dialog).queryByRole('alert')).toBeNull()
+    await user.click(within(dialog).getByRole('button', { name: 'Allow' }))
+    await waitFor(async () => expect(within(await card()).getByText('https://contexts.example.net/c.jsonld')).toBeVisible())
+  })
+
+  test('a context added here is removed after confirmation', async () => {
+    const user = userEvent.setup()
+    open()
+    const list = await card()
+    await user.click(within(list).getByRole('button', { name: 'Remove https://contexts.example.org/factory/' }))
+    const dialog = screen.getByRole('dialog', { name: 'Remove this allowed context?' })
+    expect(dialog).toHaveTextContent('Entities already in the broker stay as they are.')
+    await user.click(within(dialog).getByRole('button', { name: 'Remove' }))
+    await waitFor(async () => expect(within(await card()).queryByText('https://contexts.example.org/factory/')).toBeNull())
+  })
+})
