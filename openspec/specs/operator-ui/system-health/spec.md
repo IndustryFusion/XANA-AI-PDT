@@ -69,11 +69,15 @@ The health table SHALL show each check's probe and hint, when it has them.
 - **THEN** the table shows where it looked, and what to look at
 
 ### Requirement: Allowed contexts
-The System area SHALL list the contexts an imported entity may name, each with its source (NGSI-LD core, built in, deployment, added here), and SHALL let the operator add a context and remove one added here, after confirming. Before a context is added, it SHALL say that the broker fetches it from inside the platform and that its owner decides what names mean, and SHALL name the risks the backend reports for that address.
+The System area SHALL list the contexts an imported entity may name, each with its source (NGSI-LD core, built in, deployment, added here) and, for a built-in one, its label, and SHALL let an operator who may change the list add a context and remove one added here, after confirming. Before a context is added, it SHALL say that the broker fetches it from inside the platform and that its owner decides what names mean, and SHALL name the risks the backend reports for that address.
 
 #### Scenario: The list
 - **WHEN** the operator opens the System area
-- **THEN** the allowed contexts are listed with their source, and only those added here offer *Remove…*
+- **THEN** the allowed contexts are listed with their source, a built-in one with its label such as "Built in: schema.org", and only those added here offer *Remove…*
+
+#### Scenario: Without the role
+- **WHEN** the signed-in operator may not change the list
+- **THEN** the list is shown without *Allow…* and *Remove…*, and says which role may change it, such as "Only an operator with Factory-Admin on client scorpio can change this list."
 
 #### Scenario: Adding warns first
 - **WHEN** the operator enters `http://contexts.example.net/c.jsonld` and chooses *Allow…*
@@ -93,4 +97,4 @@ The System area SHALL list the contexts an imported entity may name, each with i
 
 #### Scenario: Not editable
 - **WHEN** the backend can't add contexts
-- **THEN** the list is shown without a way to add, and says why
+- **THEN** the list is shown without a way to add, and says why, whether or not the operator has the role

@@ -119,7 +119,7 @@ The backend SHALL create or replace a list of entities and report the result per
 
 #### Scenario: Context that isn't allowed
 - **WHEN** an entity names, at its top level, a remote context that isn't among the allowed contexts (*Allowed contexts*), whether it came from a file or a fetched document
-- **THEN** that entity fails, the request does not reach the context broker, and the reason points to the System area's allowed contexts; it names the context only when its address doesn't look internal
+- **THEN** that entity fails, the request does not reach the context broker, and the reason points to the System area's allowed contexts and says that an operator with `Factory-Admin` on the platform's client can allow it there; it names the context only when its address doesn't look internal
 
 #### Scenario: A context that can never be allowed
 - **WHEN** an entity names a context inside an attribute, or a context that an object context names or imports
@@ -466,11 +466,23 @@ An update that gives `unitCode` as `null` SHALL remove the unit from the attribu
 - **THEN** only that sub-attribute loses its unit
 
 ### Requirement: Allowed contexts
-The contexts an imported entity may name SHALL be the ETSI core context, a built-in list with the IFF contexts on `https://industryfusion.github.io/contexts/`, the deployment's (`NGSI_CONTEXT_URL`, `NGSI_ALLOWED_CONTEXTS`) and those added through `/api/ngsi/contexts`, kept in the memory database. An entry ending in `/` SHALL allow every context below it. `GET /api/ngsi/contexts` SHALL list them with their source.
+The contexts an imported entity may name SHALL be the ETSI core context, a built-in list (the IFF contexts and well-known vocabularies served by their own host), the deployment's (`NGSI_CONTEXT_URL`, `NGSI_ALLOWED_CONTEXTS`) and those added through `/api/ngsi/contexts`, kept in the memory database. An entry ending in `/` SHALL allow every context below it. `GET /api/ngsi/contexts` SHALL list them with their source and label, and say whether the operator may change the list.
 
 #### Scenario: Built in
 - **WHEN** an entity names `https://industryfusion.github.io/contexts/staging/opcua/v0.2/context.jsonld`, and nothing is configured
 - **THEN** it is imported
+
+#### Scenario: Well-known contexts built in
+- **WHEN** an entity names `https://schema.org/`, `https://smartdatamodels.org/context.jsonld`, `https://fiware.github.io/data-models/context.jsonld`, `https://www.w3.org/ns/odrl.jsonld`, `https://www.w3.org/2018/credentials/v1` or `https://ref.gs1.org/voc/data/gs1Voc.jsonld`, and nothing is configured
+- **THEN** its context is allowed
+
+#### Scenario: Redirect services aren't built in
+- **WHEN** an entity names `https://w3id.org/security/v2` or a context on `purl.org`, and nothing is configured
+- **THEN** it is refused
+
+#### Scenario: Others' content isn't built in
+- **WHEN** an entity names a file below `https://raw.githubusercontent.com/smart-data-models/` other than `https://raw.githubusercontent.com/smart-data-models/data-models/master/context.jsonld`, such as one at a fork's commit or a pull request's head, and nothing is configured
+- **THEN** it is refused
 
 #### Scenario: Below an entry only
 - **WHEN** the built-in entry is `https://industryfusion.github.io/contexts/`, and an entity names `https://industryfusion.github.io.evil.example/contexts/c`, or `https://industryfusion.github.io/contexts/../other/c`, with the `..` plain or percent-encoded
@@ -478,7 +490,7 @@ The contexts an imported entity may name SHALL be the ETSI core context, a built
 
 #### Scenario: Listed with their source
 - **WHEN** the list is asked for
-- **THEN** each context is given with its source, `core`, `built_in`, `deployment` or `added`, whether it can be removed, and whether contexts can be added here at all
+- **THEN** each context is given with its source, `core`, `built_in`, `deployment` or `added`, its label for the core and built-in ones (such as `schema.org`), whether it can be removed, whether contexts can be added here at all, whether the signed-in operator may change the list, and which role may
 
 #### Scenario: Another backend's change
 - **WHEN** a context was added through another backend of the same deployment
@@ -493,18 +505,26 @@ The contexts an imported entity may name SHALL be the ETSI core context, a built
 - **THEN** the other contexts still apply, those read last stay in force, and the list says that the added ones can't be read; once it can be read again, the list no longer says so
 
 ### Requirement: Allowing a context
-`POST /api/ngsi/contexts` SHALL add a context, with the signed-in user who added it, and `DELETE` SHALL remove one that was added. Only a plain http or https URL SHALL be taken. `GET /api/ngsi/contexts/risks` SHALL say what allowing it risks beyond trusting its owner: plain http, an address inside the network, or a host that can't be resolved. The backend SHALL only resolve the host for it, never connect to it.
+`POST /api/ngsi/contexts` SHALL add a context, with the signed-in user who added it, and `DELETE` SHALL remove one that was added, only for an operator whose token carries `Factory-Admin` on the platform's client; anyone else SHALL be refused as `unauthorized` (HTTP 403), with the role named. Only a plain http or https URL SHALL be taken. `GET /api/ngsi/contexts/risks` SHALL say, to such an operator only, what allowing it risks beyond trusting its owner, resolving the host only.
 
 #### Scenario: Added and removed
-- **WHEN** a client adds `https://example.org/c.jsonld`, then removes it
+- **WHEN** an operator with `Factory-Admin` adds `https://example.org/c.jsonld`, then removes it
 - **THEN** it is allowed, listed as `added`, then no longer allowed
 
+#### Scenario: Without the role
+- **WHEN** an operator without `Factory-Admin` on the platform's client, such as one with `Factory-Reader` only, adds or removes a context, or asks for an address's risks, through the UI or the API
+- **THEN** it is refused as `unauthorized` with HTTP 403, naming `Factory-Admin` and the client, nothing is stored or removed, and the list still answers, saying that the operator may not change it
+
+#### Scenario: Without sign-in
+- **WHEN** nobody is signed in, or the backend has no sign-in
+- **THEN** the list says that it may not be changed, and adding, removing and the risks check are refused as `unauthorized`; once an operator with `Factory-Admin` signs in, the list says that it may be changed, and they are taken
+
 #### Scenario: Not a plain URL
-- **WHEN** the URL isn't http or https, has no host, has a port that isn't a number from 0 to 65535, holds a user name, a password or spaces, or is longer than 2000 characters
+- **WHEN** an operator with `Factory-Admin` gives a URL that isn't http or https, has no host, has a port that isn't a number from 0 to 65535, holds a user name, a password or spaces, or is longer than 2000 characters
 - **THEN** it is refused as `invalid`, and nothing is stored
 
 #### Scenario: Allowed already
-- **WHEN** the URL is allowed already, such as one below the built-in entry
+- **WHEN** an operator with `Factory-Admin` adds a URL that is allowed already, such as one below the built-in entry
 - **THEN** it is refused as `invalid`
 
 #### Scenario: Not added here
