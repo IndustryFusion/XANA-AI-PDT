@@ -16,6 +16,7 @@
 
 import { useEffect, useId, useRef, useState } from 'react'
 import { entityLabel, entityMenuItems } from '../../app/EntityRef'
+import { headerOffset } from '../../app/reveal'
 import { useRoute } from '../../app/router'
 import { entities } from '../../data'
 import { useData } from '../../data/useData'
@@ -53,7 +54,7 @@ export const entityTitleShortened = (entity, id) => !(entity && displayName(enti
 /** Moves focus to an entity shown on its own (unnested or pinned) and brings it into view. */
 export function goToEntity(id) {
   const target = document.querySelector(`[data-own-place="${CSS.escape(id)}"]`)
-  target?.scrollIntoView?.({ block: 'start' })
+  if (target) window.scrollBy?.({ top: target.getBoundingClientRect().top - headerOffset() })
   target?.querySelector('.entity-node__toggle')?.focus()
 }
 
@@ -79,7 +80,7 @@ const instanceText = (name, dataset) => `${registry.shorten(name)}[${dataset ===
 
 export default function EntityNode({
   id, summary, depth = 0, chain = [], query, expanded: expandedProp, onExpandedChange,
-  current = false, listen, onChanged, onDeleted, standalone = false, refreshKey = 0,
+  current = false, arrived = false, listen, onChanged, onDeleted, standalone = false, refreshKey = 0,
   place = 'top', origin = null, nodeKey = id,
 }) {
   useRegistry()
@@ -122,10 +123,6 @@ export default function EntityNode({
   const notify = useToast()
 
   useEffect(() => { setOverrides({}) }, [result.data])
-
-  useEffect(() => {
-    if (current) ref.current?.scrollIntoView?.({ block: 'start' })
-  }, [current])
 
   // Only an expanded entity shows attributes, so only it listens; that includes one expanded in place.
   useEffect(() => {
@@ -296,7 +293,7 @@ export default function EntityNode({
 
   return (
     <article
-      className={`entity-node entity-node--depth-${depth % TINTS}${current ? ' entity-node--current' : ''}${pinned && !nested ? ' entity-node--pinned' : ''}`}
+      className={`entity-node entity-node--depth-${depth % TINTS}${current ? ' entity-node--current' : ''}${arrived ? ' entity-node--arrived' : ''}${pinned && !nested ? ' entity-node--pinned' : ''}`}
       data-entity={id} data-own-place={ownPlace ? id : undefined} aria-labelledby={ids.title} ref={ref}
     >
       <header className="entity-node__header" ref={headerRef} {...menu.triggerProps}>
@@ -317,6 +314,7 @@ export default function EntityNode({
         </Heading>
         {entity && <span className="kind-tag entity-node__type"><Iri value={entity.type} /></span>}
         {entity && <span className="entity-node__count">{count(attributes.length, 'attribute')}</span>}
+        {current && <span className="entity-node__selected" data-testid="selected-entity">Selected</span>}
         {pinned && !nested && <span className="entity-node__badge">Pinned</span>}
         <span className="entity-node__id"><Iri value={id} to={refTo(id)} /></span>
         <span className="entity-node__actions">

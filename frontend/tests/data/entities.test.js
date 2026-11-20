@@ -221,6 +221,29 @@ describe('import and bulk delete', () => {
     await expect(entities.importEntities({})).rejects.toMatchObject({ kind: 'invalid' })
   })
 
+  test('imports an attribute with several instances, checking each one', async () => {
+    const line = 'urn:ngsi-ld:ProductionLine:line-two'
+    const instances = [
+      { type: 'Relationship', object: MACHINE, datasetId: 'urn:ngsi-ld:Dataset:first' },
+      { type: 'Relationship', object: 'urn:ngsi-ld:Machine:chiller-01', datasetId: 'urn:ngsi-ld:Dataset:second' },
+    ]
+    const [ok, bad] = await entities.importEntities([
+      { id: line, type: 'ProductionLine', hasMachine: instances },
+      { id: `${line}-bad`, type: 'ProductionLine', hasMachine: [instances[0], { type: 'Relationship', datasetId: 'urn:ngsi-ld:Dataset:x' }] },
+    ])
+    expect(ok.result).toBe('created')
+    expect((await entities.getEntity(line)).hasMachine.map((i) => i.object)).toEqual([MACHINE, 'urn:ngsi-ld:Machine:chiller-01'])
+    expect(bad).toMatchObject({ result: 'failed', reason: 'Enter the target entity of hasMachine.' })
+    const [twice] = await entities.importEntities([
+      { id: `${line}-twice`, type: 'ProductionLine', hasMachine: [{ ...instances[0], datasetId: undefined }, { ...instances[1], datasetId: undefined }] },
+    ])
+    expect(twice).toMatchObject({ result: 'failed', reason: 'Each instance of hasMachine needs its own dataset.' })
+    const [nested] = await entities.importEntities([{ id: `${line}-nested`, type: 'ProductionLine', hasMachine: [instances] }])
+    expect(nested).toMatchObject({ result: 'failed', reason: 'Attribute hasMachine needs a type and a value.' })
+    await expect(entities.appendAttributes(line, { hasOperator: [{ type: 'Relationship', datasetId: 'urn:ngsi-ld:Dataset:a' }] }))
+      .rejects.toMatchObject({ kind: 'invalid', message: 'Enter the target entity of hasOperator.' })
+  })
+
   test('fetches only sample documents and makes no network requests', async () => {
     const { document } = await entities.fetchImportDocument('https://samples.example.org/ngsi-ld/line-d.json')
     expect(document).toHaveLength(3)

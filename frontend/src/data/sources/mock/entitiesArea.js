@@ -119,6 +119,15 @@ const clearNulls = (attribute) => { if (attribute && attribute.unitCode === null
 
 function validateAttribute(name, attr, existing, force = false) {
   if (!NAME.test(name) || RESERVED.includes(name)) throw err('invalid', `"${name}" is not a valid attribute name.`)
+  // An attribute with several instances, one per dataset, as the broker takes it: each instance is checked.
+  if (Array.isArray(attr)) {
+    if (attr.length === 0 || attr.some((instance) => Array.isArray(instance))) throw err('invalid', `Attribute ${name} needs a type and a value.`)
+    attr.forEach((instance) => validateAttribute(name, instance, null, force))
+    // As the broker: one default instance at most, and no dataset twice.
+    const datasets = attr.map((instance) => instance.datasetId ?? null)
+    if (new Set(datasets).size !== datasets.length) throw err('invalid', `Each instance of ${name} needs its own dataset.`)
+    return
+  }
   if (!isAttribute(attr) && !existing) throw err('invalid', `Attribute ${name} needs a type and a value.`)
   if (attr.type !== undefined && !ATTRIBUTE_TYPES.includes(attr.type)) throw err('invalid', `${attr.type} is not an NGSI-LD attribute type.`)
   const type = attr.type ?? existing?.type

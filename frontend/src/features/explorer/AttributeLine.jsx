@@ -94,13 +94,13 @@ export function ExpandControl({ open, count, noun, of, controls, onToggle, class
  * the target in place, a marker when the target is already shown above in
  * this branch, or a link to it when it was moved out of the tree.
  */
-function Targets({ inst, ctx, open, onToggle, origin }) {
+function Targets({ inst, ctx, open, onToggle, level }) {
   const unnested = useUnnested()
   return (
     <span className="attr-line__targets">
       {targetsOf(inst).map((target) => {
         const short = registry.shorten(target)
-        const out = unnested.find((u) => u.id === target && u.origin?.key === origin)
+        const out = unnested.find((u) => u.id === target && u.origin?.level === level)
         return (
           <span key={target} className="attr-line__target">
             <Iri value={target} to={ctx.refTo(target)} />
@@ -149,9 +149,13 @@ function valueText(inst) {
  */
 function Line({ name, path, inst, ctx, actions, multi = false, dataset = null, first = true }) {
   useRegistry()
-  const key = `${ctx.nodeKey}#${levelKey(name, path)}`
+  // The instances of a multi-attribute share the toggle of their sub-attributes (`levelId`), but each expands
+  // its own relationship targets in place: its dataset is part of `key`, so the targets expanded under one
+  // instance are not shown under the others.
+  const levelId = `${ctx.nodeKey}#${levelKey(name, path)}`
+  const key = `${levelId}${dataset ? `@${JSON.stringify(dataset)}` : ''}`
   const [editing, setEditing] = useState(false)
-  const [subsOpen, setSubsOpen] = useKept(`${key}|subs`, false)
+  const [subsOpen, setSubsOpen] = useKept(`${levelId}|subs`, false)
   const [nested, setNested] = useKept(`${key}|nested`, [])
   const [addingSub, setAddingSub] = useState(false)
   const subsId = useId()
@@ -173,13 +177,10 @@ function Line({ name, path, inst, ctx, actions, multi = false, dataset = null, f
   // The time series is the reference for alerts: say when it is ahead of the instance shown.
   const ahead = path.length === 0 ? timeSeriesAhead(ctx.stored, inst) : null
 
-  // A level above the focused line opens its sub-attributes; the line itself comes into view.
+  // A level above the focused line opens its sub-attributes. The explorer brings the line into view when a
+  // link opened it, and leaves the kept position on a return.
   useEffect(() => {
     if (focused === 'above') setSubsOpen(true)
-    // After the entity's own scroll and the explorer's kept scroll, which run later in this commit or the next frame.
-    if (focused !== 'line') return undefined
-    const frame = requestAnimationFrame(() => lineRef.current?.scrollIntoView?.({ block: 'center' }))
-    return () => cancelAnimationFrame(frame)
   }, [focused, setSubsOpen])
   const iriMember = editable && (editable[0] === 'object' || editable[0] === 'vocab' || (editable[0] === 'value' && kind === 'iri'))
 
@@ -233,7 +234,8 @@ function Line({ name, path, inst, ctx, actions, multi = false, dataset = null, f
   const numberText = isNumberText(inst.value)
   const raw = member === 'value' && iriOf(inst.value) ? iriOf(inst.value) : current
   const initial = iriMember && typeof raw === 'string' ? registry.shorten(raw) : raw
-  const unnested = useUnnested().filter((u) => u.origin?.key === key).map((u) => u.id)
+  // A target moved out of the tree is out for every instance of the line: it is shown in one place.
+  const unnested = useUnnested().filter((u) => u.origin?.level === levelId).map((u) => u.id)
 
   let value
   if (editing) {
@@ -245,7 +247,7 @@ function Line({ name, path, inst, ctx, actions, multi = false, dataset = null, f
       />
     )
   } else if (kind === 'relationship') {
-    value = <Targets inst={inst} ctx={ctx} open={nested} onToggle={toggleNested} origin={key} />
+    value = <Targets inst={inst} ctx={ctx} open={nested} onToggle={toggleNested} level={levelId} />
   } else if (editable && !linkValue) {
     value = (
       <button type="button" className="attr-line__value-btn" onClick={() => setEditing(true)}>
@@ -256,7 +258,9 @@ function Line({ name, path, inst, ctx, actions, multi = false, dataset = null, f
     value = <AttributeValue attr={inst} refTo={ctx.refTo} />
   }
 
-  const shownNested = nested.filter((target) => !unnested.includes(target))
+  // Only targets of this instance are expanded under it.
+  const ownTargets = kind === 'relationship' ? targetsOf(inst) : []
+  const shownNested = nested.filter((target) => ownTargets.includes(target) && !unnested.includes(target))
 
   return (
     <>
@@ -314,7 +318,7 @@ function Line({ name, path, inst, ctx, actions, multi = false, dataset = null, f
       </div>
       {shownNested.length > 0 && (
         <div className="attr-line__nested">
-          {shownNested.map((target) => <div key={target}>{ctx.renderNested(target, { key, parent: ctx.entityId, attribute: pathKey })}</div>)}
+          {shownNested.map((target) => <div key={target}>{ctx.renderNested(target, { key, level: levelId, parent: ctx.entityId, attribute: pathKey })}</div>)}
         </div>
       )}
       {addingSub && (

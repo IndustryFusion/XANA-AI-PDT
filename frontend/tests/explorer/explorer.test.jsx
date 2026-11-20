@@ -24,6 +24,8 @@ import { LIVE_UPDATE_MS } from '../../src/data/sources/mock/entitiesArea'
 import { MAX_DEPTH } from '../../src/features/explorer/AttributeLine'
 import { hasHistory, sameValue, statusOf, timeSeriesAhead } from '../../src/features/explorer/attributes'
 import ValueEditor from '../../src/features/explorer/ValueEditor'
+import DeleteByTypeDialog from '../../src/features/explorer/DeleteByTypeDialog'
+import { keepScroll, keptScroll } from '../../src/features/explorer/store'
 import { HIGHLIGHT_MS } from '../../src/features/explorer/EntityNode'
 import { renderApp, renderAppWith } from '../helpers'
 import { entities } from '../../src/data'
@@ -140,15 +142,19 @@ describe('entity nodes', () => {
   })
 
   test('opening an entity URL expands that node and scrolls it into view', async () => {
-    const scrolled = vi.fn()
-    Element.prototype.scrollIntoView = function scrollIntoView() { scrolled(this) }
+    // The opened node's top is moved just below the page's top (the sticky header is not rendered here).
+    const scrollBy = vi.spyOn(window, 'scrollBy').mockImplementation(() => {})
+    const rect = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function rect() {
+      return { top: this.dataset?.entity === MACHINE ? 400 : 0, bottom: 0 }
+    })
     try {
       openEntity(MACHINE, '?type=Machine')
       expect(await expandedNode('Press brake 01')).toBeVisible()
-      await waitFor(() => expect(scrolled).toHaveBeenCalledWith(node(MACHINE)))
+      await waitFor(() => expect(scrollBy).toHaveBeenCalledWith({ top: 400 - 12 }))
       expect(screen.getByRole('button', { name: 'Laser cutter 01' })).toHaveAttribute('aria-expanded', 'false')
     } finally {
-      delete Element.prototype.scrollIntoView
+      scrollBy.mockRestore()
+      rect.mockRestore()
     }
   })
 
@@ -263,6 +269,160 @@ describe('entity view', () => {
     expect(dialog).toHaveTextContent('the attribute’s other instances remain')
     await user.click(within(dialog).getByRole('button', { name: 'Delete' }))
     await waitFor(() => expect(entityStored(SENSOR).temperature).toMatchObject({ datasetId: 'urn:ngsi-ld:Dataset:outlet', value: 25 }))
+  })
+
+  test('each instance of a multi-relationship is unfolded on its own, with its own target', async () => {
+    const user = userEvent.setup()
+    openEntity(SENSOR)
+    store.update((s) => {
+      s.entities.find((e) => e.id === SENSOR).measures = [
+        { type: 'Relationship', object: CHILLER, datasetId: 'urn:ngsi-ld:Dataset:chiller' },
+        { type: 'Relationship', object: LINE_A, datasetId: 'urn:ngsi-ld:Dataset:line' },
+      ]
+      return s
+    })
+    await waitFor(() => expect(attribute('measures').querySelectorAll('.attr-line:not(.attr-line--note)')).toHaveLength(2))
+    const nestedIds = () => [...attribute('measures').querySelectorAll('.attr-line__nested [data-entity]')]
+      .filter((el) => !el.parentElement.closest('.attr-line__nested [data-entity]'))
+      .map((el) => el.getAttribute('data-entity'))
+    const expandChiller = within(attribute('measures')).getByRole('button', { name: `Expand ${CHILLER} in place` })
+    const expandLine = within(attribute('measures')).getByRole('button', { name: `Expand ${LINE_A} in place` })
+
+    await user.click(expandChiller)
+    await waitFor(() => expect(nestedIds()).toEqual([CHILLER]))
+    expect(expandChiller).toHaveAttribute('aria-expanded', 'true')
+    expect(expandLine).toHaveAttribute('aria-expanded', 'false')
+
+    await user.click(expandLine)
+    await waitFor(() => expect(nestedIds()).toEqual([CHILLER, LINE_A]))
+
+    await user.click(expandChiller)
+    await waitFor(() => expect(nestedIds()).toEqual([LINE_A]))
+    expect(expandLine).toHaveAttribute('aria-expanded', 'true')
+  })
+
+  test('a target moved out of the tree from one instance is in one place for every instance', async () => {
+    const user = userEvent.setup()
+    const scrollBy = vi.spyOn(window, 'scrollBy').mockImplementation(() => {})
+    try {
+      openEntity(SENSOR)
+      store.update((s) => {
+        s.entities.find((e) => e.id === SENSOR).measures = [
+          { type: 'Relationship', object: CHILLER, datasetId: 'urn:ngsi-ld:Dataset:a' },
+          { type: 'Relationship', object: CHILLER, datasetId: 'urn:ngsi-ld:Dataset:b' },
+        ]
+        return s
+      })
+      await waitFor(() => expect(attribute('measures').querySelectorAll('.attr-line:not(.attr-line--note)')).toHaveLength(2))
+      await user.click(within(attribute('measures')).getAllByRole('button', { name: `Expand ${CHILLER} in place` })[0])
+      await user.click(await screen.findByRole('button', { name: 'Unnest Process chiller 01' }))
+      await screen.findByRole('region', { name: 'Unnested entities' })
+      expect(within(attribute('measures')).queryAllByRole('button', { name: `Expand ${CHILLER} in place` })).toHaveLength(0)
+      const goTo = within(attribute('measures')).getAllByRole('button', { name: `Go to ${CHILLER}, moved out of the tree` })
+      expect(goTo).toHaveLength(2)
+      expect(document.querySelectorAll(`.attr-line__nested [data-entity="${CHILLER}"]`)).toHaveLength(0)
+      // Going to it puts its top below the sticky header (none here), not under it.
+      scrollBy.mockClear()
+      await user.click(goTo[1])
+      expect(scrollBy).toHaveBeenCalledWith({ top: -12 })
+    } finally {
+      scrollBy.mockRestore()
+    }
+  })
+
+  test('a link to the entity whose address the scroll position was kept at brings the entity into view', async () => {
+    keepScroll(paths.entity(MACHINE), 800)
+    const scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation(() => {})
+    const scrollBy = vi.spyOn(window, 'scrollBy').mockImplementation(() => {})
+    try {
+      openEntity(MACHINE)
+      await expandedNode('Press brake 01')
+      await waitFor(() => expect(scrollBy).toHaveBeenCalled())
+      expect(scrollTo).not.toHaveBeenCalledWith(0, 800)
+    } finally {
+      scrollTo.mockRestore()
+      scrollBy.mockRestore()
+    }
+  })
+
+  test('the kept position is restored only at the address it was kept at', async () => {
+    const scrollBy = vi.spyOn(window, 'scrollBy').mockImplementation(() => {})
+    try {
+      keepScroll(`${paths.explorer()}?type=Machine`, 900)
+      const { unmount } = open(`${paths.explorer()}?type=Sensor`)
+      await waitFor(async () => expect(await nodeHeadings()).toHaveLength(13))
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      expect(scrollBy).not.toHaveBeenCalledWith({ top: 900 })
+      unmount()
+      keepScroll(`${paths.explorer()}?type=Sensor`, 700)
+      open(`${paths.explorer()}?type=Sensor`)
+      await waitFor(() => expect(scrollBy).toHaveBeenCalledWith({ top: 700 }))
+    } finally {
+      scrollBy.mockRestore()
+    }
+  })
+
+  test('back inside the explorer to another entity neither brings it into view nor pulses', async () => {
+    const scrollBy = vi.spyOn(window, 'scrollBy').mockImplementation(() => {})
+    try {
+      openEntity(MACHINE)
+      await expandedNode('Press brake 01')
+      await waitFor(() => expect(scrollBy).toHaveBeenCalled())
+      window.dispatchEvent(new Event('wheel'))
+      scrollBy.mockClear()
+      act(() => {
+        window.history.pushState(null, '', paths.entity(SENSOR))
+        window.dispatchEvent(new PopStateEvent('popstate'))
+      })
+      await waitFor(() => expect(document.querySelector(`.entity-node--current[data-entity="${SENSOR}"]`)).not.toBeNull())
+      await new Promise((resolve) => setTimeout(resolve, 100))
+      expect(scrollBy).not.toHaveBeenCalled()
+      expect(document.querySelector('.entity-node--arrived')).toBeNull()
+    } finally {
+      scrollBy.mockRestore()
+    }
+  })
+
+  test('a later change of the query does not bring the opened entity into view again', async () => {
+    const scrollBy = vi.spyOn(window, 'scrollBy').mockImplementation(() => {})
+    try {
+      openEntity(MACHINE)
+      await expandedNode('Press brake 01')
+      await waitFor(() => expect(scrollBy).toHaveBeenCalled())
+      window.dispatchEvent(new Event('wheel'))
+      scrollBy.mockClear()
+      act(() => {
+        window.history.pushState(null, '', `${paths.entity(MACHINE)}?type=Machine`)
+        window.dispatchEvent(new PopStateEvent('popstate'))
+      })
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Laser cutter 01' })).toBeVisible())
+      await new Promise((resolve) => setTimeout(resolve, 100))
+      expect(scrollBy).not.toHaveBeenCalled()
+    } finally {
+      scrollBy.mockRestore()
+    }
+  })
+
+  test('the entity a link opens is marked as selected, and only that one', async () => {
+    openEntity(SENSOR)
+    const node = await waitFor(() => {
+      const el = document.querySelector(`.entity-node--current[data-entity="${SENSOR}"]`)
+      expect(el).not.toBeNull()
+      return el
+    })
+    expect(within(node).getByTestId('selected-entity')).toHaveTextContent('Selected')
+    expect(document.querySelectorAll('.entity-node--current')).toHaveLength(1)
+    expect(screen.getAllByTestId('selected-entity')).toHaveLength(1)
+  })
+
+  test('the scroll position is kept as the page scrolls, with the address', async () => {
+    openEntity(SENSOR)
+    await waitFor(() => expect(attribute('value')).not.toBeNull())
+    const address = `${window.location.pathname}${window.location.search}`
+    Object.defineProperty(window, 'scrollY', { configurable: true, value: 640 })
+    window.dispatchEvent(new Event('scroll'))
+    await waitFor(() => expect(keptScroll()).toEqual({ address, y: 640 }))
+    Object.defineProperty(window, 'scrollY', { configurable: true, value: 0 })
   })
 
   test('raw JSON can be shown and copied, and the URL names the entity', async () => {
@@ -1081,6 +1241,51 @@ describe('import and bulk delete', () => {
     expect(done).toHaveTextContent('Sensor: 13 entities deleted')
     expect(done).toHaveTextContent('Component: 18 entities deleted')
     expect(await within(await listRegion()).findByText('No entities matched the query.')).toBeVisible()
+  })
+
+  test('delete by type: "Select all types" selects every type, half-ticked when some are', async () => {
+    const user = userEvent.setup()
+    open(`${paths.explorer()}?type=Sensor`)
+    await waitFor(async () => expect(await nodeHeadings()).toHaveLength(13))
+    await user.click(screen.getByRole('button', { name: 'Delete by type…' }))
+    const dialog = screen.getByRole('dialog', { name: 'Delete entities by type' })
+    const all = within(dialog).getByRole('checkbox', { name: 'Select all types' })
+    const types = within(dialog).getAllByRole('checkbox').filter((box) => box !== all)
+    expect(types.length).toBeGreaterThan(1)
+    expect(all).not.toBeChecked()
+    expect(all.indeterminate).toBe(false)
+
+    await user.click(within(dialog).getByLabelText('Sensor'))
+    expect(all).not.toBeChecked()
+    expect(all.indeterminate).toBe(true)
+
+    await user.click(all)
+    expect(all).toBeChecked()
+    expect(all.indeterminate).toBe(false)
+    for (const box of types) expect(box).toBeChecked()
+
+    await user.click(all)
+    for (const box of types) expect(box).not.toBeChecked()
+    expect(within(dialog).getByRole('button', { name: 'Delete entities…' })).toBeDisabled()
+
+    await user.click(all)
+    await user.click(within(dialog).getByRole('button', { name: 'Delete entities…' }))
+    expect(dialog).toHaveTextContent('Sensor')
+    expect(dialog).toHaveTextContent('Component')
+    await user.click(within(dialog).getByRole('button', { name: 'Delete all' }))
+    const done = await within(dialog).findByRole('region', { name: 'Deleted entities' })
+    expect(within(done).getAllByRole('listitem')).toHaveLength(types.length)
+    expect(done).toHaveTextContent('Sensor: 13 entities deleted')
+    expect(done).toHaveTextContent('Component: 18 entities deleted')
+  })
+
+  test('delete by type: no "Select all types" for a single type', async () => {
+    const user = userEvent.setup()
+    render(<DeleteByTypeDialog open types={['https://example.org/Only']} onClose={() => {}} onDeleted={() => {}} />)
+    const dialog = screen.getByRole('dialog', { name: 'Delete entities by type' })
+    expect(within(dialog).queryByRole('checkbox', { name: 'Select all types' })).toBeNull()
+    await user.click(within(dialog).getAllByRole('checkbox')[0])
+    expect(within(dialog).getByRole('button', { name: 'Delete entities…' })).toBeEnabled()
   })
 })
 

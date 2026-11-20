@@ -14,7 +14,7 @@
 // limitations under the License.
 //
 
-import { useEffect, useId, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { entities } from '../../data'
 import { Button, Dialog } from '../../ui/components'
 import { Iri, shortenText } from './Iri'
@@ -40,6 +40,17 @@ export default function DeleteByTypeDialog({ open, types, onClose, onDeleted }) 
   }, [open])
 
   const toggle = (type) => setSelected((s) => (s.includes(type) ? s.filter((t) => t !== type) : [...s, type]))
+
+  // "Select all types": ticked when every listed type is selected, half-ticked
+  // when some are; it selects all of them, in the list's order, or none. The
+  // types are still sent by name, never as a wildcard the backend would refuse.
+  const allSelected = types.length > 0 && types.every((t) => selected.includes(t))
+  const someSelected = !allSelected && types.some((t) => selected.includes(t))
+  const selectAllRef = useRef(null)
+  useEffect(() => {
+    if (selectAllRef.current) selectAllRef.current.indeterminate = someSelected
+  }, [someSelected, step])
+  const toggleAll = () => setSelected(allSelected ? [] : [...types])
 
   async function remove() {
     setBusy(true)
@@ -70,6 +81,9 @@ export default function DeleteByTypeDialog({ open, types, onClose, onDeleted }) 
           <fieldset className="plain-fieldset stack" aria-labelledby={legendId}>
             <legend id={legendId} className="field__label">Entity types to delete</legend>
             {types.length === 0 && <p className="muted">There are no entity types.</p>}
+            {types.length > 1 && (
+              <label className="row"><input ref={selectAllRef} type="checkbox" checked={allSelected} onChange={toggleAll} /> <strong>Select all types</strong></label>
+            )}
             {types.map((t) => (
               <label key={t} className="row"><input type="checkbox" checked={selected.includes(t)} onChange={() => toggle(t)} /> <Iri value={t} /></label>
             ))}

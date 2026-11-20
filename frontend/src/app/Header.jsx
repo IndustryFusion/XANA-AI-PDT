@@ -37,7 +37,7 @@ export default function Header() {
         <ul>
           {NAV_ITEMS.map((item) => (
             <li key={item.area}>
-              <Link to={lastPath(item.area, item.path)} className="app-nav__link" aria-current={area === item.area ? 'page' : undefined}>
+              <Link to={lastPath(item.area, item.path)} kind="return" className="app-nav__link" aria-current={area === item.area ? 'page' : undefined}>
                 {item.label}
               </Link>
             </li>

@@ -18,7 +18,8 @@ import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from
 import { rememberPath } from '../../app/lastPath'
 import { useData } from '../../data/useData'
 import { entities } from '../../data'
-import { useRoute } from '../../app/router'
+import { isReturn, navigationKind, useRoute } from '../../app/router'
+import { headerOffset } from '../../app/reveal'
 import { Button, Card, DataView, EmptyState, ErrorState, StatusBadge } from '../../ui/components'
 import { formatTime } from '../../ui/format'
 import { IconButton, Popover } from '../../ui/icons'
@@ -73,6 +74,78 @@ function useContextPrefixes() {
       .then((answer) => { if (!cancelled) registry.loadContext(answer?.prefixes ?? []) }, () => { if (!cancelled) registry.loadContext([]) })
     return () => { cancelled = true }
   }, [])
+}
+
+/** How long an entity opened by a link is kept in view while the page around it loads. */
+export const REVEAL_MS = 2000
+/** How long the arrival pulse lasts: twice its 1.2 s animation. */
+export const ARRIVAL_MS = 2400
+const USER_SCROLLS = ['wheel', 'touchstart', 'keydown', 'mousedown']
+
+/**
+ * Moves the page each frame by `delta()` (how far it still has to go; null while there is nothing to place)
+ * for up to `within` ms, so a move the page's end cut short is completed once the page grows. Ends early
+ * when `done()` says so, and as soon as the operator scrolls: by wheel, touch, key or press, or any movement
+ * of the page this didn't make, such as dragging the scrollbar. The browser's scroll anchoring is off
+ * meanwhile, so the page moves only by this or by the operator. Calls `onEnd` once; returns the stop.
+ */
+export function holdScroll(delta, { within = REVEAL_MS, done = () => false, onEnd = () => {} } = {}) {
+  const root = document.documentElement
+  const anchoring = root.style.overflowAnchor
+  root.style.overflowAnchor = 'none'
+  let frame = null
+  let expectedY = null
+  let stopped = false
+  const started = performance.now()
+  const stop = () => {
+    if (stopped) return
+    stopped = true
+    if (frame != null) cancelAnimationFrame(frame)
+    USER_SCROLLS.forEach((type) => window.removeEventListener(type, stop))
+    root.style.overflowAnchor = anchoring
+    onEnd()
+  }
+  USER_SCROLLS.forEach((type) => window.addEventListener(type, stop, { passive: true }))
+  const step = () => {
+    frame = null
+    if (stopped) return
+    if (expectedY != null && Math.abs(window.scrollY - expectedY) > 1) {
+      stop()
+      return
+    }
+    const d = delta()
+    if (d != null && Math.abs(d) > 1) window.scrollBy?.({ top: d })
+    expectedY = window.scrollY
+    if (done() || performance.now() - started >= within) stop()
+    else frame = requestAnimationFrame(step)
+  }
+  frame = requestAnimationFrame(step)
+  return stop
+}
+
+/**
+ * Brings the entity `id` into view, and keeps it there for `within` ms while content loading around it moves
+ * it, until the operator scrolls: its focused attribute line in the middle of the space below the sticky
+ * header when the link named one, else the entity's top just below the header. It takes the entity's own
+ * node, the current one or one shown on its own (pinned or unnested), never a copy nested under another.
+ * Returns the function that stops it.
+ */
+export function revealEntity(id, within = REVEAL_MS) {
+  const selector = `.entity-node[data-entity="${CSS.escape(id)}"]`
+  return holdScroll(() => {
+    const node = document.querySelector(`${selector}.entity-node--current`) ?? document.querySelector(`${selector}[data-own-place]`)
+    if (!node) return null
+    const offset = headerOffset()
+    const line = node.querySelector('.attr-line--focused')
+    if (!line) return node.getBoundingClientRect().top - offset
+    const { top, bottom } = line.getBoundingClientRect()
+    return (top + bottom) / 2 - (offset + window.innerHeight) / 2
+  }, { within })
+}
+
+/** Scrolls back to `y`, again while the page is still too short for it, until it is there or the operator scrolls. */
+export function restoreScroll(y, onEnd) {
+  return holdScroll(() => y - window.scrollY, { done: () => Math.abs(window.scrollY - y) <= 1, onEnd })
 }
 
 /** Result list: matching entities as collapsible nodes, and an opened entity that is not among them. */
@@ -259,15 +332,88 @@ export default function DataExplorer() {
   })
   useEffect(() => { keepResults(resultsKey, list.data) }, [resultsKey, list.data])
 
-  // The scroll position is kept on leaving and restored after the first paint on return.
+  // The scroll position is kept as the page scrolls and whenever the address changes, with that address.
+  // Coming back through the main navigation or the browser's back and forward restores it at that address;
+  // any other way to an entity (a link from an alert, an incident or a reference, or within the explorer)
+  // brings that entity, or the attribute line the address names, into view instead.
+  const address = useRef(`${pathname}${search}`)
+  address.current = `${pathname}${search}`
+  // How each address was reached, taken when the address changes: a later navigation to the same address
+  // (the navigation entry while the results still load) doesn't change it.
+  const reachedBy = useRef({ address: null, kind: null })
+  if (reachedBy.current.address !== address.current) reachedBy.current = { address: address.current, kind: navigationKind() }
+  const returned = useRef(isReturn(reachedBy.current.kind))
+  const namedAtMount = useRef(!!entityId)
+  const restoring = useRef(false)
   useLayoutEffect(() => {
-    const y = keptScroll()
-    if (y != null) requestAnimationFrame(() => window.scrollTo?.(0, y))
-    return () => keepScroll(window.scrollY)
+    const kept = keptScroll()
+    const y = kept && kept.address === address.current ? kept.y : null
+    let stopRestore = null
+    if (y != null && (returned.current || !namedAtMount.current)) {
+      restoring.current = true
+      stopRestore = restoreScroll(y, () => { restoring.current = false })
+    }
+    // Once a frame while scrolling: by the time the explorer unmounts, the navigation to another area has
+    // already moved the page to the top. Only while the address is still the explorer's, and not while
+    // restoring, when a page still too short for the kept position would keep a shorter one.
+    let frame = null
+    const keep = () => {
+      if (frame != null) return
+      frame = requestAnimationFrame(() => {
+        frame = null
+        if (!restoring.current && `${window.location.pathname}${window.location.search}` === address.current) keepScroll(address.current, window.scrollY)
+      })
+    }
+    window.addEventListener('scroll', keep, { passive: true })
+    return () => {
+      stopRestore?.()
+      window.removeEventListener('scroll', keep)
+      if (frame != null) cancelAnimationFrame(frame)
+    }
   }, [])
+  // An address changed without scrolling (an entity expanded at the end of the list) is kept too.
+  const mounted = useRef(false)
+  useEffect(() => {
+    if (!mounted.current) {
+      mounted.current = true
+      return
+    }
+    if (!restoring.current) keepScroll(address.current, window.scrollY)
+  }, [pathname, search])
 
   const listed = list.data ?? []
   const settled = !hasCriteria(query) || list.data !== undefined || list.status === 'error'
+
+  // What the address names -- the entity and the attribute line -- is brought into view once per change, when
+  // the results are there, and kept there while what loads around it moves it. Not on a return or back and
+  // forward, where the kept position or the browser's applies. The pulse marks the arrival of an entity: not
+  // one the operator expanded in the list, nor another line of the entity already shown.
+  const named = entityId ? `${entityId}|${urlQuery.focus ?? ''}` : null
+  const revealed = useRef(returned.current ? named : null)
+  const expandedHere = useRef(null)
+  const [arrived, setArrived] = useState(null)
+  useEffect(() => {
+    if (!named) {
+      revealed.current = null
+      setArrived(null)
+      return undefined
+    }
+    if (!settled || revealed.current === named) return undefined
+    const sameEntity = revealed.current?.startsWith(`${entityId}|`) ?? false
+    revealed.current = named
+    const expanded = expandedHere.current === entityId
+    expandedHere.current = null
+    setArrived(null)
+    if (isReturn(reachedBy.current.kind)) return undefined
+    if (!expanded && !sameEntity) setArrived(entityId)
+    return revealEntity(entityId)
+  }, [named, entityId, settled])
+  // The pulse is over after ARRIVAL_MS; a node that mounts again later does not pulse again.
+  useEffect(() => {
+    if (!arrived) return undefined
+    const timer = setTimeout(() => setArrived(null), ARRIVAL_MS)
+    return () => clearTimeout(timer)
+  }, [arrived])
   const standalone = entityId && settled && !listed.some((e) => e.id === entityId) && !pins.includes(entityId) ? entityId : null
   const ownIds = [...pins, ...unnested.map((u) => u.id)]
   const shownIds = [...listed.map((e) => e.id), ...(standalone ? [standalone] : [])].filter((id) => expanded.includes(id))
@@ -279,7 +425,10 @@ export default function DataExplorer() {
 
   function setNodeExpanded(id, open) {
     setExpanded((s) => (open ? (s.includes(id) ? s : [...s, id]) : s.filter((x) => x !== id)))
-    if (open && id !== entityId) navigate(entityPath(id, query), { scroll: false })
+    if (open && id !== entityId) {
+      expandedHere.current = id
+      navigate(entityPath(id, query), { scroll: false })
+    }
     if (!open && id === entityId) navigate(explorerPath(query), { replace: true, scroll: false })
   }
 
@@ -301,6 +450,7 @@ export default function DataExplorer() {
         expanded={top ? expanded.includes(id) : undefined}
         onExpandedChange={top ? (open) => setNodeExpanded(id, open) : undefined}
         current={top && id === entityId}
+        arrived={top && id === arrived}
         listen={live.listen}
         refreshKey={refreshKey}
         onChanged={refresh}

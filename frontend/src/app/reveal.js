@@ -18,6 +18,9 @@ import { useEffect, useRef } from 'react'
 
 const GAP = 12
 
+/** Where the top of revealed content goes: just below the sticky header. */
+export const headerOffset = () => (document.querySelector('.app-header')?.getBoundingClientRect().bottom ?? 0) + GAP
+
 /**
  * When `key` changes (another item was selected in the same area), scrolls
  * the page so the element's top shows just below the sticky header, if it
@@ -31,7 +34,7 @@ export function useRevealOnChange(ref, key) {
     previous.current = key
     const el = ref.current
     if (!el) return
-    const offset = (document.querySelector('.app-header')?.getBoundingClientRect().bottom ?? 0) + GAP
+    const offset = headerOffset()
     const { top } = el.getBoundingClientRect()
     if (top < offset || top > window.innerHeight - 80) window.scrollBy?.({ top: top - offset })
   }, [ref, key])

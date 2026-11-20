@@ -118,8 +118,9 @@ export function startQuery(key) {
 
 /* ── Scroll ──────────────────────────────────────────────────────────── */
 
+/** The kept scroll position and the address (path and search) it was kept at, as `{ address, y }`, or null. */
 export const keptScroll = () => state.scroll
-export const keepScroll = (y) => { state.scroll = y }
+export const keepScroll = (address, y) => { state.scroll = { address, y } }
 
 /* ── Unnested entities ───────────────────────────────────────────────── */
 

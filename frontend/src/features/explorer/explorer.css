@@ -87,7 +87,31 @@
 .entity-node--depth-2 { --node-tone: var(--tone-success); }
 .entity-node--depth-3 { --node-tone: var(--tone-special); }
 .entity-node--depth-4 { --node-tone: var(--tone-warning); }
-.entity-node--current { box-shadow: 0 0 0 1px var(--node-tone); }
+/*
+ * The entity the address names (a link opened it, or it was expanded in the list): a thick accent frame, a tinted header
+ * and a "Selected" chip, so it stands out among the results without relying on colour alone; when it
+ * arrives (not when expanded in the list, nor on a return) the frame pulses briefly, not with reduced motion.
+ */
+.entity-node--current {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent), 0 0 0 6px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.entity-node--current > .entity-node__header { background: color-mix(in srgb, var(--accent) var(--tint), var(--surface)); }
+.entity-node__selected {
+  font-size: var(--text-xs);
+  font-weight: 700;
+  color: var(--surface);
+  background: var(--accent);
+  border-radius: 999px;
+  padding: 0.1rem 0.55rem;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .entity-node--arrived { animation: entity-node-arrive 1.2s ease-out 2; }
+}
+@keyframes entity-node-arrive {
+  0% { box-shadow: 0 0 0 2px var(--accent), 0 0 0 14px color-mix(in srgb, var(--accent) 45%, transparent); }
+  100% { box-shadow: 0 0 0 2px var(--accent), 0 0 0 6px color-mix(in srgb, var(--accent) 22%, transparent); }
+}
 
 .entity-node--missing, .entity-node--problem { --node-tone: var(--tone-danger); padding: var(--space-3) var(--space-4); }
 .entity-node--problem { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); font-size: var(--text-sm); }

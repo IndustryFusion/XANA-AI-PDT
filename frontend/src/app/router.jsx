@@ -95,11 +95,31 @@ function currentLocation() {
   return { pathname: window.location.pathname, search: window.location.search }
 }
 
+/*
+ * How the current address was reached: `load` (opened or reloaded), `push` (a link or a navigation in an
+ * area), `return` (the main navigation's entry, which goes back to an area's last place) or `pop` (the
+ * browser's back and forward). Areas that keep their place restore it on `return` and `pop`.
+ */
+let lastNavigation = 'load'
+
+/** The kind of the navigation that reached the current address. */
+export const navigationKind = () => lastNavigation
+
+/** Whether a navigation of this kind goes back to a kept place: the main navigation's entries, back and forward. */
+export const isReturn = (kind) => kind === 'return' || kind === 'pop'
+
 export function RouterProvider({ children }) {
-  const [location, setLocation] = useState(currentLocation)
+  const [location, setLocation] = useState(() => {
+    // A new router is a new page: opened or reloaded.
+    lastNavigation = 'load'
+    return currentLocation()
+  })
 
   useEffect(() => {
-    const onPop = () => setLocation(currentLocation())
+    const onPop = () => {
+      lastNavigation = 'pop'
+      setLocation(currentLocation())
+    }
     window.addEventListener('popstate', onPop)
     return () => window.removeEventListener('popstate', onPop)
   }, [])
@@ -107,12 +127,14 @@ export function RouterProvider({ children }) {
   /**
    * Goes to `to`. Moving to another area starts at the top of the page;
    * within an area (selecting an item, changing a filter) the page keeps its
-   * scroll position. `scroll: true | false` overrides this.
+   * scroll position. `scroll: true | false` overrides this. `kind: 'return'`
+   * marks a return to an area's last place (the main navigation's entries).
    */
-  const navigate = useCallback((to, { replace = false, scroll } = {}) => {
+  const navigate = useCallback((to, { replace = false, scroll, kind = 'push' } = {}) => {
     const url = new URL(to, window.location.origin)
     const next = { pathname: url.pathname, search: url.search }
     const toTop = scroll ?? matchRoute(url.pathname)?.area !== matchRoute(window.location.pathname)?.area
+    lastNavigation = kind
     if (replace) window.history.replaceState(null, '', to)
     else window.history.pushState(null, '', to)
     setLocation(next)
@@ -140,13 +162,13 @@ export function useRoute() {
 }
 
 /** In-app link: plain anchor for the browser, client-side navigation on click. */
-export function Link({ to, onClick, children, ...props }) {
+export function Link({ to, kind, onClick, children, ...props }) {
   const { navigate } = useRoute()
   function handleClick(e) {
     onClick?.(e)
     if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
     e.preventDefault()
-    navigate(to)
+    navigate(to, { kind })
   }
   return <a href={to} onClick={handleClick} {...props}>{children}</a>
 }
