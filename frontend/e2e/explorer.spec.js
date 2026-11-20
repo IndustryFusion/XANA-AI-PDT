@@ -408,3 +408,14 @@ test('an entity opened in the middle of a long list comes to the top below the s
   }).toBeGreaterThanOrEqual(0)
   await expect(target.getByText('Selected', { exact: true })).toBeInViewport()
 })
+
+test('expand all relationships of an entity shows its tree in place, and collapse all folds it', async ({ page }) => {
+  await page.goto(`/explorer/${encodeURIComponent(SENSOR)}?type=Sensor`)
+  const sensor = page.locator(`.entity-node--current[data-entity="${SENSOR}"]`)
+  await expect(sensor.locator('[data-attribute="measures"]')).toBeVisible()
+  await sensor.getByRole('button', { name: 'Expand all relationships of Process chiller 01 flow' }).click()
+  await expect(sensor.locator(`.attr-line__nested [data-entity="${CHILLER}"]`)).toBeVisible()
+  await expect(sensor.locator('.attr-line__nested [data-entity="urn:ngsi-ld:ProductionLine:line-a"]').first()).toBeVisible()
+  await sensor.getByRole('button', { name: 'Collapse all in Process chiller 01 flow' }).first().click()
+  await expect(sensor.locator('.attr-line__nested [data-entity]')).toHaveCount(0)
+})

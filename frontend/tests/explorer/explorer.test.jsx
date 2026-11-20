@@ -425,6 +425,71 @@ describe('entity view', () => {
     Object.defineProperty(window, 'scrollY', { configurable: true, value: 0 })
   })
 
+  test('expand all relationships shows the whole tree in place, and collapse all folds it again', async () => {
+    const user = userEvent.setup()
+    openEntity(SENSOR)
+    await expandedNode('Process chiller 01 flow')
+    const sensor = node(SENSOR)
+    const nestedIds = () => [...sensor.querySelectorAll('.attr-line__nested [data-entity]')].map((el) => el.dataset.entity)
+    await user.click(within(sensor).getByRole('button', { name: 'Expand all relationships of Process chiller 01 flow' }))
+    // The chiller under the sensor, and the chiller's own line under it, as they load.
+    await waitFor(() => expect(nestedIds()).toEqual(expect.arrayContaining([CHILLER, LINE_A])))
+    const chiller = sensor.querySelector(`.attr-line__nested [data-entity="${CHILLER}"]`)
+    // A relationship back to an entity already shown above is marked, not expanded again.
+    if (attribute('monitoredBy', chiller)) expect(attribute('monitoredBy', chiller)).toHaveTextContent('shown above')
+    await user.click(within(sensor).getAllByRole('button', { name: 'Collapse all in Process chiller 01 flow' })[0])
+    await waitFor(() => expect(nestedIds()).toEqual([]))
+    expect(within(attribute('measures', sensor)).getByRole('button', { name: `Expand ${CHILLER} in place` })).toHaveAttribute('aria-expanded', 'false')
+  })
+
+  test('expand all expands an entity once in the tree, however many relationships lead to it', async () => {
+    const user = userEvent.setup()
+    openEntity(SENSOR)
+    store.update((s) => {
+      s.entities.find((e) => e.id === SENSOR).alsoMeasures = { type: 'Relationship', object: CHILLER }
+      return s
+    })
+    await waitFor(() => expect(attribute('alsoMeasures')).not.toBeNull())
+    const sensor = node(SENSOR)
+    await user.click(within(sensor).getByRole('button', { name: 'Expand all relationships of Process chiller 01 flow' }))
+    await waitFor(() => expect(sensor.querySelector(`.attr-line__nested [data-entity="${LINE_A}"]`)).not.toBeNull())
+    expect(sensor.querySelectorAll(`.attr-line__nested [data-entity="${CHILLER}"]`)).toHaveLength(1)
+    // The other relationship to it stays a line that can be expanded by hand.
+    const lines = [attribute('measures', sensor), attribute('alsoMeasures', sensor)]
+    const expandedHere = lines.map((line) => !!line.querySelector(`.attr-line__nested [data-entity="${CHILLER}"]`))
+    expect(expandedHere.filter(Boolean)).toHaveLength(1)
+    const other = lines[expandedHere.indexOf(false)]
+    expect(within(other).getByRole('button', { name: `Expand ${CHILLER} in place` })).toHaveAttribute('aria-expanded', 'false')
+  })
+
+  test('collapse all also closes the raw JSON and the history panes', async () => {
+    const user = userEvent.setup()
+    openEntity(SENSOR)
+    await expandedNode('Process chiller 01 flow')
+    const sensor = node(SENSOR)
+    await user.click(within(sensor).getByRole('button', { name: 'History of value' }))
+    expect(await screen.findByRole('heading', { name: 'History of value' })).toBeVisible()
+    await user.click(within(sensor).getByRole('button', { name: 'Raw JSON of Process chiller 01 flow' }))
+    expect(await screen.findByLabelText('Entity JSON')).toBeVisible()
+    await user.click(within(sensor).getAllByRole('button', { name: 'Collapse all in Process chiller 01 flow' })[0])
+    await waitFor(() => expect(screen.queryByLabelText('Entity JSON')).toBeNull())
+    expect(screen.queryByRole('heading', { name: 'History of value' })).toBeNull()
+  })
+
+  test('collapse all on a nested entity folds it back into its relationship line, with all inside it', async () => {
+    const user = userEvent.setup()
+    openEntity(SENSOR)
+    await expandedNode('Process chiller 01 flow')
+    const sensor = node(SENSOR)
+    await user.click(within(sensor).getByRole('button', { name: 'Expand all relationships of Process chiller 01 flow' }))
+    await waitFor(() => expect(sensor.querySelector(`.attr-line__nested [data-entity="${LINE_A}"]`)).not.toBeNull())
+    const chiller = sensor.querySelector(`.attr-line__nested [data-entity="${CHILLER}"]`)
+    await user.click(within(chiller).getAllByRole('button', { name: 'Collapse all in Process chiller 01' })[0])
+    await waitFor(() => expect(sensor.querySelector(`.attr-line__nested [data-entity="${CHILLER}"]`)).toBeNull())
+    expect(sensor.querySelector(`.attr-line__nested [data-entity="${LINE_A}"]`)).toBeNull()
+    expect(within(attribute('measures', sensor)).getByRole('button', { name: `Expand ${CHILLER} in place` })).toHaveAttribute('aria-expanded', 'false')
+  })
+
   test('raw JSON can be shown and copied, and the URL names the entity', async () => {
     const user = userEvent.setup()
     openEntity(MACHINE)

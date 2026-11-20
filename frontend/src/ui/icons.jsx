@@ -36,6 +36,8 @@ const GLYPHS = {
   chevronDown: <path d="M3.5 6L8 10.5 12.5 6" />,
   expand: <><path d="M2.5 6V2.5H6" /><path d="M10 13.5h3.5V10" /><path d="M2.5 2.5L7 7" /><path d="M13.5 13.5L9 9" /></>,
   collapse: <><path d="M7 3.5V7H3.5" /><path d="M9 12.5V9h3.5" /><path d="M2.5 2.5L7 7" /><path d="M13.5 13.5L9 9" /></>,
+  expandAll: <><path d="M4 3.5L8 7.5 12 3.5" /><path d="M4 8.5L8 12.5 12 8.5" /></>,
+  collapseAll: <><path d="M4 7.5L8 3.5 12 7.5" /><path d="M4 12.5L8 8.5 12 12.5" /></>,
   close: <><path d="M4 4l8 8" /><path d="M12 4l-8 8" /></>,
   copy: <><rect x="5.5" y="5.5" width="8" height="8" rx="1" /><path d="M10.5 5.5v-2a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2" /></>,
   save: <path d="M3 8.5l3.5 3.5L13 4.5" />,

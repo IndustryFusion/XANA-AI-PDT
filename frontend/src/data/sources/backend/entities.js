@@ -25,6 +25,73 @@ import { socketUrl } from './runs'
 const AREA = 'entities'
 const raw = { raw: true }
 
+/** IDs per request when many entities are read at once: few enough that one request stays short. */
+export const MAX_IDS = 100
+/** IDs per request for many entities' latest states: each is read from the time series, so fewer. */
+export const MAX_STATUS_IDS = 20
+
+/**
+ * Reads asked for in the same task go out together: one ID by its own request, as always; several in one
+ * request to the backend's `…-by-id` endpoint, `size` IDs at a time, each caller getting its own answer. A tree
+ * of entities expanding at once thus reads a level in one request instead of one per entity. An ID the answer
+ * leaves out gets `missing(id)`: rejected if it is an error, answered otherwise, as its single read would be.
+ */
+function batched(readOne, readMany, missing, size) {
+  let pending = null
+  async function flush() {
+    const waiting = pending
+    pending = null
+    const ids = [...waiting.keys()]
+    const settle = (id, ok, value) => waiting.get(id).forEach((caller) => (ok ? caller.resolve(value) : caller.reject(value)))
+    if (ids.length === 1) {
+      try {
+        settle(ids[0], true, await readOne(ids[0]))
+      } catch (error) {
+        settle(ids[0], false, error)
+      }
+      return
+    }
+    const chunks = []
+    for (let start = 0; start < ids.length; start += size) chunks.push(ids.slice(start, start + size))
+    // The chunks go out together, each answering its own callers.
+    await Promise.all(chunks.map(async (chunk) => {
+      try {
+        const found = await readMany(chunk)
+        chunk.forEach((id) => {
+          if (Object.hasOwn(found, id)) settle(id, true, found[id])
+          else {
+            const answer = missing(id)
+            settle(id, !(answer instanceof Error), answer)
+          }
+        })
+      } catch (error) {
+        chunk.forEach((id) => settle(id, false, error))
+      }
+    }))
+  }
+  return (id) => new Promise((resolve, reject) => {
+    if (!pending) {
+      pending = new Map()
+      setTimeout(flush, 0)
+    }
+    if (!pending.has(id)) pending.set(id, [])
+    pending.get(id).push({ resolve, reject })
+  })
+}
+
+const readEntity = batched(
+  (id) => request(AREA, 'GET', `/api/ngsi/entities/${seg(id)}`, raw),
+  (ids) => request(AREA, 'POST', '/api/ngsi/entities-by-id', { ...raw, body: { ids } }),
+  (id) => new DataError(AREA, 'not_found', `There is no entity ${id}.`),
+  MAX_IDS,
+)
+const readStatus = batched(
+  (id) => request(AREA, 'GET', '/api/ngsi/attr-status', { ...raw, params: { entity_id: id } }),
+  (ids) => request(AREA, 'POST', '/api/ngsi/attr-status-by-id', { ...raw, body: { ids } }),
+  () => ({}),
+  MAX_STATUS_IDS,
+)
+
 /** The stream of changes: it ends with one `error` event, and the screen resubscribes when health says `ok`. */
 function subscribeEntities({ type, ids } = {}, onEvent) {
   const params = new URLSearchParams()
@@ -76,7 +143,7 @@ export const entities = {
   listTypes: () => request(AREA, 'GET', '/api/ngsi/types', raw),
   listAttributes: () => request(AREA, 'GET', '/api/ngsi/attributes', raw),
   queryEntities: (query) => request(AREA, 'GET', '/api/ngsi/entities', { ...raw, params: pagedParams(query) }),
-  getEntity: (id) => request(AREA, 'GET', `/api/ngsi/entities/${seg(id)}`, raw),
+  getEntity: (id) => readEntity(id),
   // With `path`, `attrs` holds one attribute whose fragment applies at that path of sub-attributes below it, in the
   // instance of `datasetId`. A fragment without a path names its instance by its own `datasetId`. `force` writes a
   // value the checks refuse, when the operator insists. `exact` writes the value in the form given, as the datatype
@@ -96,7 +163,7 @@ export const entities = {
   deleteByTypes: (types) => request(AREA, 'POST', '/api/ngsi/delete-by-types', { ...raw, body: { types: [].concat(types) } }),
   getAttributeHistory: (id, name, { from, to, path } = {}) =>
     request(AREA, 'GET', '/api/ngsi/history', { ...raw, params: { entity_id: id, attribute: name, from, to, path } }),
-  getAttributeStatus: (id) => request(AREA, 'GET', '/api/ngsi/attr-status', { ...raw, params: { entity_id: id } }),
+  getAttributeStatus: (id) => readStatus(id),
   listTypesAt: (at) => request(AREA, 'GET', '/api/ngsi/timeshift/types', { ...raw, params: { at } }),
   queryEntitiesAt: (at, query) =>
     request(AREA, 'GET', '/api/ngsi/timeshift/entities', { ...raw, params: { at, ...queryParams(query) } }),

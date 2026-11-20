@@ -28,7 +28,7 @@ import AddAttributeForm from './AddAttributeForm'
 import HistoryPane from './HistoryPane'
 import { Iri, nameItems, useCopy, useFullIri, useRegistry } from './Iri'
 import { isHttpIri, registry } from './prefixes'
-import { useKept, useUnnested } from './store'
+import { claimTargets, takeLine, useExpandingAll, useKept, useUnnested } from './store'
 import ValueEditor, { NUMBER_TEXT_HINT } from './ValueEditor'
 
 /** Deepest nesting of relationship targets expanded in place. */
@@ -236,6 +236,24 @@ function Line({ name, path, inst, ctx, actions, multi = false, dataset = null, f
   const initial = iriMember && typeof raw === 'string' ? registry.shorten(raw) : raw
   // A target moved out of the tree is out for every instance of the line: it is shown in one place.
   const unnested = useUnnested().filter((u) => u.origin?.level === levelId).map((u) => u.id)
+
+  // Expand all relationships of an entity: once the line is in such a tree, it opens its sub-attributes and
+  // expands its own targets -- not one shown above it, moved out of the tree or beyond the nesting limit --
+  // and the nested entities do the same as they load. Once: a target collapsed by hand stays collapsed.
+  const expandingAll = useExpandingAll(ctx.nodeKey)
+  const subCount = subAttributesOf(inst).length
+  const expandable = kind === 'relationship' && ctx.depth < MAX_DEPTH
+    ? targetsOf(inst).filter((target) => !ctx.chain.includes(target) && !unnested.includes(target))
+    : []
+  const expandableKey = expandable.join(' ')
+  useEffect(() => {
+    // Once per line in the tree, kept by the tree: a line mounting again expands nothing anew.
+    if (!expandingAll || !takeLine(ctx.nodeKey, key)) return
+    if (subCount > 0) setSubsOpen(true)
+    // Each entity once in the tree: one already expanded at another place stays a line here.
+    const fresh = expandableKey ? claimTargets(ctx.nodeKey, expandableKey.split(' ')) : []
+    if (fresh.length) setNested((list) => [...new Set([...list, ...fresh])])
+  }, [expandingAll, subCount, expandableKey, setSubsOpen, setNested, ctx.nodeKey, key])
 
   let value
   if (editing) {

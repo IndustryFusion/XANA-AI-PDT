@@ -346,6 +346,47 @@ describe('entities', () => {
     expect(await entities.queryEntities({ type: 'T' })).toEqual([entity])
   })
 
+  test('entities asked for in the same task are read in one request; one alone by its own', async () => {
+    const a = { id: 'urn:a', type: 'T' }
+    const b = { id: 'urn:b', type: 'T' }
+    const fn = fakeFetch({ 'POST /api/ngsi/entities-by-id': { body: { 'urn:a': a, 'urn:b': b } }, 'GET /api/ngsi/entities/urn%3Aa': { body: a } })
+    const [gotA, gotB, gotAAgain, missing] = await Promise.allSettled([
+      entities.getEntity('urn:a'), entities.getEntity('urn:b'), entities.getEntity('urn:a'), entities.getEntity('urn:none'),
+    ])
+    expect([gotA.value, gotB.value, gotAAgain.value]).toEqual([a, b, a])
+    expect(missing.reason).toMatchObject({ kind: 'not_found' })
+    expect(fn.calls).toHaveLength(1)
+    expect(fn.calls[0]).toMatchObject({ key: 'POST /api/ngsi/entities-by-id', body: { ids: ['urn:a', 'urn:b', 'urn:none'] } })
+    expect(await entities.getEntity('urn:a')).toEqual(a)
+    expect(fn.calls[1].key).toBe('GET /api/ngsi/entities/urn%3Aa')
+  })
+
+  test('an entity the answer for many latest states leaves out has no states, as when read alone', async () => {
+    fakeFetch({ 'POST /api/ngsi/attr-status-by-id': { body: { 'urn:a': { x: { deleted: false } } } } })
+    const [a, b] = await Promise.all([entities.getAttributeStatus('urn:a'), entities.getAttributeStatus('urn:b')])
+    expect(a).toEqual({ x: { deleted: false } })
+    expect(b).toEqual({})
+  })
+
+  test('many entities go in requests of at most 100 IDs, and a prototype name is not taken for an answer', async () => {
+    const ids = Array.from({ length: 150 }, (_, i) => `urn:n:${i}`)
+    const fn = fakeFetch({ 'POST /api/ngsi/entities-by-id': { body: {} } })
+    const answers = await Promise.allSettled([...ids, 'toString'].map((id) => entities.getEntity(id)))
+    expect(fn.calls.map((c) => c.body.ids.length)).toEqual([100, 51])
+    expect(answers.at(-1).reason).toMatchObject({ kind: 'not_found' })
+  })
+
+  test('attribute states asked for together are read in one request, and a failure reaches every caller', async () => {
+    const fn = fakeFetch({ 'POST /api/ngsi/attr-status-by-id': { body: { 'urn:a': { x: { deleted: false } }, 'urn:b': {} } } })
+    const [a, b] = await Promise.all([entities.getAttributeStatus('urn:a'), entities.getAttributeStatus('urn:b')])
+    expect(a).toEqual({ x: { deleted: false } })
+    expect(b).toEqual({})
+    expect(fn).toHaveBeenCalledTimes(1)
+    fakeFetch({ 'POST /api/ngsi/attr-status-by-id': { status: 502, body: { error: { kind: 'unavailable', message: 'down' } } } })
+    const failed = await Promise.allSettled([entities.getAttributeStatus('urn:a'), entities.getAttributeStatus('urn:b')])
+    expect(failed.map((r) => r.status)).toEqual(['rejected', 'rejected'])
+  })
+
   test('edits send attribute names unchanged, to the entity encoded as one path segment', async () => {
     const fn = fakeFetch({ 'PATCH /api/ngsi/entities/urn%3Am%2Fx/attrs': { status: 204 } })
     await entities.updateAttributes('urn:m/x', { maxTemp_a: { value: 1 } })

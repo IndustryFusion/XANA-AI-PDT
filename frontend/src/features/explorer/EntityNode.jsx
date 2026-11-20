@@ -32,7 +32,7 @@ import { isHttpIri, registry } from './prefixes'
 import { entityPath, readFocus } from './query'
 import { applyChanges } from './rawEdit'
 import RawJsonEditor from './RawJsonEditor'
-import { pin, renest, toggleSelected, unnest, unpin, useKept, usePins, useSelection } from './store'
+import { collapseAll, collapseNested, expandAllRelationships, takeLine, useExpandingAll, pin, renest, toggleSelected, unnest, unpin, useKept, usePins, useSelection } from './store'
 
 /** The time series records a change asynchronously; its state is read again at these delays after it. */
 export const STATUS_RECHECK_MS = [2000, 6000]
@@ -92,6 +92,12 @@ export default function EntityNode({
   const [ownExpanded, setOwnExpanded] = useKept(`${at ?? ''}|${nodeKey}|open`, place !== 'pinned')
   const expanded = expandedProp ?? ownExpanded
   const setExpanded = (next) => (onExpandedChange ? onExpandedChange(next) : setOwnExpanded(next))
+  // In a tree whose relationships are all being expanded, an entity folded by hand opens, once per tree: it
+  // takes its place when expand all reaches it, open or not, so folding it later sticks.
+  const expandingTree = useExpandingAll(nodeKey)
+  useEffect(() => {
+    if (place === 'nested' && expandingTree && takeLine(nodeKey, `${nodeKey}|node`) && !expanded) setExpanded(true)
+  }, [expandingTree]) // eslint-disable-line react-hooks/exhaustive-deps
   const pins = usePins()
   const selection = useSelection()
   const pinned = pins.includes(id)
@@ -330,6 +336,8 @@ export default function EntityNode({
           {place === 'unnested' && (
             <IconButton icon="renest" tone="muted" label={`Re-nest ${title}`} onClick={() => renest(id)} />
           )}
+          <IconButton icon="expandAll" tone="muted" label={`Expand all relationships of ${title}`} onClick={() => openBody(() => expandAllRelationships(nodeKey, id))} />
+          <IconButton icon="collapseAll" tone="muted" label={`Collapse all in ${title}`} onClick={() => (nested && origin ? collapseNested(nodeKey, origin, id) : collapseAll(nodeKey))} />
           {canWhole && (
             <IconButton icon="json" tone="muted" aria-pressed={raw} label={`Raw JSON of ${title}`} onClick={() => openBody(() => setRaw((r) => !r))} />
           )}

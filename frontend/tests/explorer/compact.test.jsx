@@ -604,6 +604,29 @@ describe('nested entities, unnest and re-nest', () => {
   })
 })
 
+describe('expand all over entities expanded by hand', () => {
+  test('a nested entity folded by hand after expand all stays folded when it is shown again', async () => {
+    const user = userEvent.setup()
+    await openPump(user)
+    await user.click(within(attr(F('FlowRate'))).getByRole('button', { name: /^1 sub-attribute/ }))
+    // Expanded by hand first, so it is already open when expand all reaches it.
+    await user.click(screen.getByRole('button', { name: `Expand ${CHILLER} in place` }))
+    const chiller = () => document.querySelector(`.attr-line__nested [data-entity="${CHILLER}"]`)
+    const chillerToggle = () => chiller().querySelector('.entity-node__toggle')
+    await waitFor(() => expect(chiller()?.querySelector('[data-attribute="status"]')).toBeTruthy())
+    await user.click(screen.getByRole('button', { name: 'Expand all relationships of Pump 1' }))
+    await waitFor(() => expect(chillerToggle()).toHaveAttribute('aria-expanded', 'true'))
+    await user.click(chillerToggle())
+    expect(chillerToggle()).toHaveAttribute('aria-expanded', 'false')
+    // The pump folded and opened again shows the chiller anew.
+    await user.click(screen.getByRole('button', { name: 'Pump 1', expanded: true }))
+    await waitFor(() => expect(chiller()).toBeNull())
+    await user.click(screen.getByRole('button', { name: 'Pump 1', expanded: false }))
+    await waitFor(() => expect(chiller()).not.toBeNull())
+    expect(chillerToggle()).toHaveAttribute('aria-expanded', 'false')
+  })
+})
+
 describe('pinning', () => {
   test('a pinned entity stays at the top for a query that does not match it, and the list says how many', async () => {
     const user = userEvent.setup()
@@ -677,7 +700,8 @@ describe('explorer state is kept', () => {
 
   const expectSameView = async () => {
     await waitFor(() => expect(attr(`${F('FlowRate')}.${F('Quality')}`)).not.toBeNull())
-    expect(within(screen.getByRole('region', { name: 'Unnested entities' })).getByRole('button', { name: 'Process chiller 01' })).toHaveAttribute('aria-expanded', 'true')
+    // The moved-out entity is read on its own, so it may answer after the pump.
+    expect(await within(screen.getByRole('region', { name: 'Unnested entities' })).findByRole('button', { name: 'Process chiller 01' })).toHaveAttribute('aria-expanded', 'true')
     expect(screen.getByRole('button', { name: 'Pump 1' })).toHaveAttribute('aria-expanded', 'true')
     expect(screen.getByLabelText('Entity type')).toHaveValue('pumps:Pump')
   }

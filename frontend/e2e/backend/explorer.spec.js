@@ -180,3 +180,35 @@ test('a declared double is shown as its value and keeps its datatype when edited
     await page.request.delete(`/api/ngsi/entities/${encodeURIComponent(id)}`)
   }
 })
+
+test('expand all reads a level of entities in one request, expands each once, and collapse all folds it', async ({ page }) => {
+  const kind = `E2eTree${tag()}`
+  const id = (name) => `urn:ngsi-ld:${kind}:${name}`
+  const rel = (target) => ({ type: 'Relationship', object: id(target) })
+  const document = [
+    { id: id('root'), type: kind, name: { type: 'Property', value: 'Tree root' }, hasA: rel('a'), hasB: rel('b'), hasC: rel('c') },
+    ...['a', 'b', 'c'].map((n) => ({ id: id(n), type: kind, name: { type: 'Property', value: `Child ${n}` }, hasShared: rel('shared') })),
+    { id: id('shared'), type: kind, name: { type: 'Property', value: 'Shared' } },
+  ]
+  const answer = await page.request.post('/api/ngsi/import', { data: document })
+  expect(answer.status()).toBe(200)
+  try {
+    const reads = []
+    page.on('request', (request) => {
+      const path = new URL(request.url()).pathname
+      if (path === '/api/ngsi/entities-by-id' || path.startsWith('/api/ngsi/entities/urn')) reads.push(`${request.method()} ${decodeURIComponent(path)}`)
+    })
+    await open(page, id('root'))
+    const root = node(page, id('root'))
+    await root.getByRole('button', { name: 'Expand all relationships of Tree root' }).click()
+    for (const n of ['a', 'b', 'c']) await expect(root.locator(`.attr-line__nested [data-entity="${id(n)}"]`)).toHaveCount(1)
+    await expect(root.locator(`.attr-line__nested [data-entity="${id('shared')}"]`)).toHaveCount(1)
+    // The three children were read together, not one by one.
+    expect(reads).toContain('POST /api/ngsi/entities-by-id')
+    for (const n of ['a', 'b', 'c']) expect(reads).not.toContain(`GET /api/ngsi/entities/${id(n)}`)
+    await root.getByRole('button', { name: 'Collapse all in Tree root' }).first().click()
+    await expect(root.locator('.attr-line__nested [data-entity]')).toHaveCount(0)
+  } finally {
+    await page.request.post('/api/ngsi/delete-by-types', { data: { types: [kind] } })
+  }
+})
