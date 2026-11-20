@@ -14,7 +14,7 @@
 // limitations under the License.
 //
 
-import { Fragment, useId } from 'react'
+import { Fragment, useEffect, useId, useRef } from 'react'
 import { useData } from '../../data/useData'
 import { EntityRef } from '../../app/EntityRef'
 import { Link, paths } from '../../app/router'
@@ -22,20 +22,39 @@ import { Button, ErrorState, LoadingState, StatusBadge } from '../../ui/componen
 import { formatTime, humanize } from '../../ui/format'
 import { useCopy } from '../explorer/Iri'
 import AlertText from './AlertText'
-import { actionsFor } from './model'
+import { actionsFor, ENDED } from './model'
 
 const HISTORY_TYPES = { new: 'Raised', status: 'Status change', note: 'Note', severity: 'Severity change' }
 
 /**
  * One alert: all attributes, the ordered history of status changes and
  * notes, its actions and the jumps to the affected entity and its incidents.
+ * It follows the list's refresh; `onEnded` is called once an alert shown as
+ * not ended is cleared, closed, expired or deleted, with its new status (none
+ * when deleted) and whether keyboard focus was in the detail, and says
+ * whether it closed the detail.
  */
-export default function AlertDetail({ id, refreshKey, onAction, onClose }) {
-  const result = useData('alerts', 'getAlert', [id], { refreshKey })
+export default function AlertDetail({ id, refreshKey, refreshMs = 0, onAction, onClose, onEnded }) {
+  const result = useData('alerts', 'getAlert', [id], { refreshKey, refreshMs })
   const titleId = useId()
   const copy = useCopy()
 
+  // Only a change seen here ends it: an alert opened when it was already closed stays open.
+  const live = useRef(false)
+  // Whether focus is in the detail. A focused button the ended alert no longer offers is removed without a blur.
+  const focused = useRef(false)
+  const onFocus = () => { focused.current = true }
+  const onBlur = (e) => { focused.current = e.currentTarget.contains(e.relatedTarget) }
+  const ended = result.status === 'error' ? result.error?.kind === 'not_found' : result.status === 'success' && ENDED.includes(result.data.status)
+  // Kept by the area, for example under a filter that lists its new status, the end is judged again at the next read.
+  useEffect(() => {
+    if (result.status === 'success' && !ended) live.current = true
+    else if (ended && live.current && onEnded?.(result.status === 'success' ? result.data.status : null, focused.current)) live.current = false
+  }, [result.status, result.data, ended]) // eslint-disable-line react-hooks/exhaustive-deps
+
   if (result.status === 'loading' && result.data === undefined) return <LoadingState label="Loading alert…" />
+  // A deleted alert that was shown closes its detail at once, without showing it as unknown first.
+  if (ended && live.current && onEnded && result.status === 'error') return null
   if (result.status === 'error' && result.error?.kind === 'not_found') {
     return (
       <section className="card" aria-labelledby={titleId}>
@@ -51,7 +70,7 @@ export default function AlertDetail({ id, refreshKey, onAction, onClose }) {
   const alert = result.data
 
   return (
-    <article className="card alert-detail" aria-labelledby={titleId}>
+    <article className="card alert-detail" aria-labelledby={titleId} onFocus={onFocus} onBlur={onBlur}>
       <header className="card__header">
         <h2 id={titleId} className="card__title">Alert {alert.id}</h2>
         <Button size="sm" variant="ghost" onClick={onClose}>Close details</Button>

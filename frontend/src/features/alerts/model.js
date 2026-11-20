@@ -29,6 +29,8 @@ export const STATUS_FILTERS = [
   { value: 'closed', label: 'Closed' },
   { value: 'open,ack,shelved,closed', label: 'All' },
 ]
+/** Statuses of an alert that is over: cleared, closed or timed out. */
+export const ENDED = ['closed', 'expired']
 export const SORTS = [
   { value: 'severity', label: 'Most severe first' },
   { value: 'time', label: 'Newest first' },

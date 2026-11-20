@@ -480,7 +480,12 @@ test('keyboard only: query, expand an entity, edit with a suggestion, cancel, an
   await page.keyboard.press('Tab')
   await page.keyboard.press('Enter')
   await expect(dialog).toHaveCount(0)
-  await expect(detail.getByRole('region', { name: 'History' }).getByRole('listitem').last()).toContainText('Resolved on site.')
+  // The closed alert leaves the list, its detail with it, and the keyboard goes on from the list.
+  await expect(detail).toHaveCount(0)
+  await expect(page.getByRole('region', { name: 'Alert list' })).toBeFocused()
+  // The note typed with the keyboard is recorded: the closed alert shows it under the closed alerts.
+  await page.goto('/alerts/alert-001?status=closed')
+  await expect(page.getByRole('article', { name: 'Alert alert-001' }).getByRole('region', { name: 'History' }).getByRole('listitem').last()).toContainText('Resolved on site.')
   const summary = page.getByRole('group', { name: 'Alerts by severity' }).getByRole('button').first()
   await summary.focus()
   await page.keyboard.press('Enter')

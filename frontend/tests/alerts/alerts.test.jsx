@@ -385,6 +385,172 @@ describe('alert detail and context', () => {
     expect(within(detail).getByRole('button', { name: 'Unshelve…' })).toBeVisible()
   })
 
+  test('closing the open alert from its detail closes the detail with it', async () => {
+    const user = userEvent.setup()
+    const [alert] = withStatus('open')
+    open(paths.alert(alert.id))
+    const detail = await screen.findByRole('article', { name: `Alert ${alert.id}` })
+    await user.click(within(detail).getByRole('button', { name: 'Close…' }))
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Close' }))
+    await waitFor(() => expect(screen.queryByRole('article', { name: `Alert ${alert.id}` })).not.toBeInTheDocument())
+    expect(window.location.pathname).toBe(paths.alerts())
+    await waitFor(() => expect(row(alert.id)).toBeNull())
+    expect(screen.getByRole('region', { name: 'Alert list' })).toHaveFocus()
+  })
+
+  test('a detail closed by a refresh leaves the focus where the operator is typing', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+      localStorage.setItem(REFRESH_KEY, '10000')
+      const [alert] = withStatus('open')
+      open(paths.alert(alert.id))
+      await screen.findByRole('article', { name: `Alert ${alert.id}` })
+      await user.click(screen.getByLabelText('Search'))
+      store.update((s) => ({ ...s, alerts: s.alerts.map((a) => (a.id === alert.id ? { ...a, status: 'closed' } : a)) }))
+      await act(() => vi.advanceTimersByTimeAsync(10_500))
+      await waitFor(() => expect(screen.queryByRole('article', { name: `Alert ${alert.id}` })).not.toBeInTheDocument())
+      expect(screen.getByLabelText('Search')).toHaveFocus()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  test('an alert cleared elsewhere takes its detail away at the next refresh', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      localStorage.setItem(REFRESH_KEY, '10000')
+      const [alert] = withStatus('open')
+      open(paths.alert(alert.id))
+      await screen.findByRole('article', { name: `Alert ${alert.id}` })
+      store.update((s) => ({ ...s, alerts: s.alerts.map((a) => (a.id === alert.id ? { ...a, status: 'closed' } : a)) }))
+      await act(() => vi.advanceTimersByTimeAsync(10_500))
+      await waitFor(() => expect(screen.queryByRole('article', { name: `Alert ${alert.id}` })).not.toBeInTheDocument())
+      expect(window.location.pathname).toBe(paths.alerts())
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  test('an alert deleted elsewhere takes its detail away at the next refresh', async () => {
+    const user = userEvent.setup()
+    localStorage.setItem(REFRESH_KEY, '0')
+    const [alert] = withStatus('open')
+    open(paths.alert(alert.id))
+    await screen.findByRole('article', { name: `Alert ${alert.id}` })
+    store.update((s) => ({ ...s, alerts: s.alerts.filter((a) => a.id !== alert.id) }))
+    await user.click(screen.getByRole('button', { name: 'Refresh now' }))
+    await waitFor(() => expect(screen.queryByRole('article', { name: `Alert ${alert.id}` })).not.toBeInTheDocument())
+    expect(screen.queryByRole('heading', { name: 'Alert not found' })).not.toBeInTheDocument()
+    expect(window.location.pathname).toBe(paths.alerts())
+  })
+
+  test('a failed read keeps the detail, and a close read afterwards still takes it away', async () => {
+    const user = userEvent.setup()
+    localStorage.setItem(REFRESH_KEY, '0')
+    const [alert] = withStatus('open')
+    open(paths.alert(alert.id))
+    const detail = await screen.findByRole('article', { name: `Alert ${alert.id}` })
+    writeControls({ authEnabled: false, failure: { alerts: 'unavailable' } })
+    await user.click(screen.getByRole('button', { name: 'Refresh now' }))
+    // The failed answers arrive; neither the list nor the detail takes the alert as gone.
+    await act(() => new Promise((resolve) => { setTimeout(resolve, 300) }))
+    expect(detail).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Alert not found' })).not.toBeInTheDocument()
+    expect(window.location.pathname).toBe(paths.alert(alert.id))
+
+    writeControls({ authEnabled: false, failure: {} })
+    store.update((s) => ({ ...s, alerts: s.alerts.map((a) => (a.id === alert.id ? { ...a, status: 'closed' } : a)) }))
+    await user.click(screen.getByRole('button', { name: 'Refresh now' }))
+    await waitFor(() => expect(screen.queryByRole('article', { name: `Alert ${alert.id}` })).not.toBeInTheDocument())
+    expect(window.location.pathname).toBe(paths.alerts())
+  })
+
+  test('a detail closed by a refresh neither moves focus that was not in it nor scrolls the page', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    const scrollBy = vi.fn()
+    const original = window.scrollBy
+    window.scrollBy = scrollBy
+    try {
+      localStorage.setItem(REFRESH_KEY, '10000')
+      const [alert] = withStatus('open')
+      open(paths.alert(alert.id))
+      await screen.findByRole('article', { name: `Alert ${alert.id}` })
+      document.activeElement?.blur?.()
+      expect(document.activeElement).toBe(document.body)
+      scrollBy.mockClear()
+      store.update((s) => ({ ...s, alerts: s.alerts.map((a) => (a.id === alert.id ? { ...a, status: 'closed' } : a)) }))
+      await act(() => vi.advanceTimersByTimeAsync(10_500))
+      await waitFor(() => expect(screen.queryByRole('article', { name: `Alert ${alert.id}` })).not.toBeInTheDocument())
+      expect(screen.getByRole('region', { name: 'Alert list' })).not.toHaveFocus()
+      expect(scrollBy).not.toHaveBeenCalled()
+    } finally {
+      window.scrollBy = original
+      vi.useRealTimers()
+    }
+  })
+
+  test('the open detail shows a change made elsewhere at the next refresh', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      localStorage.setItem(REFRESH_KEY, '10000')
+      const [alert] = withStatus('open')
+      open(paths.alert(alert.id))
+      const detail = await screen.findByRole('article', { name: `Alert ${alert.id}` })
+      expect(within(detail).getByRole('button', { name: 'Acknowledge…' })).toBeVisible()
+      store.update((s) => ({ ...s, alerts: s.alerts.map((a) => (a.id === alert.id ? { ...a, status: 'ack' } : a)) }))
+      await act(() => vi.advanceTimersByTimeAsync(10_500))
+      await waitFor(() => expect(within(detail).queryByRole('button', { name: 'Acknowledge…' })).not.toBeInTheDocument())
+      expect(within(detail).getByRole('button', { name: 'Unacknowledge…' })).toBeVisible()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  test('under a filter that lists closed alerts, an alert that expires still takes its detail away', async () => {
+    const user = userEvent.setup()
+    localStorage.setItem(REFRESH_KEY, '0')
+    const [alert] = withStatus('open')
+    open(`${paths.alert(alert.id)}?status=open,ack,shelved,closed`)
+    await screen.findByRole('article', { name: `Alert ${alert.id}` })
+    store.update((s) => ({ ...s, alerts: s.alerts.map((a) => (a.id === alert.id ? { ...a, status: 'expired' } : a)) }))
+    await user.click(screen.getByRole('button', { name: 'Refresh now' }))
+    await waitFor(() => expect(screen.queryByRole('article', { name: `Alert ${alert.id}` })).not.toBeInTheDocument())
+    expect(search()).toEqual({ status: 'open,ack,shelved,closed' })
+  })
+
+  test('a detail kept under a filter that lists closed alerts closes once the filter no longer lists them', async () => {
+    const user = userEvent.setup()
+    localStorage.setItem(REFRESH_KEY, '0')
+    const [alert] = withStatus('open')
+    open(`${paths.alert(alert.id)}?status=open,ack,shelved,closed`)
+    await screen.findByRole('article', { name: `Alert ${alert.id}` })
+    store.update((s) => ({ ...s, alerts: s.alerts.map((a) => (a.id === alert.id ? { ...a, status: 'closed' } : a)) }))
+    await user.click(screen.getByRole('button', { name: 'Refresh now' }))
+    await waitFor(() => expect(within(screen.getByRole('article', { name: `Alert ${alert.id}` })).getByRole('button', { name: 'Reopen…' })).toBeVisible())
+    await user.selectOptions(screen.getByLabelText('Status'), 'open,ack')
+    await user.click(screen.getByRole('button', { name: 'Refresh now' }))
+    await waitFor(() => expect(screen.queryByRole('article', { name: `Alert ${alert.id}` })).not.toBeInTheDocument())
+    expect(window.location.pathname).toBe(paths.alerts())
+  })
+
+  test('a closed alert stays open when the filter lists closed alerts or it was already closed', async () => {
+    const user = userEvent.setup()
+    const [alert] = withStatus('open')
+    open(`${paths.alert(alert.id)}?status=open,ack,shelved,closed`)
+    const detail = await screen.findByRole('article', { name: `Alert ${alert.id}` })
+    await user.click(within(detail).getByRole('button', { name: 'Close…' }))
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Close' }))
+    await waitFor(() => expect(within(detail).getByRole('button', { name: 'Reopen…' })).toBeVisible())
+    expect(screen.getByRole('article', { name: `Alert ${alert.id}` })).toBeVisible()
+
+    const [closed] = withStatus('closed').filter((a) => a.id !== alert.id)
+    await user.click(screen.getByRole('button', { name: 'Close details' }))
+    window.history.pushState(null, '', paths.alert(closed.id))
+    window.dispatchEvent(new PopStateEvent('popstate'))
+    expect(await screen.findByRole('article', { name: `Alert ${closed.id}` })).toBeVisible()
+  })
+
   test('an unknown alert is not found', async () => {
     open(paths.alert('alert-999'))
     expect(await screen.findByRole('heading', { name: 'Alert not found' })).toBeVisible()

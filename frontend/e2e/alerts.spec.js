@@ -135,3 +135,21 @@ for (const width of [1280, 1024, 390]) {
     }
   })
 }
+
+test('closing the open alert from its detail closes the detail, and going back does not reopen it', async ({ page }) => {
+  await page.goto('/alerts')
+  const row = list(page).locator('tbody tr', { has: page.locator('[data-status="open"]') }).first()
+  await expect(row).toBeVisible()
+  const id = await row.getAttribute('data-alert')
+  await row.getByRole('link', { name: new RegExp(`\\(${id}\\)$`) }).click()
+  await expect(page).toHaveURL(new RegExp(`/alerts/${id}$`))
+  const detail = page.getByRole('article', { name: `Alert ${id}` })
+  await detail.getByRole('button', { name: 'Close…', exact: true }).click()
+  await page.getByRole('dialog', { name: `Close alert ${id}` }).getByRole('button', { name: 'Close', exact: true }).click()
+
+  await expect(detail).toHaveCount(0)
+  await expect(page).toHaveURL(/\/alerts$/)
+  await expect(list(page).locator(`tr[data-alert="${id}"]`)).toHaveCount(0)
+  await page.goBack()
+  await expect(page.getByRole('article', { name: `Alert ${id}` })).toHaveCount(0)
+})

@@ -25,7 +25,7 @@ export const headerOffset = () => (document.querySelector('.app-header')?.getBou
  * When `key` changes (another item was selected in the same area), scrolls
  * the page so the element's top shows just below the sticky header, if it
  * is hidden above it or far down the page. Nothing moves when it is already
- * in view, and nothing happens on first render.
+ * in view, and nothing happens on first render or for a hidden element.
  */
 export function useRevealOnChange(ref, key) {
   const previous = useRef(key)
@@ -33,7 +33,8 @@ export function useRevealOnChange(ref, key) {
     if (previous.current === key) return
     previous.current = key
     const el = ref.current
-    if (!el) return
+    // Something hidden, such as a closed detail, has nothing to reveal.
+    if (!el || el.hidden) return
     const offset = headerOffset()
     const { top } = el.getBoundingClientRect()
     if (top < offset || top > window.innerHeight - 80) window.scrollBy?.({ top: top - offset })

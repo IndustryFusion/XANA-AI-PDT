@@ -199,6 +199,23 @@ export default function Alerts() {
   }, [])
   const refresh = useCallback(() => setRefreshKey((k) => k + 1), [])
 
+  // An alert that ends leaves the list, and so does its detail, unless the filter lists its new status.
+  // Keyboard focus that was in the closed detail goes to the list, never away from anything else.
+  const layoutRef = useRef(null)
+  const focusList = useRef(false)
+  const endDetail = (status, hadFocus) => {
+    if (status && request.status.includes(status)) return false
+    focusList.current = hadFocus
+    navigate(alertsPath(filters), { replace: true })
+    return true
+  }
+  useEffect(() => {
+    if (selectedAlert || !focusList.current) return
+    focusList.current = false
+    const active = document.activeElement
+    if (!active || active === document.body || !active.isConnected) layoutRef.current?.querySelector('.alert-list')?.focus({ preventScroll: true })
+  }, [selectedAlert])
+
   const changeFilters = (next, typing) => navigate(selectedAlert ? alertPath(selectedAlert, next) : alertsPath(next), { replace: typing })
 
   function changeRefresh(value) {
@@ -269,8 +286,8 @@ export default function Alerts() {
         </div>
       )}
 
-      <div className={`alerts__layout${selectedAlert ? ' alerts__layout--detail' : ''}`}>
-        <Card title="Alert list" className="alert-list">
+      <div ref={layoutRef} className={`alerts__layout${selectedAlert ? ' alerts__layout--detail' : ''}`}>
+        <Card title="Alert list" className="alert-list" tabIndex={-1}>
           <DataView
             result={result}
             errorTitle="Could not load alerts"
@@ -294,9 +311,10 @@ export default function Alerts() {
         <div className="alerts__detail" ref={detailRef} hidden={!selectedAlert}>
           {selectedAlert && (
             <AlertDetail
-              key={selectedAlert} id={selectedAlert} refreshKey={refreshKey}
+              key={selectedAlert} id={selectedAlert} refreshKey={refreshKey} refreshMs={refreshMs}
               onAction={(action, ids) => setPending({ action, ids })}
               onClose={() => navigate(alertsPath(filters))}
+              onEnded={endDetail}
             />
           )}
         </div>
