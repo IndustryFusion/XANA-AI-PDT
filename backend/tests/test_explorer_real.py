@@ -791,3 +791,15 @@ def test_a_declared_sub_attribute_round_trips(api):
         assert datatype(limit["value"]) == DOUBLE
     finally:
         api.delete(f"/api/ngsi/entities/{entity_id}")
+
+
+@needs_broker
+def test_many_entities_by_id_in_one_request(api):
+    kind = f"{IRI}many_{uuid.uuid4().hex[:8]}"
+    entities = [{"id": unique("n"), "type": kind} for _ in range(150)]
+    assert {r["result"] for r in api.post("/api/ngsi/import", json=entities).json()} == {"created"}
+    ids = [e["id"] for e in entities]
+    found = api.post("/api/ngsi/entities-by-id", json={"ids": [*ids, unique("missing")]}).json()
+    assert sorted(found) == sorted(ids)
+    assert {entity["type"] for entity in found.values()} == {kind}
+    api.post("/api/ngsi/delete-by-types", json={"types": [kind]})

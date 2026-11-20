@@ -30,7 +30,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Body, Query, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.errors import Refused, invalid
 from app.ngsi.broker import check_document
@@ -54,6 +54,14 @@ class ImportUrl(BaseModel):
 
 class TypeNames(BaseModel):
     types: list[str]
+
+
+# Many entities at once, for a tree of entities: more than this is refused rather than read.
+MAX_IDS = 1000
+
+
+class EntityIds(BaseModel):
+    ids: list[str] = Field(max_length=MAX_IDS)
 
 
 def _answer(found: list) -> Any:
@@ -255,6 +263,12 @@ async def delete_attribute(
     return Response(status_code=204)
 
 
+@router.post("/entities-by-id")
+async def entities_by_id(body: EntityIds, request: Request) -> dict:
+    """The entities of `ids` that exist, by ID, read together; an ID without an entity is left out."""
+    return await request.app.state.broker.entities_by_id(body.ids)
+
+
 @router.get("/entities/{entity_id:path}")
 async def get_entity(entity_id: str, request: Request) -> dict:
     return await request.app.state.broker.entity(entity_id)
@@ -304,6 +318,12 @@ async def history(
 @router.get("/attr-status")
 async def attribute_status(request: Request, entity_id: str) -> dict:
     return await request.app.state.attribute_history.status(entity_id)
+
+
+@router.post("/attr-status-by-id")
+async def attribute_statuses(body: EntityIds, request: Request) -> dict:
+    """The latest recorded state per attribute of each entity of `ids`, by ID."""
+    return await request.app.state.attribute_history.statuses(body.ids)
 
 
 @router.get("/timeshift/types")

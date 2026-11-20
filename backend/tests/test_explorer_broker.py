@@ -1430,3 +1430,51 @@ def test_the_unit_of_one_instance_and_at_a_path_is_cleared_alone(client, broker)
     assert client.patch(f"{ENTITY}/attrs", params=params, json={attrs("deep"): {"unitCode": None}}).status_code == 204
     second = broker.entities[MACHINE][attrs("deep")][1]
     assert "unitCode" not in second[attrs("limit")][attrs("max")] and second["unitCode"] == "CEL"
+
+
+def test_many_entities_are_read_in_one_query_per_hundred(client, broker):
+    for i in range(250):
+        broker.entities[f"urn:many:{i:03d}"] = {"id": f"urn:many:{i:03d}", "type": "Many"}
+    ids = [f"urn:many:{i:03d}" for i in range(250)] + ["urn:many:missing", "urn:many:000"]
+    broker.requests.clear()
+    answer = client.post("/api/ngsi/entities-by-id", json={"ids": ids})
+    assert answer.status_code == 200
+    found = answer.json()
+    assert sorted(found) == [f"urn:many:{i:03d}" for i in range(250)]
+    assert found["urn:many:007"] == {"id": "urn:many:007", "type": "Many"}
+    queries = [r for r in broker.requests if r.url.path.endswith("/entities")]
+    assert len(queries) == 3
+    assert all(len(r.url.params["id"].split(",")) <= 100 for r in queries)
+
+
+def test_an_id_with_a_comma_is_read_on_its_own(client, broker):
+    broker.entities["urn:a,b"] = {"id": "urn:a,b", "type": "T"}
+    found = client.post("/api/ngsi/entities-by-id", json={"ids": ["urn:a,b", MACHINE, "urn:c,d"]}).json()
+    assert sorted(found) == sorted(["urn:a,b", MACHINE])
+
+
+def test_more_ids_than_allowed_at_once_are_refused(client):
+    assert client.post("/api/ngsi/entities-by-id", json={"ids": [f"urn:x:{i}" for i in range(1001)]}).status_code == 422
+    assert (
+        client.post("/api/ngsi/attr-status-by-id", json={"ids": [f"urn:x:{i}" for i in range(1001)]}).status_code == 422
+    )
+
+
+def test_an_id_the_broker_refuses_in_a_list_leaves_the_others(client, broker):
+    for i in range(3):
+        broker.entities[f"urn:ok:{i}"] = {"id": f"urn:ok:{i}", "type": "T"}
+    query = broker._query
+
+    def refusing(params):
+        if "id" in params and "bad id" in params["id"]:
+            return httpx.Response(400, json={"title": "Bad request", "detail": "invalid id"})
+        return query(params)
+
+    broker._query = refusing
+    found = client.post("/api/ngsi/entities-by-id", json={"ids": ["urn:ok:0", "bad id", "urn:ok:1", "urn:ok:2"]}).json()
+    assert sorted(found) == ["urn:ok:0", "urn:ok:1", "urn:ok:2"]
+
+
+def test_a_failing_broker_still_fails_a_read_of_many(client, broker):
+    broker._query = lambda params: httpx.Response(503, json={"title": "Unavailable"})
+    assert client.post("/api/ngsi/entities-by-id", json={"ids": ["urn:a", "urn:b"]}).status_code == 502

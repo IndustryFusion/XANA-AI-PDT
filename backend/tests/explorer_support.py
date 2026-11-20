@@ -128,6 +128,7 @@ class Broker:
     def _entity(self, request: httpx.Request, path: str) -> httpx.Response:
         raw = request.url.raw_path.decode().split("?")[0].removeprefix("/ngsi-ld/v1/entities/")
         parts = raw.split("/")
+        parts[0] = unquote(parts[0])  # as the broker: the ID decoded, after splitting, so an encoded `/` stays in it
         entity = self.entities.get(parts[0])
         if entity is None:
             return httpx.Response(404, json={"title": "Resource not found.", "detail": "Resource not found."})

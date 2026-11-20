@@ -48,6 +48,10 @@ SERVICE = "The context broker"
 BASE = "/ngsi-ld/v1"
 TIMEOUT_S = 15
 MAX_LIMIT = 1000
+# IDs per query when reading many entities at once: one query instead of one per entity.
+ENTITIES_PER_READ = 100
+# Single reads at once when a list is read one by one: few, as the broker serves everyone.
+SINGLE_READS = 4
 BATCH = 100
 MAX_SCANNED = 5000
 # Without an order, the broker's pages can repeat some entities and leave out others (measured on
@@ -101,6 +105,12 @@ def _checked_identifier(identifier: str) -> str:
     if identifier.strip() in ("", ".", ".."):
         raise invalid("That is not a valid identifier.")
     return identifier
+
+
+def _refused_ids(refused: Refused) -> bool:
+    """Whether the broker refused the IDs it was asked for, as invalid or as too long an address, rather
+    than failing: reading them one by one then leaves out only those it refuses."""
+    return refused.kind == "invalid" or getattr(refused, "upstream_status", None) == 414
 
 
 def _segment(identifier: str) -> str:
@@ -466,6 +476,51 @@ class ContextBroker:
         found = await self._json("GET", f"/entities/{_segment(entity_id)}")
         if not isinstance(found, dict):
             raise bad_gateway(f"{SERVICE} sent an unexpected answer.")
+        return found
+
+    def _single_reads(self) -> asyncio.Semaphore:
+        """The bound on single reads of a refused list, shared by all requests of the app."""
+        if getattr(self, "_single_reads_gate", None) is None:
+            self._single_reads_gate = asyncio.Semaphore(SINGLE_READS)
+        return self._single_reads_gate
+
+    async def entities_by_id(self, entity_ids: list[str]) -> dict[str, dict[str, Any]]:
+        """The entities of `entity_ids` that exist, by ID: one query per ENTITIES_PER_READ IDs instead of one
+        per entity. An ID with a comma, which the broker's `id` list can't hold, is read on its own, and so
+        are the IDs of a list the broker refuses (an ID it doesn't accept, a list too long for its address),
+        so that one such ID leaves the others' entities. An ID the broker can't read is left out."""
+        wanted = list(dict.fromkeys(i for i in entity_ids if isinstance(i, str) and i))
+        listed = [i for i in wanted if "," not in i]
+        singles = [i for i in wanted if "," in i]
+        found: dict[str, dict[str, Any]] = {}
+        for start in range(0, len(listed), ENTITIES_PER_READ):
+            chunk = listed[start : start + ENTITIES_PER_READ]
+            try:
+                read = await self._json("GET", "/entities", params={"id": ",".join(chunk), "limit": MAX_LIMIT})
+            except Refused as refused:
+                if not _refused_ids(refused):
+                    raise
+                singles.extend(chunk)
+                continue
+            for entity in read if isinstance(read, list) else []:
+                if isinstance(entity, dict) and entity.get("id") in chunk:
+                    found[entity["id"]] = entity
+        gate = self._single_reads()
+
+        async def one(single: str) -> None:
+            async with gate:
+                try:
+                    found[single] = await self.entity(single)
+                except Refused as refused:
+                    if refused.kind != "not_found" and not _refused_ids(refused):
+                        raise
+
+        try:
+            async with asyncio.TaskGroup() as group:
+                for single in singles:
+                    group.create_task(one(single))
+        except* Refused as failed:
+            raise failed.exceptions[0] from None
         return found
 
     async def _existing(self, entity_id: str) -> dict[str, Any]:

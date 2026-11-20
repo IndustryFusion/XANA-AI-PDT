@@ -494,3 +494,89 @@ def test_timeshift_with_postgrest_stopped_is_502():
         raise httpx.ConnectError("x", request=request)
 
     assert at_types(TestClient(app_with(Broker(), down)), T1).status_code == 502
+
+
+def test_statuses_of_many_entities_are_each_entitys_status(client):
+    single = client.get("/api/ngsi/attr-status", params={"entity_id": MACHINE}).json()
+    many = client.post("/api/ngsi/attr-status-by-id", json={"ids": [MACHINE, MACHINE]}).json()
+    assert many == {MACHINE: single}
+
+
+async def test_statuses_read_the_time_series_a_few_at_a_time(monkeypatch):
+    import asyncio
+
+    running, most = 0, 0
+
+    async def status(self, entity_id):
+        nonlocal running, most
+        running += 1
+        most = max(most, running)
+        await asyncio.sleep(0.01)
+        running -= 1
+        return {"a": {"deleted": False, "observedAt": T1, "datasets": {}}}
+
+    monkeypatch.setattr(history_module.AttributeHistory, "status", status)
+    found = await history_module.AttributeHistory.statuses(
+        object.__new__(history_module.AttributeHistory), [f"urn:s:{i}" for i in range(20)]
+    )
+    assert len(found) == 20
+    assert most == history_module.STATUS_READS
+
+
+async def test_the_bound_on_time_series_reads_holds_across_requests(monkeypatch):
+    import asyncio
+
+    running, most = 0, 0
+
+    async def status(self, entity_id):
+        nonlocal running, most
+        running += 1
+        most = max(most, running)
+        await asyncio.sleep(0.01)
+        running -= 1
+        return {}
+
+    monkeypatch.setattr(history_module.AttributeHistory, "status", status)
+    reader = object.__new__(history_module.AttributeHistory)
+    requests = [
+        history_module.AttributeHistory.statuses(reader, [f"urn:s:{r}:{i}" for i in range(20)]) for r in range(5)
+    ]
+    await asyncio.gather(*requests)
+    assert most == history_module.STATUS_READS
+
+
+async def test_an_entity_whose_states_cant_be_read_is_left_out(monkeypatch):
+    from app.errors import invalid
+
+    async def status(self, entity_id):
+        if entity_id == "urn:s:bad":
+            raise invalid("PostgREST refused the filter.")
+        return {"a": {"deleted": False, "observedAt": T1, "datasets": {}}}
+
+    monkeypatch.setattr(history_module.AttributeHistory, "status", status)
+    reader = object.__new__(history_module.AttributeHistory)
+    found = await history_module.AttributeHistory.statuses(reader, ["urn:s:1", "urn:s:bad", "urn:s:2"])
+    assert sorted(found) == ["urn:s:1", "urn:s:2"]
+
+
+async def test_a_failing_time_series_fails_the_states_of_many_and_stops_the_rest(monkeypatch):
+    import asyncio
+
+    from app.errors import Refused, bad_gateway
+
+    started = []
+
+    async def status(self, entity_id):
+        started.append(entity_id)
+        if entity_id == "urn:s:0":
+            raise bad_gateway("PostgREST failed (HTTP 500).")
+        await asyncio.sleep(0.05)
+        return {}
+
+    monkeypatch.setattr(history_module.AttributeHistory, "status", status)
+    reader = object.__new__(history_module.AttributeHistory)
+    with pytest.raises(Refused) as failed:
+        await history_module.AttributeHistory.statuses(reader, [f"urn:s:{i}" for i in range(20)])
+    assert failed.value.kind == "unavailable"
+    await asyncio.sleep(0.2)
+    assert len(started) < 20

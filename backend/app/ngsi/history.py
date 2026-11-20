@@ -26,6 +26,7 @@ as a comma or bracket would otherwise change the filter.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from collections.abc import Callable
@@ -43,6 +44,8 @@ SERVICE = "The history service (PostgREST)"
 TIMEOUT_S = 15
 MAX_ROWS = 5000
 PAGE = 1000
+# Reads of the time series at once for many entities' states: the database sorts each, so not all at once.
+STATUS_READS = 4
 MAX_ENTITY_ROWS = 100_000
 MAX_PARENT_IDS = 100
 DEFAULT_VOCAB = "https://uri.etsi.org/ngsi-ld/default-context/"
@@ -284,6 +287,38 @@ class AttributeHistory:
             if len(rows) < PAGE:
                 return {compact(name): state for name, state in latest.items()}
             after = (rows[-1]["attributeId"], rows[-1].get("datasetId"))
+
+    def _status_gate(self) -> asyncio.Semaphore:
+        """The bound on reads of the time series for many entities, shared by all requests of the app."""
+        if getattr(self, "_status_reads_gate", None) is None:
+            self._status_reads_gate = asyncio.Semaphore(STATUS_READS)
+        return self._status_reads_gate
+
+    async def statuses(self, entity_ids: list[str]) -> dict[str, dict[str, dict[str, Any]]]:
+        """`status` of each entity, by ID, with at most STATUS_READS reads of the time series at once. An entity
+        whose states can't be read for its own sake (not found, refused) is left out; a failing service fails the
+        whole answer, and the reads still running stop."""
+        wanted = list(dict.fromkeys(i for i in entity_ids if isinstance(i, str) and i))
+        gate = self._status_gate()
+
+        found: dict[str, dict[str, dict[str, Any]]] = {}
+
+        async def one(entity_id: str) -> None:
+            # What concerns one entity leaves out that entity only; a failing service fails the request.
+            async with gate:
+                try:
+                    found[entity_id] = await self.status(entity_id)
+                except Refused as refused:
+                    if refused.kind not in ("not_found", "invalid"):
+                        raise
+
+        try:
+            async with asyncio.TaskGroup() as group:
+                for entity_id in wanted:
+                    group.create_task(one(entity_id))
+        except* Refused as failed:
+            raise failed.exceptions[0] from None
+        return {i: found[i] for i in wanted if i in found}
 
     # Time-shift ---------------------------------------------------------------
 
