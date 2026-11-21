@@ -25,13 +25,14 @@ When the request for several fails, whatever the reason (an error, no answer wit
 - Smaller requests: fewer nodes per failure, but every failure still fails nodes a single read would have loaded, and more requests on a healthy broker.
 - The backend returns the reason for each ID it leaves out: an API change on both sides for what a second single read already gives.
 
-### D2: The single reads go out together
+### D2: The single reads go out together, a few at a time
 
-The IDs read again on their own are read at the same time, as before #141, when every node read its own entity.
+The IDs read again on their own are read at the same time, as before #141, but at most six at once: the browser sends about that many at once to one host, and a read waiting in its queue would run out of its timeout before it is sent.
 
 *Alternative:* one after another: a level of 100 entities would take up to 100 times the single read.
 
 ## Risks / Trade-offs
 
 - A request for several that times out is followed by its single reads, so a node of such a level may wait for the timeout and its own single read. The level loads where single reads succeed, where it failed before.
-- A level whose request fails sends one request per entity, as before #141.
+- A level whose request fails sends one request per entity, as before #141, at most six at once, so that none of them waits in the browser's queue until its timeout runs out. A refusal that holds for the whole request (not signed in, too many IDs) is passed on as it is instead.
+- Every entity an answer leaves out costs one more request, also one that simply doesn't exist, such as the target of a relationship to a deleted entity. A level with many such targets is read in more than one request.
