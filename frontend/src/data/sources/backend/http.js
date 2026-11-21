@@ -77,7 +77,8 @@ export async function request(area, method, path, { params, body, raw = false, t
     const message = err?.name === 'AbortError'
       ? `The backend did not answer within ${timeoutMs / 1000} s.`
       : 'The backend cannot be reached.'
-    throw new DataError(area, 'unavailable', message)
+    // No answer at all, as opposed to an answer that is a failure: callers may tell the two apart.
+    throw new DataError(area, 'unavailable', message, { noAnswer: true })
   } finally {
     clearTimeout(timer)
   }
