@@ -38,6 +38,7 @@ import httpx
 
 from app.config import Settings
 from app.errors import Refused, bad_gateway, conflict, invalid, not_found
+from app.ngsi.bounded import gather_bounded
 from app.ngsi.contexts import ContextAllowList, change_role, deployment_contexts, looks_external
 from app.ngsi.failures import refusal, scrubbed, unreachable
 from app.ngsi.query import broker_can_evaluate, compile_pattern, matches, parse
@@ -48,10 +49,10 @@ SERVICE = "The context broker"
 BASE = "/ngsi-ld/v1"
 TIMEOUT_S = 15
 MAX_LIMIT = 1000
-# IDs per query when reading many entities at once: one query instead of one per entity.
-ENTITIES_PER_READ = 100
 # Single reads at once when a list is read one by one: few, as the broker serves everyone.
 SINGLE_READS = 4
+# IDs per id-list query: all of a page's IDs in one address can be too long for the broker (HTTP 414).
+IDS_PER_QUERY = 100
 BATCH = 100
 MAX_SCANNED = 5000
 # Without an order, the broker's pages can repeat some entities and leave out others (measured on
@@ -416,15 +417,7 @@ class ContextBroker:
         ids = [entity["id"] for entity in found if isinstance(entity.get("id"), str)]
         if not ids:
             return []
-        by_id: dict[Any, dict[str, Any]] = {}
-        # In chunks, as all of a page's IDs in one address can be too long for the broker (HTTP 414).
-        for start in range(0, len(ids), BATCH):
-            chunk = ids[start : start + BATCH]
-            asked: dict[str, Any] = {"id": ",".join(chunk), "type": "*", "limit": len(chunk)}
-            if selected:
-                asked["attrs"] = ",".join(selected)
-            read = await self._json("GET", "/entities", params=asked)
-            by_id.update((e.get("id"), e) for e in (read if isinstance(read, list) else []) if isinstance(e, dict))
+        by_id = await self._by_ids(ids, {"type": "*", "attrs": ",".join(selected)} if selected else {"type": "*"})
         return [by_id[entity_id] for entity_id in ids if entity_id in by_id]
 
     async def _filtered(self, params: dict[str, Any], tree: Any, page: _Page) -> Limited:
@@ -485,42 +478,64 @@ class ContextBroker:
         return self._single_reads_gate
 
     async def entities_by_id(self, entity_ids: list[str]) -> dict[str, dict[str, Any]]:
-        """The entities of `entity_ids` that exist, by ID: one query per ENTITIES_PER_READ IDs instead of one
-        per entity. An ID with a comma, which the broker's `id` list can't hold, is read on its own, and so
-        are the IDs of a list the broker refuses (an ID it doesn't accept, a list too long for its address),
-        so that one such ID leaves the others' entities. An ID the broker can't read is left out."""
+        """The entities of `entity_ids` that exist, by ID, as `_by_ids` reads them."""
+        return await self._by_ids(entity_ids)
+
+    async def _by_ids(
+        self, entity_ids: list[str], params: dict[str, Any] | None = None, *, leave_out_refused: bool = True
+    ) -> dict[str, dict[str, Any]]:
+        """The entities of `entity_ids` that exist, by ID, from id-list queries of IDS_PER_QUERY IDs each, with
+        `params` (such as `type` and `attrs`) added. An ID with a comma, which the broker's `id` list can't hold,
+        is read on its own, and so are the IDs of a list too long for the broker's address; at most SINGLE_READS
+        of those reads run at once. A failing broker fails the read, and so does an answer that is no entity.
+
+        Without `params`, the IDs of a list the broker refuses as invalid are read one by one as well, so that one
+        such ID leaves the others' entities, and an ID the broker refuses on its own is left out, unless
+        `leave_out_refused` is off: then only an ID the broker doesn't know is left out, as a caller that writes
+        must not take a refused ID for an absent one. With `params` a refusal can't be told from one of the
+        parameters, so it reaches the caller as it is. A single read with selected attributes that holds none of
+        them is left out, as the list query leaves it out."""
+        params = params or {}
+        lenient = not params
         wanted = list(dict.fromkeys(i for i in entity_ids if isinstance(i, str) and i))
         listed = [i for i in wanted if "," not in i]
         singles = [i for i in wanted if "," in i]
         found: dict[str, dict[str, Any]] = {}
-        for start in range(0, len(listed), ENTITIES_PER_READ):
-            chunk = listed[start : start + ENTITIES_PER_READ]
+        for start in range(0, len(listed), IDS_PER_QUERY):
+            chunk = listed[start : start + IDS_PER_QUERY]
             try:
-                read = await self._json("GET", "/entities", params={"id": ",".join(chunk), "limit": MAX_LIMIT})
+                read = await self._json(
+                    "GET", "/entities", params={**params, "id": ",".join(chunk), "limit": len(chunk)}
+                )
             except Refused as refused:
-                if not _refused_ids(refused):
+                too_long = getattr(refused, "upstream_status", None) == 414
+                if not (too_long or (lenient and _refused_ids(refused))):
                     raise
                 singles.extend(chunk)
                 continue
-            for entity in read if isinstance(read, list) else []:
+            if not isinstance(read, list):
+                raise bad_gateway(f"{SERVICE} sent an unexpected answer.")
+            for entity in read:
                 if isinstance(entity, dict) and entity.get("id") in chunk:
                     found[entity["id"]] = entity
-        gate = self._single_reads()
+        # A single read has no type to give; the attributes stay as asked.
+        single_params = {key: value for key, value in params.items() if key != "type"}
+        selected = [name for name in single_params.get("attrs", "").split(",") if name]
 
         async def one(single: str) -> None:
-            async with gate:
-                try:
-                    found[single] = await self.entity(single)
-                except Refused as refused:
-                    if refused.kind != "not_found" and not _refused_ids(refused):
-                        raise
+            try:
+                entity = await self._json("GET", f"/entities/{_segment(single)}", params=single_params)
+            except Refused as refused:
+                if refused.kind == "not_found" or (lenient and leave_out_refused and _refused_ids(refused)):
+                    return
+                raise
+            if not isinstance(entity, dict):
+                raise bad_gateway(f"{SERVICE} sent an unexpected answer.")
+            if selected and not any(name in entity for name in selected):
+                return
+            found[single] = entity
 
-        try:
-            async with asyncio.TaskGroup() as group:
-                for single in singles:
-                    group.create_task(one(single))
-        except* Refused as failed:
-            raise failed.exceptions[0] from None
+        await gather_bounded(self._single_reads(), singles, one)
         return found
 
     async def _existing(self, entity_id: str) -> dict[str, Any]:
@@ -797,13 +812,8 @@ class ContextBroker:
 
     async def _types_of(self, ids: list[str]) -> dict[str, Any]:
         """The types of those IDs that exist."""
-        known: dict[str, Any] = {}
-        for start in range(0, len(ids), BATCH):
-            chunk = ids[start : start + BATCH]
-            found = await self._json("GET", "/entities", params={"id": ",".join(chunk), "limit": MAX_LIMIT})
-            for entity in found if isinstance(found, list) else []:
-                known[entity.get("id")] = entity.get("type")
-        return known
+        found = await self._by_ids(ids, leave_out_refused=False)
+        return {entity_id: entity.get("type") for entity_id, entity in found.items()}
 
     async def import_entities(self, entities: list[Any]) -> list[dict[str, Any]]:
         """Creates or replaces entities. The result has one line per entry, in order."""

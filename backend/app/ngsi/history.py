@@ -37,6 +37,7 @@ import httpx
 
 from app.config import Settings
 from app.errors import Refused, bad_gateway, invalid, unauthorized
+from app.ngsi.bounded import gather_bounded
 from app.ngsi.broker import Limited
 from app.ngsi.failures import reason_from, unreachable
 
@@ -299,25 +300,17 @@ class AttributeHistory:
         whose states can't be read for its own sake (not found, refused) is left out; a failing service fails the
         whole answer, and the reads still running stop."""
         wanted = list(dict.fromkeys(i for i in entity_ids if isinstance(i, str) and i))
-        gate = self._status_gate()
-
         found: dict[str, dict[str, dict[str, Any]]] = {}
 
         async def one(entity_id: str) -> None:
             # What concerns one entity leaves out that entity only; a failing service fails the request.
-            async with gate:
-                try:
-                    found[entity_id] = await self.status(entity_id)
-                except Refused as refused:
-                    if refused.kind not in ("not_found", "invalid"):
-                        raise
+            try:
+                found[entity_id] = await self.status(entity_id)
+            except Refused as refused:
+                if refused.kind not in ("not_found", "invalid"):
+                    raise
 
-        try:
-            async with asyncio.TaskGroup() as group:
-                for entity_id in wanted:
-                    group.create_task(one(entity_id))
-        except* Refused as failed:
-            raise failed.exceptions[0] from None
+        await gather_bounded(self._status_gate(), wanted, one)
         return {i: found[i] for i in wanted if i in found}
 
     # Time-shift ---------------------------------------------------------------

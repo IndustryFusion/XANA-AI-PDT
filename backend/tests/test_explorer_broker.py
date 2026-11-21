@@ -839,6 +839,67 @@ def test_import_tells_created_from_updated(client, broker):
     assert upserts and all("options" not in r.url.params for r in upserts)
 
 
+def test_a_single_read_the_broker_fails_fails_the_read_of_many(client, broker):
+    broker.entities["urn:a,b"] = {"id": "urn:a,b", "type": "T"}
+    entity = broker._entity
+
+    def failing(request, path):
+        if request.url.path.endswith("/entities/urn:a,b"):
+            return httpx.Response(500, json={"title": "Internal error"})
+        return entity(request, path)
+
+    broker._entity = failing
+    assert client.post("/api/ngsi/entities-by-id", json={"ids": ["urn:a,b", MACHINE]}).status_code == 502
+
+
+def test_an_import_the_broker_refuses_to_read_is_refused_and_writes_nothing(client, broker):
+    broker.entities["urn:n:9"] = {"id": "urn:n:9", "type": "Other"}
+    query, entity = broker._query, broker._entity
+    bad = httpx.Response(400, json={"title": "Bad request", "detail": "refused"})
+
+    def refusing(params):
+        return bad if "id" in params else query(params)
+
+    def refusing_one(request, path):
+        return bad if request.method == "GET" else entity(request, path)
+
+    broker._query, broker._entity = refusing, refusing_one
+    answer = client.post("/api/ngsi/import", json=[{"id": "urn:n:9", "type": "T"}])
+    assert answer.status_code == 422
+    assert broker.entities["urn:n:9"] == {"id": "urn:n:9", "type": "Other"}
+
+
+def test_a_list_answer_that_is_no_list_fails_the_read_of_many(client, broker):
+    query = broker._query
+
+    def odd(params):
+        return httpx.Response(200, json={"oops": 1}) if "id" in params else query(params)
+
+    broker._query = odd
+    assert client.post("/api/ngsi/entities-by-id", json={"ids": ["urn:p:0", "urn:p:1"]}).status_code == 502
+
+
+def test_import_reads_an_existing_id_with_a_comma_on_its_own(client, broker):
+    broker.entities["urn:a,b"] = {"id": "urn:a,b", "type": "T"}
+    answer = client.post("/api/ngsi/import", json=[{"id": "urn:a,b", "type": "T"}, {"id": "urn:n:3", "type": "T"}])
+    assert [r["result"] for r in answer.json()] == ["updated", "created"]
+
+
+def test_import_whose_id_list_the_broker_refuses_reads_each_on_its_own(client, broker):
+    broker.entities["urn:n:4"] = {"id": "urn:n:4", "type": "T"}
+    query = broker._query
+
+    def refusing(params):
+        if "id" in params and "," in params["id"]:
+            return httpx.Response(400, json={"title": "Bad request", "detail": "invalid id"})
+        return query(params)
+
+    broker._query = refusing
+    answer = client.post("/api/ngsi/import", json=[{"id": "urn:n:4", "type": "T"}, {"id": "urn:n:5", "type": "T"}])
+    assert answer.status_code == 200
+    assert [r["result"] for r in answer.json()] == ["updated", "created"]
+
+
 def test_reimporting_without_an_attribute_removes_it(client, broker):
     first = {"id": "urn:n:2", "type": "T", "a": {"type": "Property", "value": 1}, "b": {"type": "Property", "value": 2}}
     assert client.post("/api/ngsi/import", json=[first]).json()[0]["result"] == "created"
@@ -1132,6 +1193,111 @@ def test_has_attribute_returns_whole_entities(client, broker):
     assert [e["id"] for e in found] == expected
     assert all("b" in e and "a" in e for e in found)
     assert answer.headers["X-Total-Count"] == "4"
+
+
+def test_has_attribute_whose_id_list_the_broker_refuses_is_refused_with_one_query(client, broker):
+    many(broker)
+    query = broker._query
+
+    def refusing(params):
+        if "id" in params and "," in params["id"]:
+            return httpx.Response(400, json={"title": "Bad request", "detail": "invalid id"})
+        return query(params)
+
+    broker._query = refusing
+    broker.requests.clear()
+    answer = client.get("/api/ngsi/entities", params={"type": "T", "has_attr": "a"})
+    assert answer.status_code == 422
+    # the filter's query and the refused list, and no single reads
+    assert not [r for r in broker.requests if r.url.path.startswith("/ngsi-ld/v1/entities/")]
+
+
+def test_has_attribute_whose_id_list_is_too_long_reads_each_on_its_own(client, broker):
+    many(broker)
+    query = broker._query
+
+    def too_long(params):
+        if "id" in params and "," in params["id"]:
+            return httpx.Response(414, text="URI Too Long")
+        return query(params)
+
+    broker._query = too_long
+    found = client.get("/api/ngsi/entities", params={"type": "T", "has_attr": "a"}).json()
+    assert [e["id"] for e in found] == ["urn:p:0", "urn:p:2", "urn:p:4", "urn:p:6"]
+    assert all("b" in e and "a" in e for e in found)
+
+
+def test_has_attribute_with_a_comma_id_and_attributes_the_broker_refuses_is_refused(client, broker):
+    broker.entities["urn:p:x,y"] = {"id": "urn:p:x,y", "type": "T", "a": {"type": "Property", "value": 1}}
+    entity = broker._entity
+
+    def refusing_one(request, path):
+        if request.url.params.get("attrs") == "bad":
+            return httpx.Response(400, json={"title": "Bad request", "detail": "invalid attrs"})
+        return entity(request, path)
+
+    broker._entity = refusing_one
+    answer = client.get("/api/ngsi/entities", params={"type": "T", "has_attr": "a", "attrs": "bad"})
+    assert answer.status_code == 422
+
+
+def test_has_attribute_with_attributes_the_broker_refuses_is_refused_not_empty(client, broker):
+    many(broker)
+    query, entity = broker._query, broker._entity
+    bad = httpx.Response(400, json={"title": "Bad request", "detail": "invalid attrs"})
+
+    def refusing(params):
+        if "id" in params and params.get("attrs") == "bad":
+            return bad
+        return query(params)
+
+    def refusing_one(request, path):
+        if request.url.params.get("attrs") == "bad":
+            return bad
+        return entity(request, path)
+
+    broker._query, broker._entity = refusing, refusing_one
+    answer = client.get("/api/ngsi/entities", params={"type": "T", "has_attr": "a", "attrs": "bad"})
+    assert answer.status_code == 422
+
+
+def test_a_single_read_that_answers_no_entity_fails_the_read_of_many(client, broker):
+    broker.entities["urn:a,b"] = {"id": "urn:a,b", "type": "T"}
+    entity = broker._entity
+
+    def listing(request, path):
+        if request.url.path.endswith("/entities/urn:a,b"):
+            return httpx.Response(200, json=["x"])
+        return entity(request, path)
+
+    broker._entity = listing
+    assert client.post("/api/ngsi/entities-by-id", json={"ids": ["urn:a,b", MACHINE]}).status_code == 502
+
+
+def test_has_attribute_reads_an_id_with_a_comma_on_its_own(client, broker):
+    broker.entities["urn:p:x,y"] = {
+        "id": "urn:p:x,y",
+        "type": "T",
+        "a": {"type": "Property", "value": 1},
+        "b": {"type": "Property", "value": 2},
+    }
+    found = client.get("/api/ngsi/entities", params={"type": "T", "has_attr": "a"}).json()
+    entity = next(e for e in found if e["id"] == "urn:p:x,y")
+    assert entity["b"]["value"] == 2
+
+
+def test_has_attribute_leaves_out_a_single_read_without_the_selected_attributes(client, broker):
+    broker.entities["urn:p:x,y"] = {"id": "urn:p:x,y", "type": "T", "a": {"type": "Property", "value": 1}}
+    entity = broker._entity
+
+    def bare(request, path):
+        if request.url.path.endswith("/entities/urn:p:x,y"):
+            return httpx.Response(200, json={"id": "urn:p:x,y", "type": "T"})
+        return entity(request, path)
+
+    broker._entity = bare
+    found = client.get("/api/ngsi/entities", params={"type": "T", "has_attr": "a", "attrs": "c"}).json()
+    assert [e["id"] for e in found] == []
 
 
 def test_has_attribute_with_selected_attributes(client, broker):

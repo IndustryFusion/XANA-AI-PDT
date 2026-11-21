@@ -506,9 +506,12 @@ async def test_a_partial_answer_that_is_not_json_expects_nothing():
 def test_a_write_through_the_application_expects_a_delivery():
     """The wiring in `create_app`: without it, a failed delivery could never be noticed."""
     app = create_app(make_settings(llm_provider="scripted"))
+    # The broker as it answers: a list for the read of existing entities, a 207 for the upsert.
     app.state.broker._transport = httpx.MockTransport(
-        lambda r: httpx.Response(
-            207 if r.url.path.endswith("upsert") else 200, json={"success": ["urn:a"], "errors": []}
+        lambda r: (
+            httpx.Response(207, json={"success": ["urn:a"], "errors": []})
+            if r.url.path.endswith("upsert")
+            else httpx.Response(200, json=[])
         )
     )
     live = app.state.live
