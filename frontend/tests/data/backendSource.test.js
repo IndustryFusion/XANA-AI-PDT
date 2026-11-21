@@ -18,6 +18,7 @@ import { afterEach, beforeEach, vi } from 'vitest'
 import { bindArea, DataError, OPERATIONS } from '../../src/data'
 import * as backend from '../../src/data/sources/backend'
 import { TIMEOUT_MS } from '../../src/data/sources/backend/http'
+import * as entitiesModule from '../../src/data/sources/backend/entities'
 import { fromBackend, outboundFiles, toBackend } from '../../src/data/sources/backend/map'
 import { RECONNECT_DELAYS_MS } from '../../src/data/sources/backend/runs'
 import * as mock from '../../src/data/sources/mock'
@@ -406,6 +407,44 @@ describe('entities', () => {
     expect(fn.calls.map((c) => c.key)).toEqual([
       'POST /api/ngsi/entities-by-id', 'GET /api/ngsi/entities/urn%3Aa', 'GET /api/ngsi/entities/urn%3Ab', 'GET /api/ngsi/entities/urn%3Anone',
     ])
+  })
+
+  test('an answer for many that is no object of answers is no answer: each is read on its own', async () => {
+    const a = { id: 'urn:a', type: 'T' }
+    for (const answer of [{ body: '' }, { status: 204 }, { body: 'null' }]) {
+      fakeFetch({ 'POST /api/ngsi/entities-by-id': answer, 'GET /api/ngsi/entities/urn%3Aa': { body: a } })
+      const settled = Promise.allSettled([entities.getEntity('urn:a'), entities.getEntity('urn:b')])
+      const result = await Promise.race([settled, new Promise((resolve) => setTimeout(() => resolve('hung'), 500))])
+      expect(result).not.toBe('hung')
+      expect(result[0].value).toEqual(a)
+      expect(result[1].reason).toMatchObject({ kind: 'not_found' })
+    }
+  })
+
+  test('the reads again on their own go at most six at once', async () => {
+    let running = 0
+    let most = 0
+    const fn = vi.fn(async (url, init = {}) => {
+      if (init.method === 'POST') return new Response(JSON.stringify({ error: { kind: 'unavailable', message: 'down' } }), { status: 502 })
+      running += 1
+      most = Math.max(most, running)
+      await new Promise((resolve) => setTimeout(resolve, 5))
+      running -= 1
+      const id = decodeURIComponent(new URL(url, 'http://ui.test').pathname.split('/').pop())
+      return new Response(JSON.stringify({ id, type: 'T' }), { status: 200 })
+    })
+    vi.stubGlobal('fetch', fn)
+    const ids = Array.from({ length: 30 }, (_, i) => `urn:n:${i}`)
+    const answers = await Promise.all(ids.map((id) => entities.getEntity(id)))
+    expect(answers.map((x) => x.id)).toEqual(ids)
+    expect(most).toBe(entitiesModule.SINGLE_READS)
+  })
+
+  test('a refusal of the whole request reaches every caller without reading each again', async () => {
+    const fn = fakeFetch({ 'POST /api/ngsi/entities-by-id': { status: 401, body: { error: { kind: 'unauthorized', message: 'Sign in again.' } } } })
+    const answers = await Promise.allSettled([entities.getEntity('urn:a'), entities.getEntity('urn:b')])
+    expect(answers.map((x) => x.reason?.kind)).toEqual(['unauthorized', 'unauthorized'])
+    expect(fn.calls.map((c) => c.key)).toEqual(['POST /api/ngsi/entities-by-id'])
   })
 
   test('attribute states asked for together are read in one request, and a failure reaches every caller', async () => {

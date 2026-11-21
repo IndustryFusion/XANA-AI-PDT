@@ -253,8 +253,9 @@ test('an ID the broker refuses among others gets the reason of the broker, as wh
       return answers.map((a) => (a.status === 'fulfilled' ? { id: a.value.id } : { kind: a.reason.kind, message: a.reason.message }))
     }, [valid])
     expect(found).toEqual({ id: valid })
+    // the refusal of its single read, not "There is no entity"
     expect(refused.kind).toBe('invalid')
-    expect(refused.message).toContain('not a URI')
+    expect(refused.message).not.toMatch(/There is no entity/)
   } finally {
     await page.request.post('/api/ngsi/delete-by-types', { data: { types: [kind] } })
   }

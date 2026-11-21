@@ -29,14 +29,22 @@ const raw = { raw: true }
 export const MAX_IDS = 100
 /** IDs per request for many entities' latest states: each is read from the time series, so fewer. */
 export const MAX_STATUS_IDS = 20
+/**
+ * Single reads at once when reads of a task are read again on their own: about what a browser sends at once to
+ * one host, so that none waits in its queue long enough to time out.
+ */
+export const SINGLE_READS = 6
+/** Refusals that hold for every ID of a request alike: reading each again on its own would only repeat them. */
+const WHOLE_REQUEST = new Set(['unauthorized', 'invalid'])
 
 /**
  * Reads asked for in the same task go out together: one ID by its own request, as always; several in one
  * request to the backend's `…-by-id` endpoint, `size` IDs at a time, each caller getting its own answer. A tree
  * of entities expanding at once thus reads a level in one request instead of one per entity. A batch never fails
  * more callers than single reads would: an ID its answer leaves out (not found, or refused by the broker), and
- * every ID of a request that fails or does not answer in time, is read again on its own, so each caller gets the
- * answer or the error of its single read.
+ * every ID of a request that fails, does not answer in time or answers no object, is read again on its own,
+ * SINGLE_READS at once, so each caller gets the answer or the error of its single read. A refusal that holds for
+ * the whole request (not signed in, too many IDs) reaches every caller as it is.
  */
 function batched(readOne, readMany, size) {
   let pending = null
@@ -45,7 +53,7 @@ function batched(readOne, readMany, size) {
     pending = null
     const ids = [...waiting.keys()]
     const settle = (id, ok, value) => waiting.get(id).forEach((caller) => (ok ? caller.resolve(value) : caller.reject(value)))
-    const single = async (id) => {
+    const read = async (id) => {
       try {
         settle(id, true, await readOne(id))
       } catch (error) {
@@ -53,9 +61,27 @@ function batched(readOne, readMany, size) {
       }
     }
     if (ids.length === 1) {
-      await single(ids[0])
+      await read(ids[0])
       return
     }
+    // The IDs read again on their own: SINGLE_READS at once, the rest waiting here rather than in the browser.
+    const queue = []
+    let running = 0
+    const next = () => {
+      while (running < SINGLE_READS && queue.length) {
+        const { id, done } = queue.shift()
+        running += 1
+        read(id).finally(() => {
+          running -= 1
+          done()
+          next()
+        })
+      }
+    }
+    const single = (id) => new Promise((done) => {
+      queue.push({ id, done })
+      next()
+    })
     const chunks = []
     for (let start = 0; start < ids.length; start += size) chunks.push(ids.slice(start, start + size))
     // The chunks go out together, each answering its own callers.
@@ -63,7 +89,13 @@ function batched(readOne, readMany, size) {
       let found
       try {
         found = await readMany(chunk)
-      } catch {
+      } catch (error) {
+        if (WHOLE_REQUEST.has(error?.kind)) chunk.forEach((id) => settle(id, false, error))
+        else await Promise.all(chunk.map(single))
+        return
+      }
+      // An answer that is no object of answers by ID is no answer.
+      if (found === null || typeof found !== 'object' || Array.isArray(found)) {
         await Promise.all(chunk.map(single))
         return
       }
