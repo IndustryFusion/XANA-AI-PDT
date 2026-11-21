@@ -34,8 +34,30 @@ export const MAX_STATUS_IDS = 20
  * one host, so that none waits in its queue long enough to time out.
  */
 export const SINGLE_READS = 6
-/** Refusals that hold for every ID of a request alike: reading each again on its own would only repeat them. */
-const WHOLE_REQUEST = new Set(['unauthorized', 'invalid'])
+/**
+ * Refusals that hold for every ID of a request alike: reading each again on its own would only repeat them. Not
+ * `invalid`: the backend refuses a whole request also for a single malformed ID in it.
+ */
+const WHOLE_REQUEST = new Set(['unauthorized'])
+
+// The reads again on their own, of every reader and every task: SINGLE_READS at once, the rest waiting here
+// rather than in the browser, where their timeout would already run.
+const pool = { running: 0, queue: [] }
+function drain() {
+  while (pool.running < SINGLE_READS && pool.queue.length) {
+    const { task, done } = pool.queue.shift()
+    pool.running += 1
+    task().finally(() => {
+      pool.running -= 1
+      done()
+      drain()
+    })
+  }
+}
+const pooled = (task) => new Promise((done) => {
+  pool.queue.push({ task, done })
+  drain()
+})
 
 /**
  * Reads asked for in the same task go out together: one ID by its own request, as always; several in one
@@ -44,7 +66,8 @@ const WHOLE_REQUEST = new Set(['unauthorized', 'invalid'])
  * more callers than single reads would: an ID its answer leaves out (not found, or refused by the broker), and
  * every ID of a request that fails, does not answer in time or answers no object, is read again on its own,
  * SINGLE_READS at once, so each caller gets the answer or the error of its single read. A refusal that holds for
- * the whole request (not signed in, too many IDs) reaches every caller as it is.
+ * the whole request (not signed in) reaches every caller as it is, and once one of these single reads gets no
+ * answer, the ones still waiting fail with it.
  */
 function batched(readOne, readMany, size) {
   let pending = null
@@ -64,23 +87,20 @@ function batched(readOne, readMany, size) {
       await read(ids[0])
       return
     }
-    // The IDs read again on their own: SINGLE_READS at once, the rest waiting here rather than in the browser.
-    const queue = []
-    let running = 0
-    const next = () => {
-      while (running < SINGLE_READS && queue.length) {
-        const { id, done } = queue.shift()
-        running += 1
-        read(id).finally(() => {
-          running -= 1
-          done()
-          next()
-        })
+    // Once a read again on its own gets no answer, the backend isn't answering in time: the ones of this task
+    // still waiting fail with it instead of each waiting out its own timeout.
+    let unanswered = null
+    const single = (id) => pooled(async () => {
+      if (unanswered) {
+        settle(id, false, unanswered)
+        return
       }
-    }
-    const single = (id) => new Promise((done) => {
-      queue.push({ id, done })
-      next()
+      try {
+        settle(id, true, await readOne(id))
+      } catch (error) {
+        if (error?.kind === 'unavailable') unanswered = error
+        settle(id, false, error)
+      }
     })
     const chunks = []
     for (let start = 0; start < ids.length; start += size) chunks.push(ids.slice(start, start + size))

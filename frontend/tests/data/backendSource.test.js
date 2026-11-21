@@ -447,6 +447,51 @@ describe('entities', () => {
     expect(fn.calls.map((c) => c.key)).toEqual(['POST /api/ngsi/entities-by-id'])
   })
 
+  test('the six reads at once are shared by entities and latest states and by every task', async () => {
+    let running = 0
+    let most = 0
+    const fn = vi.fn(async (url, init = {}) => {
+      if (init.method === 'POST') return new Response(JSON.stringify({ error: { kind: 'unavailable', message: 'down' } }), { status: 502 })
+      running += 1
+      most = Math.max(most, running)
+      await new Promise((resolve) => setTimeout(resolve, 5))
+      running -= 1
+      return new Response(JSON.stringify(url.includes('attr-status') ? {} : { id: 'x', type: 'T' }), { status: 200 })
+    })
+    vi.stubGlobal('fetch', fn)
+    const ids = Array.from({ length: 20 }, (_, i) => `urn:n:${i}`)
+    const first = Promise.all([...ids.map((id) => entities.getEntity(id)), ...ids.map((id) => entities.getAttributeStatus(id))])
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    const second = Promise.all(ids.map((id) => entities.getEntity(`${id}:b`)))
+    await Promise.all([first, second])
+    expect(most).toBe(entitiesModule.SINGLE_READS)
+  })
+
+  test('a malformed ID among others fails only itself', async () => {
+    const a = { id: 'urn:a', type: 'T' }
+    fakeFetch({
+      'POST /api/ngsi/entities-by-id': { status: 422, body: { error: { kind: 'invalid', message: 'ids.1: Input should be a valid string' } } },
+      'GET /api/ngsi/entities/urn%3Aa': { body: a },
+      'GET /api/ngsi/entities/42': { status: 404, body: { error: { kind: 'not_found', message: 'There is no entity 42.' } } },
+    })
+    const [gotA, bad] = await Promise.allSettled([entities.getEntity('urn:a'), entities.getEntity(42)])
+    expect(gotA.value).toEqual(a)
+    expect(bad.status).toBe('rejected')
+  })
+
+  test('once a read again on its own gets no answer, the ones still waiting fail with it', async () => {
+    const fn = vi.fn(async (url, init = {}) => {
+      if (init.method === 'POST') return new Response(JSON.stringify({ error: { kind: 'unavailable', message: 'down' } }), { status: 502 })
+      throw new DOMException('The operation was aborted.', 'AbortError')
+    })
+    vi.stubGlobal('fetch', fn)
+    const ids = Array.from({ length: 30 }, (_, i) => `urn:n:${i}`)
+    const answers = await Promise.allSettled(ids.map((id) => entities.getEntity(id)))
+    expect(answers.every((x) => x.status === 'rejected' && x.reason.kind === 'unavailable')).toBe(true)
+    // the batch, and no more single reads than were already on their way
+    expect(fn.mock.calls.length).toBeLessThanOrEqual(1 + entitiesModule.SINGLE_READS)
+  })
+
   test('attribute states asked for together are read in one request, and a failure reaches every caller', async () => {
     const fn = fakeFetch({ 'POST /api/ngsi/attr-status-by-id': { body: { 'urn:a': { x: { deleted: false } }, 'urn:b': {} } } })
     const [a, b] = await Promise.all([entities.getAttributeStatus('urn:a'), entities.getAttributeStatus('urn:b')])

@@ -234,6 +234,9 @@ test('a level whose request for many fails still loads, each entity read on its 
     const root = node(page, id('root'))
     await root.getByRole('button', { name: 'Expand all relationships of Fallback root' }).click()
     for (const n of ['a', 'b']) await expect(root.locator(`.attr-line__nested [data-entity="${id(n)}"]`)).toHaveCount(1)
+    // loaded, not shown as a problem
+    for (const n of ['a', 'b']) await expect(root.locator(`.attr-line__nested [data-entity="${id(n)}"]`)).toContainText(`Child ${n}`)
+    await expect(root.locator('.entity-node--problem')).toHaveCount(0)
     for (const n of ['a', 'b']) expect(singles).toContain(`/api/ngsi/entities/${id(n)}`)
   } finally {
     await page.request.post('/api/ngsi/delete-by-types', { data: { types: [kind] } })
