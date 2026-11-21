@@ -540,7 +540,7 @@ The contexts an imported entity may name SHALL be the ETSI core context, a built
 - **THEN** the list says that contexts can't be added, and adding is refused as `unavailable`
 
 ### Requirement: Many entities at once
-The backend SHALL give the entities of a list of IDs, and the latest states of their attributes, in one request each, up to 1,000 IDs. It SHALL read the broker for up to 100 entities per query, and the time series for at most four entities at once. An ID without an entity SHALL be left out of the answer.
+The backend SHALL give the entities of a list of IDs, and the latest states of their attributes, in one request each, up to 1,000 IDs of at most 2,048 characters each. It SHALL read the broker for up to 100 entities per query, and the time series for at most four entities at once. An ID without an entity SHALL be left out of the answer.
 
 #### Scenario: Many entities
 - **WHEN** 250 existing entities and one ID without an entity are asked for in one request
@@ -565,6 +565,10 @@ The backend SHALL give the entities of a list of IDs, and the latest states of t
 #### Scenario: Too many IDs
 - **WHEN** more than 1,000 IDs are asked for in one request
 - **THEN** the request is refused as invalid
+
+#### Scenario: An ID too long
+- **WHEN** an ID longer than 2,048 characters is among the IDs asked for
+- **THEN** the request is refused as invalid, and nothing is sent to the broker or the time series
 
 #### Scenario: Latest states of many entities
 - **WHEN** the latest attribute states of many entities are asked for in one request
