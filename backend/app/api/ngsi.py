@@ -30,7 +30,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Body, Query, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
 
 from app.errors import Refused, invalid
 from app.ngsi.broker import check_document
@@ -58,10 +58,13 @@ class TypeNames(BaseModel):
 
 # Many entities at once, for a tree of entities: more than this is refused rather than read.
 MAX_IDS = 1000
+# The longest entity ID accepted there: an ID is a URI, and the platform's are far shorter (about 120
+# characters for the IRIs of an OPC UA model); a longer one is refused before anything reaches the broker.
+MAX_ID_LENGTH = 2048
 
 
 class EntityIds(BaseModel):
-    ids: list[str] = Field(max_length=MAX_IDS)
+    ids: list[Annotated[str, StringConstraints(max_length=MAX_ID_LENGTH)]] = Field(max_length=MAX_IDS)
 
 
 def _answer(found: list) -> Any:

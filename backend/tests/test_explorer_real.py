@@ -803,3 +803,14 @@ def test_many_entities_by_id_in_one_request(api):
     assert sorted(found) == sorted(ids)
     assert {entity["type"] for entity in found.values()} == {kind}
     api.post("/api/ngsi/delete-by-types", json={"types": [kind]})
+
+
+@needs_broker
+def test_an_id_longer_than_allowed_is_refused_and_the_others_still_read(api, entity):
+    from app.api.ngsi import MAX_ID_LENGTH
+
+    too_long = "urn:test:long:" + "a" * MAX_ID_LENGTH
+    assert api.post("/api/ngsi/entities-by-id", json={"ids": [entity["id"], too_long]}).status_code == 422
+    assert api.post("/api/ngsi/attr-status-by-id", json={"ids": [entity["id"], too_long]}).status_code == 422
+    found = api.post("/api/ngsi/entities-by-id", json={"ids": [entity["id"]]}).json()
+    assert list(found) == [entity["id"]]

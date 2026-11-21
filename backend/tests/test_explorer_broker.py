@@ -28,7 +28,7 @@ from app.ngsi import query as q
 from app.ngsi.broker import ContextBroker, check_document
 from app.ngsi.failures import scrubbed
 from tests.conftest import make_settings
-from tests.explorer_support import IRI, MACHINE, TOKEN, Broker, app_with
+from tests.explorer_support import IRI, MACHINE, TOKEN, Broker, Rows, app_with
 
 ENTITY = f"/api/ngsi/entities/{MACHINE}"
 CORE = "https://uri.etsi.org/ngsi-ld/v1/ngsi-ld-core-context.jsonld"
@@ -1451,6 +1451,24 @@ def test_an_id_with_a_comma_is_read_on_its_own(client, broker):
     broker.entities["urn:a,b"] = {"id": "urn:a,b", "type": "T"}
     found = client.post("/api/ngsi/entities-by-id", json={"ids": ["urn:a,b", MACHINE, "urn:c,d"]}).json()
     assert sorted(found) == sorted(["urn:a,b", MACHINE])
+
+
+def test_an_id_longer_than_allowed_is_refused_before_the_broker(broker):
+    from app.api.ngsi import MAX_ID_LENGTH
+
+    rows = Rows()
+    client = TestClient(app_with(broker, rows))
+    at_limit = "urn:x:" + "a" * (MAX_ID_LENGTH - len("urn:x:"))
+    too_long = at_limit + "a"
+    assert client.post("/api/ngsi/entities-by-id", json={"ids": [MACHINE, at_limit]}).status_code == 200
+    assert client.post("/api/ngsi/attr-status-by-id", json={"ids": [MACHINE, at_limit]}).status_code == 200
+    broker.requests.clear()
+    rows.requests.clear()
+    for path in ("/api/ngsi/entities-by-id", "/api/ngsi/attr-status-by-id"):
+        assert client.post(path, json={"ids": [MACHINE, too_long]}).status_code == 422
+    # nothing reaches the broker or the time series
+    assert broker.requests == []
+    assert rows.requests == []
 
 
 def test_more_ids_than_allowed_at_once_are_refused(client):
