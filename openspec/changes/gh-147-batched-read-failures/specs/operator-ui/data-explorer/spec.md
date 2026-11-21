@@ -14,12 +14,12 @@ The Data explorer SHALL read the entities, and the latest states of their attrib
 - **THEN** it is read on its own, as before
 
 #### Scenario: Reading together fails
-- **WHEN** the request for several entities fails as a whole, or doesn't answer in time
+- **WHEN** the request for several entities, or for their latest states, fails as a whole, or doesn't answer in time
 - **THEN** each of them is read on its own, and only a node whose own read fails shows the failure
 
 #### Scenario: An entity the broker refuses
 - **WHEN** the broker refuses one of several entities read together, such as an ID that is not a URI
-- **THEN** that entity is read on its own, and its node shows the broker's reason, as when it is read alone, while the others are shown
+- **THEN** that entity is read on its own, and its node shows the reason its single read gives, as when it is read alone, while the others are shown
 
 #### Scenario: Read anew
 - **WHEN** an entity is read again after a change, while an earlier read of it may still be on its way
