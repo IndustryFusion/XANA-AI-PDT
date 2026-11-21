@@ -15,7 +15,7 @@ The Data explorer SHALL read the entities, and the latest states of their attrib
 
 #### Scenario: Reading together fails
 - **WHEN** the request for several entities, or for their latest states, fails as a whole, or doesn't answer in time
-- **THEN** each of them is read on its own, and only a node whose own read fails shows the failure
+- **THEN** each of them is read on its own, a few at a time, and only a node whose own read fails shows the failure; a refusal of the whole request, such as not being signed in, reaches each of them as it is, and once one of these reads gets no answer, the ones still waiting show that failure
 
 #### Scenario: An entity the broker refuses
 - **WHEN** the broker refuses one of several entities read together, such as an ID that is not a URI

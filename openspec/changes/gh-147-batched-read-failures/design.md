@@ -33,6 +33,8 @@ The IDs read again on their own are read at the same time, as before #141, but a
 
 ## Risks / Trade-offs
 
-- A request for several that times out is followed by its single reads, so a node of such a level may wait for the timeout and its own single read. The level loads where single reads succeed, where it failed before.
+- A request for several that times out is followed by its single reads, so a node of such a level may wait for the timeout and its own single read. The level loads where single reads succeed, where it failed before. Once a single read gets no answer either, the backend is taken as not answering: the reads still waiting fail with it, so no node waits out one timeout after another.
+- The six reads at once are shared by entities and latest states and by every task, so the bound holds for the page as a whole.
+- A request refused for a malformed ID in it is read again ID by ID, since the backend refuses the whole request for one such ID; only not being signed in is passed on as it is.
 - A level whose request fails sends one request per entity, as before #141, at most six at once, so that none of them waits in the browser's queue until its timeout runs out. A refusal that holds for the whole request (not signed in, too many IDs) is passed on as it is instead.
 - Every entity an answer leaves out costs one more request, also one that simply doesn't exist, such as the target of a relationship to a deleted entity. A level with many such targets is read in more than one request.
