@@ -33,40 +33,41 @@ export const MAX_STATUS_IDS = 20
 /**
  * Reads asked for in the same task go out together: one ID by its own request, as always; several in one
  * request to the backend's `…-by-id` endpoint, `size` IDs at a time, each caller getting its own answer. A tree
- * of entities expanding at once thus reads a level in one request instead of one per entity. An ID the answer
- * leaves out gets `missing(id)`: rejected if it is an error, answered otherwise, as its single read would be.
+ * of entities expanding at once thus reads a level in one request instead of one per entity. A batch never fails
+ * more callers than single reads would: an ID its answer leaves out (not found, or refused by the broker), and
+ * every ID of a request that fails or does not answer in time, is read again on its own, so each caller gets the
+ * answer or the error of its single read.
  */
-function batched(readOne, readMany, missing, size) {
+function batched(readOne, readMany, size) {
   let pending = null
   async function flush() {
     const waiting = pending
     pending = null
     const ids = [...waiting.keys()]
     const settle = (id, ok, value) => waiting.get(id).forEach((caller) => (ok ? caller.resolve(value) : caller.reject(value)))
-    if (ids.length === 1) {
+    const single = async (id) => {
       try {
-        settle(ids[0], true, await readOne(ids[0]))
+        settle(id, true, await readOne(id))
       } catch (error) {
-        settle(ids[0], false, error)
+        settle(id, false, error)
       }
+    }
+    if (ids.length === 1) {
+      await single(ids[0])
       return
     }
     const chunks = []
     for (let start = 0; start < ids.length; start += size) chunks.push(ids.slice(start, start + size))
     // The chunks go out together, each answering its own callers.
     await Promise.all(chunks.map(async (chunk) => {
+      let found
       try {
-        const found = await readMany(chunk)
-        chunk.forEach((id) => {
-          if (Object.hasOwn(found, id)) settle(id, true, found[id])
-          else {
-            const answer = missing(id)
-            settle(id, !(answer instanceof Error), answer)
-          }
-        })
-      } catch (error) {
-        chunk.forEach((id) => settle(id, false, error))
+        found = await readMany(chunk)
+      } catch {
+        await Promise.all(chunk.map(single))
+        return
       }
+      await Promise.all(chunk.map((id) => (Object.hasOwn(found, id) ? settle(id, true, found[id]) : single(id))))
     }))
   }
   return (id) => new Promise((resolve, reject) => {
@@ -82,13 +83,11 @@ function batched(readOne, readMany, missing, size) {
 const readEntity = batched(
   (id) => request(AREA, 'GET', `/api/ngsi/entities/${seg(id)}`, raw),
   (ids) => request(AREA, 'POST', '/api/ngsi/entities-by-id', { ...raw, body: { ids } }),
-  (id) => new DataError(AREA, 'not_found', `There is no entity ${id}.`),
   MAX_IDS,
 )
 const readStatus = batched(
   (id) => request(AREA, 'GET', '/api/ngsi/attr-status', { ...raw, params: { entity_id: id } }),
   (ids) => request(AREA, 'POST', '/api/ngsi/attr-status-by-id', { ...raw, body: { ids } }),
-  () => ({}),
   MAX_STATUS_IDS,
 )
 

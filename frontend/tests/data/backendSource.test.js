@@ -355,25 +355,57 @@ describe('entities', () => {
     ])
     expect([gotA.value, gotB.value, gotAAgain.value]).toEqual([a, b, a])
     expect(missing.reason).toMatchObject({ kind: 'not_found' })
-    expect(fn.calls).toHaveLength(1)
     expect(fn.calls[0]).toMatchObject({ key: 'POST /api/ngsi/entities-by-id', body: { ids: ['urn:a', 'urn:b', 'urn:none'] } })
+    // the one the answer left out was read on its own, and said not found there
+    expect(fn.calls.slice(1).map((c) => c.key)).toEqual(['GET /api/ngsi/entities/urn%3Anone'])
     expect(await entities.getEntity('urn:a')).toEqual(a)
-    expect(fn.calls[1].key).toBe('GET /api/ngsi/entities/urn%3Aa')
+    expect(fn.calls.at(-1).key).toBe('GET /api/ngsi/entities/urn%3Aa')
   })
 
   test('an entity the answer for many latest states leaves out has no states, as when read alone', async () => {
-    fakeFetch({ 'POST /api/ngsi/attr-status-by-id': { body: { 'urn:a': { x: { deleted: false } } } } })
+    const fn = fakeFetch({
+      'POST /api/ngsi/attr-status-by-id': { body: { 'urn:a': { x: { deleted: false } } } },
+      'GET /api/ngsi/attr-status': { body: {} },
+    })
     const [a, b] = await Promise.all([entities.getAttributeStatus('urn:a'), entities.getAttributeStatus('urn:b')])
     expect(a).toEqual({ x: { deleted: false } })
     expect(b).toEqual({})
+    expect(fn.calls.at(-1)).toMatchObject({ key: 'GET /api/ngsi/attr-status', search: '?entity_id=urn%3Ab' })
   })
 
   test('many entities go in requests of at most 100 IDs, and a prototype name is not taken for an answer', async () => {
     const ids = Array.from({ length: 150 }, (_, i) => `urn:n:${i}`)
     const fn = fakeFetch({ 'POST /api/ngsi/entities-by-id': { body: {} } })
     const answers = await Promise.allSettled([...ids, 'toString'].map((id) => entities.getEntity(id)))
-    expect(fn.calls.map((c) => c.body.ids.length)).toEqual([100, 51])
+    expect(fn.calls.filter((c) => c.key.startsWith('POST')).map((c) => c.body.ids.length)).toEqual([100, 51])
     expect(answers.at(-1).reason).toMatchObject({ kind: 'not_found' })
+  })
+
+  test('an entity the broker refuses among others gets the reason of the broker, as when read alone', async () => {
+    const a = { id: 'urn:a', type: 'T' }
+    fakeFetch({
+      'POST /api/ngsi/entities-by-id': { body: { 'urn:a': a } },
+      'GET /api/ngsi/entities/not%20a%20uri': { status: 422, body: { error: { kind: 'invalid', message: 'id is not a URI' } } },
+    })
+    const [gotA, refused] = await Promise.allSettled([entities.getEntity('urn:a'), entities.getEntity('not a uri')])
+    expect(gotA.value).toEqual(a)
+    expect(refused.reason).toMatchObject({ kind: 'invalid', message: 'id is not a URI' })
+  })
+
+  test('a request for many that fails or does not answer in time fails no caller its single read would not', async () => {
+    const a = { id: 'urn:a', type: 'T' }
+    const b = { id: 'urn:b', type: 'T' }
+    const fn = fakeFetch({
+      'POST /api/ngsi/entities-by-id': { reject: new DOMException('The operation was aborted.', 'AbortError') },
+      'GET /api/ngsi/entities/urn%3Aa': { body: a },
+      'GET /api/ngsi/entities/urn%3Ab': { body: b },
+    })
+    const [gotA, gotB, gotNone] = await Promise.allSettled([entities.getEntity('urn:a'), entities.getEntity('urn:b'), entities.getEntity('urn:none')])
+    expect([gotA.value, gotB.value]).toEqual([a, b])
+    expect(gotNone.reason).toMatchObject({ kind: 'not_found' })
+    expect(fn.calls.map((c) => c.key)).toEqual([
+      'POST /api/ngsi/entities-by-id', 'GET /api/ngsi/entities/urn%3Aa', 'GET /api/ngsi/entities/urn%3Ab', 'GET /api/ngsi/entities/urn%3Anone',
+    ])
   })
 
   test('attribute states asked for together are read in one request, and a failure reaches every caller', async () => {
@@ -382,9 +414,14 @@ describe('entities', () => {
     expect(a).toEqual({ x: { deleted: false } })
     expect(b).toEqual({})
     expect(fn).toHaveBeenCalledTimes(1)
-    fakeFetch({ 'POST /api/ngsi/attr-status-by-id': { status: 502, body: { error: { kind: 'unavailable', message: 'down' } } } })
+    // the request for many fails, and so do the single reads: every caller gets the error of its single read
+    fakeFetch({
+      'POST /api/ngsi/attr-status-by-id': { status: 502, body: { error: { kind: 'unavailable', message: 'down' } } },
+      'GET /api/ngsi/attr-status': { status: 502, body: { error: { kind: 'unavailable', message: 'still down' } } },
+    })
     const failed = await Promise.allSettled([entities.getAttributeStatus('urn:a'), entities.getAttributeStatus('urn:b')])
     expect(failed.map((r) => r.status)).toEqual(['rejected', 'rejected'])
+    expect(failed[0].reason).toMatchObject({ kind: 'unavailable', message: 'still down' })
   })
 
   test('edits send attribute names unchanged, to the entity encoded as one path segment', async () => {

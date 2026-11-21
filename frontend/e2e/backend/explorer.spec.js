@@ -212,3 +212,50 @@ test('expand all reads a level of entities in one request, expands each once, an
     await page.request.post('/api/ngsi/delete-by-types', { data: { types: [kind] } })
   }
 })
+
+test('a level whose request for many fails still loads, each entity read on its own', async ({ page }) => {
+  const kind = `E2eFallback${tag()}`
+  const id = (name) => `urn:ngsi-ld:${kind}:${name}`
+  const document = [
+    { id: id('root'), type: kind, name: { type: 'Property', value: 'Fallback root' }, hasA: { type: 'Relationship', object: id('a') }, hasB: { type: 'Relationship', object: id('b') } },
+    ...['a', 'b'].map((n) => ({ id: id(n), type: kind, name: { type: 'Property', value: `Child ${n}` } })),
+  ]
+  const answer = await page.request.post('/api/ngsi/import', { data: document })
+  expect(answer.status()).toBe(200)
+  try {
+    // The request for many is lost; the entities are then read one by one from the broker.
+    await page.route('**/api/ngsi/entities-by-id', (route) => route.abort())
+    const singles = []
+    page.on('request', (request) => {
+      const path = decodeURIComponent(new URL(request.url()).pathname)
+      if (request.method() === 'GET' && path.startsWith(`/api/ngsi/entities/urn:ngsi-ld:${kind}:`)) singles.push(path)
+    })
+    await open(page, id('root'))
+    const root = node(page, id('root'))
+    await root.getByRole('button', { name: 'Expand all relationships of Fallback root' }).click()
+    for (const n of ['a', 'b']) await expect(root.locator(`.attr-line__nested [data-entity="${id(n)}"]`)).toHaveCount(1)
+    for (const n of ['a', 'b']) expect(singles).toContain(`/api/ngsi/entities/${id(n)}`)
+  } finally {
+    await page.request.post('/api/ngsi/delete-by-types', { data: { types: [kind] } })
+  }
+})
+
+test('an ID the broker refuses among others gets the reason of the broker, as when read alone', async ({ page }) => {
+  const kind = `E2eRefused${tag()}`
+  const valid = `urn:ngsi-ld:${kind}:1`
+  await create(page, { id: valid, type: kind, name: { type: 'Property', value: 'Valid' } })
+  try {
+    await page.goto('/')
+    // The data source of the page itself, reading a stored entity and a refused ID together.
+    const [found, refused] = await page.evaluate(async ([id]) => {
+      const { entities } = await import('/src/data/sources/backend/entities.js')
+      const answers = await Promise.allSettled([entities.getEntity(id), entities.getEntity('not a uri')])
+      return answers.map((a) => (a.status === 'fulfilled' ? { id: a.value.id } : { kind: a.reason.kind, message: a.reason.message }))
+    }, [valid])
+    expect(found).toEqual({ id: valid })
+    expect(refused.kind).toBe('invalid')
+    expect(refused.message).toContain('not a URI')
+  } finally {
+    await page.request.post('/api/ngsi/delete-by-types', { data: { types: [kind] } })
+  }
+})
