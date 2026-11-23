@@ -17,7 +17,7 @@
 import { useState } from 'react'
 import { sourceInfo } from '../data'
 import { Button } from '../ui/components'
-import { ProductMark } from './Brand'
+import { ProductMark, Wordmark } from './Brand'
 
 const MESSAGES = {
   unauthorized: 'Username or password is not correct.',
@@ -46,9 +46,9 @@ export default function SignInScreen({ provider, onSignIn }) {
     <main className="center-screen">
       <form className="signin card" onSubmit={submit} aria-labelledby="signin-title">
         <div className="signin__brand">
-          <ProductMark />
+          <ProductMark size={48} />
           <div>
-            <h1 id="signin-title" className="signin__title">XANA AI PDT</h1>
+            <h1 id="signin-title" className="signin__title"><Wordmark height={22} /></h1>
             <p className="muted">Process Digital Twin</p>
           </div>
         </div>

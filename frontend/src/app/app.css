@@ -44,12 +44,27 @@
   flex-wrap: wrap;
 }
 
-.app-header__brand { color: inherit; text-decoration: none; }
+/* Flex, not inline: an inline link leaves room for descenders below the brand and lifts it off centre. */
+.app-header__brand { display: flex; align-items: center; color: inherit; text-decoration: none; }
 
-.brand { display: inline-flex; align-items: center; gap: var(--space-2); }
-.brand__text { display: flex; flex-direction: column; line-height: 1.1; }
-.brand__name { font-weight: 700; }
+.brand { display: flex; align-items: center; gap: var(--space-2); }
+/* Nudged down: centred by its box, the text looks high, as the subtitle's descenders count but weigh little. */
+.brand__text { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; line-height: 1.1; transform: translateY(2px); }
 .brand__sub { font-size: var(--text-xs); color: var(--text-muted); }
+
+/* Logo images: one per theme (Brand.jsx). Dark is the default, as in tokens.css. */
+.product-mark,
+.wordmark { display: inline-flex; flex-shrink: 0; }
+.themed-img { display: block; }
+.themed-img--light { display: none; }
+
+:root[data-theme='light'] .themed-img--light { display: block; }
+:root[data-theme='light'] .themed-img--dark { display: none; }
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) .themed-img--light { display: block; }
+  :root:not([data-theme]) .themed-img--dark { display: none; }
+}
 
 .app-nav { flex: 1; min-width: 0; }
 
@@ -191,7 +206,8 @@
 
 .signin { width: min(400px, 100%); padding: var(--space-5); display: flex; flex-direction: column; gap: var(--space-3); }
 .signin__brand { display: flex; align-items: center; gap: var(--space-3); }
-.signin__title { font-size: var(--text-xl); }
+.signin__brand > div { transform: translateY(3px); } /* as .brand__text: level with the mark */
+.signin__title { font-size: var(--text-xl); line-height: 1; margin-bottom: var(--space-1); }
 .signin__error { color: var(--tone-danger); font-weight: 600; }
 .signin__hint { font-size: var(--text-xs); }
 

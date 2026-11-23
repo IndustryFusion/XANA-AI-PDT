@@ -14,25 +14,53 @@
 // limitations under the License.
 //
 
+import markDark from '../assets/brand/xana-mark-dark.png'
+import markLight from '../assets/brand/xana-mark-light.png'
+import wordmarkDark from '../assets/brand/xana-wordmark-dark.png'
+import wordmarkLight from '../assets/brand/xana-wordmark-light.png'
+
+export const PRODUCT_NAME = 'XANA AI PDT'
+const WORDMARK_RATIO = 1536 / 260 // width / height of the "XANA AI" lettering
+
 /**
- * Product mark: a neutral placeholder until a logo is chosen. Replace this
- * component to brand the application.
+ * One image per theme. CSS shows the one that matches the active theme
+ * (app.css: .themed-img), so a theme change needs no re-render and the
+ * system theme is followed without script. Both are decorative: the
+ * wrapper carries the meaning.
  */
+function ThemedImage({ light, dark, width, height }) {
+  return (
+    <>
+      <img className="themed-img themed-img--dark" src={dark} width={width} height={height} alt="" decoding="async" />
+      <img className="themed-img themed-img--light" src={light} width={width} height={height} alt="" decoding="async" />
+    </>
+  )
+}
+
+/** The XANA AI ring mark, without lettering. Decorative. */
 export function ProductMark({ size = 32 }) {
   return (
-    <svg className="product-mark" width={size} height={size} viewBox="0 0 32 32" aria-hidden="true" focusable="false">
-      <rect x="1" y="1" width="30" height="30" rx="8" fill="var(--accent-strong)" />
-      <path d="M9 9l14 14M23 9L9 23" stroke="var(--accent-contrast)" strokeWidth="3" strokeLinecap="round" />
-    </svg>
+    <span className="product-mark" aria-hidden="true">
+      <ThemedImage light={markLight} dark={markDark} width={size} height={size} />
+    </span>
+  )
+}
+
+/** The "XANA AI" lettering, announced as the product name. */
+export function Wordmark({ height = 16, label = PRODUCT_NAME }) {
+  return (
+    <span className="wordmark" role="img" aria-label={label}>
+      <ThemedImage light={wordmarkLight} dark={wordmarkDark} width={Math.round(height * WORDMARK_RATIO)} height={height} />
+    </span>
   )
 }
 
 export function Brand() {
   return (
     <span className="brand">
-      <ProductMark />
+      <ProductMark size={30} />
       <span className="brand__text">
-        <span className="brand__name">XANA AI PDT</span>
+        <Wordmark height={13} />
         <span className="brand__sub">Process Digital Twin</span>
       </span>
     </span>

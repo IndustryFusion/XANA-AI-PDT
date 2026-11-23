@@ -113,6 +113,8 @@ src/
   ui/         design tokens, themes and shared components
   data/       UI data interface, facade, mock and backend data sources
   features/   one folder per area (dashboard, incidents, history, explorer, alerts, dataspace, system)
+  assets/     brand: the XANA AI ring mark and lettering, one image per theme (shown by `app/Brand.jsx`)
+public/       favicons: the ring mark, one per browser colour scheme
 tests/        Vitest tests, mirroring src/
 e2e/          Playwright tests
 docs/         data-interface.md
