@@ -263,3 +263,23 @@ test('an ID the broker refuses among others gets the reason of the broker, as wh
     await page.request.post('/api/ngsi/delete-by-types', { data: { types: [kind] } })
   }
 })
+
+test('the way up on a real broker: what refers to an entity, expanded in place, and what refers to that', async ({ page }) => {
+  const kind = `E2eUp${tag()}`
+  const [part, pump, plant] = ['part', 'pump', 'plant'].map((n) => `urn:ngsi-ld:${kind}:${n}`)
+  const name = (value) => ({ type: 'Property', value })
+  await create(page, { id: part, type: kind, name: name('Part') })
+  await create(page, { id: pump, type: kind, name: name('Pump'), 'http://example.org/v0.1/hasPart': { type: 'Relationship', object: part } })
+  await create(page, { id: plant, type: kind, name: name('Plant'), hasPump: { type: 'Relationship', object: pump } })
+  try {
+    await open(page, part)
+    await page.getByRole('button', { name: 'Show what refers to Part' }).click()
+    await page.getByRole('button', { name: `Expand ${pump} in place` }).click()
+    await page.getByRole('button', { name: 'Show what refers to Pump' }).click()
+    await expect(page.locator(`[data-referrer="${plant}"]`)).toBeVisible()
+    await page.locator(`[data-referrer="${pump}"] > .attr-line .referrer__place`).click()
+    await expect(page.locator(`.entity-node--current[data-entity="${pump}"] .attr-line--focused`)).toBeVisible()
+  } finally {
+    await page.request.post('/api/ngsi/delete-by-types', { data: { types: [kind] } })
+  }
+})

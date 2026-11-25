@@ -1,0 +1,27 @@
+{
+  "method": "GET",
+  "path": "/api/ngsi/referenced-by?entity_id=urn%3Angsi-ld%3AMachine%3Alaser-cutter-01",
+  "status": 200,
+  "body": [
+    {
+      "id": "urn:ngsi-ld:Sensor:laser-cutter-01-temperature",
+      "type": "Sensor",
+      "name": {
+        "type": "Property",
+        "value": "Laser cutter 01 temperature"
+      },
+      "references": [
+        {
+          "path": [
+            "installedOn"
+          ]
+        },
+        {
+          "path": [
+            "measures"
+          ]
+        }
+      ]
+    }
+  ]
+}

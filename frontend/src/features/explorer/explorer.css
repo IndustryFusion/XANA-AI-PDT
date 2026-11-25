@@ -243,6 +243,12 @@
 .line-action:hover { border-color: var(--border-strong); }
 .line-action[aria-pressed='true'], .line-action[aria-expanded='true'] { border-color: var(--border-strong); color: var(--text); }
 
+/* The way up: what refers to the entity, apart from its own attributes. */
+.referrers { padding: var(--space-2) var(--space-3); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: var(--radius); }
+.referrers__title { margin: 0 0 var(--space-1); font-size: var(--text-sm); font-weight: 600; }
+.referrer__places { min-width: 0; }
+.referrer__place { overflow-wrap: anywhere; }
+
 /* Syntax colouring of values, mixed with the text colour so it stays readable on tinted lines. */
 .tok--string { color: color-mix(in srgb, var(--tone-success) 80%, var(--text)); }
 .tok--number { color: color-mix(in srgb, var(--tone-progress) 80%, var(--text)); }

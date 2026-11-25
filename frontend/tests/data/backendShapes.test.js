@@ -89,6 +89,7 @@ const ARGS = {
   'entities.getStats': () => [],
   'entities.listTypes': () => [],
   'entities.listAttributes': () => [],
+  'entities.listReferrers': () => ['urn:ngsi-ld:Machine:laser-cutter-01'],
   'entities.queryEntities': () => [{ type: 'Machine', limit: 5 }],
   'entities.getEntity': (f) => [f.body.id],
   'entities.updateAttributes': () => ['urn:m', { a: { value: 1 } }],

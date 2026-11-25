@@ -111,6 +111,7 @@ describe('mock source matches the documented shapes', () => {
     entities: {
       queryEntities: () => [{ type: 'Sensor', limit: 5 }],
       getEntity: () => [SENSOR],
+      listReferrers: () => ['urn:ngsi-ld:Machine:chiller-01'],
       updateAttributes: () => [SENSOR, { value: { value: 20.5, datasetId: 'urn:ngsi-ld:Dataset:live' } }],
       appendAttributes: () => [SENSOR, { location: { type: 'Property', value: 'Hall 2' } }],
       deleteAttribute: () => [SENSOR, 'value', { subAttribute: 'accuracy' }],

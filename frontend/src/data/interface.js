@@ -43,7 +43,7 @@ export const OPERATIONS = {
   ],
   incidents: ['listIncidents', 'getIncident', 'reopenIncident'],
   entities: [
-    'getStats', 'listTypes', 'listAttributes', 'queryEntities', 'getEntity', 'updateAttributes',
+    'getStats', 'listTypes', 'listAttributes', 'queryEntities', 'getEntity', 'listReferrers', 'updateAttributes',
     'appendAttributes', 'deleteAttribute', 'deleteEntity', 'importEntities', 'fetchImportDocument',
     'deleteByTypes', 'getAttributeHistory', 'getAttributeStatus', 'listTypesAt', 'queryEntitiesAt', 'subscribeEntities',
     'getLiveUpdateHealth', 'getValueHints', 'getUnits', 'getPrefixes',
@@ -388,6 +388,7 @@ export const SHAPES = {
     listAttributes: ['string'],
     queryEntities: [entity],
     getEntity: entity,
+    listReferrers: [{ id: 'string', references: [{ path: ['string'], datasetId: '?string' }] }],
     updateAttributes: nothing,
     appendAttributes: nothing,
     deleteAttribute: nothing,

@@ -29,6 +29,10 @@ const raw = { raw: true }
 export const MAX_IDS = 100
 /** IDs per request for many entities' latest states: each is read from the time series, so fewer. */
 export const MAX_STATUS_IDS = 20
+/** Searching every entity for references is slower than other reads. */
+export const REFERRERS_TIMEOUT_MS = 60_000
+/** Such searches at once, as many as the backend runs: the others wait here, where their timeout doesn't run yet. */
+export const REFERRER_SEARCHES = 2
 /**
  * Reads again on their own at once: below what a browser sends at once to one host, so that none of them, and no
  * other request of the page, waits in its queue long enough to time out.
@@ -42,22 +46,26 @@ const WHOLE_REQUEST = new Set(['unauthorized'])
 
 // The reads again on their own, of every reader and every task: SINGLE_READS at once, the rest waiting here
 // rather than in the browser, where their timeout would already run.
-const pool = { running: 0, queue: [] }
-function drain() {
-  while (pool.running < SINGLE_READS && pool.queue.length) {
-    const { task, done } = pool.queue.shift()
-    pool.running += 1
-    task().finally(() => {
-      pool.running -= 1
-      done()
-      drain()
-    })
+function poolOf(size) {
+  const pool = { running: 0, queue: [] }
+  function drain() {
+    while (pool.running < size && pool.queue.length) {
+      const { task, done } = pool.queue.shift()
+      pool.running += 1
+      task().finally(() => {
+        pool.running -= 1
+        done()
+        drain()
+      })
+    }
   }
+  return (task) => new Promise((done) => {
+    pool.queue.push({ task, done })
+    drain()
+  })
 }
-const pooled = (task) => new Promise((done) => {
-  pool.queue.push({ task, done })
-  drain()
-})
+const pooled = poolOf(SINGLE_READS)
+const searches = poolOf(REFERRER_SEARCHES)
 
 /**
  * Reads asked for in the same task go out together: one ID by its own request, as always; several in one
@@ -196,6 +204,11 @@ export const entities = {
   listAttributes: () => request(AREA, 'GET', '/api/ngsi/attributes', raw),
   queryEntities: (query) => request(AREA, 'GET', '/api/ngsi/entities', { ...raw, params: pagedParams(query) }),
   getEntity: (id) => readEntity(id),
+  // The backend reads every entity for this, as the broker has no reverse lookup.
+  listReferrers: (id) => new Promise((resolve, reject) => {
+    searches(() => request(AREA, 'GET', '/api/ngsi/referenced-by', { ...raw, params: { entity_id: id }, timeoutMs: REFERRERS_TIMEOUT_MS })
+      .then(resolve, reject))
+  }),
   // With `path`, `attrs` holds one attribute whose fragment applies at that path of sub-attributes below it, in the
   // instance of `datasetId`. A fragment without a path names its instance by its own `datasetId`. `force` writes a
   // value the checks refuse, when the operator insists. `exact` writes the value in the form given, as the datatype

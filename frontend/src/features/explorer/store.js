@@ -133,6 +133,12 @@ export const keepScroll = (address, y) => { state.scroll = { address, y } }
  */
 const inTree = (key, nodeKey) => key === nodeKey || key.startsWith(`${nodeKey}#[`)
 
+/** The key of a node's list of referring entities: a line key, at a level no attribute can have. */
+export const referrersKey = (nodeKey) => `${nodeKey}#[]`
+
+/** Whether the way from `root` to `key` goes up, through a list of referring entities. */
+const goesUp = (key, root) => key.slice(root.length).includes('#[]>')
+
 /** The node keys of the entities moved out of the tree: they keep their key under their origin. */
 const unnestedKeys = () => state.unnested.map((u) => `${u.origin?.key}>${u.id}`)
 
@@ -181,6 +187,8 @@ export function collapseNested(nodeKey, origin, id) {
 /** The entities already expanded in place in the tree of `root`: the targets of its lines' kept lists. */
 const expandedBelow = (root) => [...state.kept.entries()]
   .filter(([key, list]) => key.endsWith('|nested') && Array.isArray(list) && belongs(key.slice(0, -'|nested'.length), root))
+  // What refers to an entity of the tree is not part of what it expands to.
+  .filter(([key]) => !goesUp(key, root) && !key.endsWith(`${referrersKey('')}|nested`))
   .flatMap(([, list]) => list)
 
 /**
@@ -190,9 +198,10 @@ const expandedBelow = (root) => [...state.kept.entries()]
  * The tree is kept in the explorer's state, with a generation that tells its lines to expand again.
  */
 export function expandAllRelationships(nodeKey, id) {
-  // The trees being expanded below this node become part of its tree again.
-  state.expandingAll.filter((root) => root !== nodeKey && belongs(root, nodeKey)).forEach((root) => state.expandedInTree.delete(root))
-  state.expandingAll = state.expandingAll.filter((root) => root === nodeKey || !belongs(root, nodeKey))
+  // The trees being expanded below this node become part of its tree again; one on the way up is no part of it.
+  const absorbs = (root) => belongs(root, nodeKey) && !goesUp(root, nodeKey)
+  state.expandingAll.filter((root) => root !== nodeKey && absorbs(root)).forEach((root) => state.expandedInTree.delete(root))
+  state.expandingAll = state.expandingAll.filter((root) => root === nodeKey || !absorbs(root))
   if (!state.expandingAll.includes(nodeKey)) state.expandingAll = [...state.expandingAll, nodeKey]
   const generation = (state.expandedInTree.get(nodeKey)?.generation ?? 0) + 1
   state.expandedInTree.set(nodeKey, { entities: new Set([id, ...expandedBelow(nodeKey)]), lines: new Set(), generation })
@@ -201,7 +210,7 @@ export function expandAllRelationships(nodeKey, id) {
 
 /** The innermost tree being expanded that the node `nodeKey` belongs to, as its root key, or null. */
 const rootOf = (nodeKey) => state.expandingAll
-  .filter((root) => belongs(nodeKey, root))
+  .filter((root) => belongs(nodeKey, root) && !goesUp(nodeKey, root))
   .reduce((inner, root) => (inner === null || root.length > inner.length ? root : inner), null)
 
 const treeOf = (nodeKey) => {

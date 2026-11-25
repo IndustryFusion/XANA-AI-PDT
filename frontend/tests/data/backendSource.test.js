@@ -227,7 +227,7 @@ describe('without the mock', () => {
       runs: ['listActiveRuns', 'startRun', 'getRun', 'subscribeRun', 'clarify', 'confirmResolution', 'escalationPreflight', 'escalate', 'getOutboxStatus', 'sendConversationAct', 'askAgent', 'approveDataRequest', 'replyToRecommendation', 'refreshConversationStatus', 'recordMachineBuilderClose', 'reopenRun', 'stopRun', 'archiveRun'],
       incidents: ['listIncidents', 'getIncident', 'reopenIncident'],
       entities: [
-        'getStats', 'listTypes', 'listAttributes', 'queryEntities', 'getEntity', 'updateAttributes', 'appendAttributes',
+        'getStats', 'listTypes', 'listAttributes', 'queryEntities', 'getEntity', 'listReferrers', 'updateAttributes', 'appendAttributes',
         'deleteAttribute', 'deleteEntity', 'importEntities', 'fetchImportDocument', 'deleteByTypes',
         'getAttributeHistory', 'getAttributeStatus', 'listTypesAt', 'queryEntitiesAt', 'subscribeEntities', 'getLiveUpdateHealth', 'getPrefixes', 'getValueHints', 'getUnits',
       ],
@@ -465,6 +465,22 @@ describe('entities', () => {
     const second = Promise.all(ids.map((id) => entities.getEntity(`${id}:b`)))
     await Promise.all([first, second])
     expect(most).toBe(entitiesModule.SINGLE_READS)
+  })
+
+  test('searches for referring entities go out two at once, and a failed one frees its place', async () => {
+    let running = 0
+    let most = 0
+    vi.stubGlobal('fetch', vi.fn(async (url) => {
+      running += 1
+      most = Math.max(most, running)
+      await new Promise((resolve) => setTimeout(resolve, 5))
+      running -= 1
+      const failing = url.includes('urn%3An%3A0')
+      return new Response(JSON.stringify(failing ? { error: { kind: 'unavailable', message: 'down' } } : []), { status: failing ? 502 : 200 })
+    }))
+    const answers = await Promise.allSettled(Array.from({ length: 6 }, (_, i) => entities.listReferrers(`urn:n:${i}`)))
+    expect(answers.map((a) => a.status)).toEqual(['rejected', ...Array(5).fill('fulfilled')])
+    expect(most).toBe(entitiesModule.REFERRER_SEARCHES)
   })
 
   test('a malformed ID among others fails only itself', async () => {

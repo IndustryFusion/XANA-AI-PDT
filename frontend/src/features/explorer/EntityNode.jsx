@@ -32,7 +32,8 @@ import { isHttpIri, registry } from './prefixes'
 import { entityPath, readFocus } from './query'
 import { applyChanges } from './rawEdit'
 import RawJsonEditor from './RawJsonEditor'
-import { collapseAll, collapseNested, expandAllRelationships, takeLine, useExpandingAll, pin, renest, toggleSelected, unnest, unpin, useKept, usePins, useSelection } from './store'
+import ReferencedBy from './ReferencedBy'
+import { collapseAll, collapseNested, expandAllRelationships, takeLine, useExpandingAll, pin, referrersKey, renest, toggleSelected, unnest, unpin, useKept, usePins, useSelection } from './store'
 
 /** The time series records a change asynchronously; its state is read again at these delays after it. */
 export const STATUS_RECHECK_MS = [2000, 6000]
@@ -121,6 +122,9 @@ export default function EntityNode({
   const shownRef = useRef(null)
   const [changed, setChanged] = useState({})
   const [raw, setRaw] = useKept(`${query.at ?? ''}|${nodeKey}|raw`, false)
+  // Kept like a line's sub-attributes, so collapse all closes it. The past has no such list.
+  const [referrersOpen, setReferrersOpen] = useKept(`${referrersKey(nodeKey)}|subs`, false)
+  const showReferrers = referrersOpen && !readOnly
   const [adding, setAdding] = useState(false)
   const [historyOf, setHistoryOf] = useKept(`${query.at ?? ''}|${nodeKey}|history`, null)
   const [deleting, setDeleting] = useState(null)
@@ -269,6 +273,9 @@ export default function EntityNode({
     goTo: goToEntity,
   })
 
+  // Open on request, or closed; opening it on a folded entity opens the entity.
+  const toggleReferrers = () => (expanded ? setReferrersOpen((o) => !o) : openBody(() => setReferrersOpen(true)))
+
   let body = null
   if (expanded) {
     if (!entity) body = <p className="muted entity-node__loading" role="status">Loading entity…</p>
@@ -336,6 +343,12 @@ export default function EntityNode({
           {place === 'unnested' && (
             <IconButton icon="renest" tone="muted" label={`Re-nest ${title}`} onClick={() => renest(id)} />
           )}
+          {!readOnly && (
+            <IconButton
+              icon="referrers" tone="muted" aria-expanded={expanded && showReferrers} label={`Show what refers to ${title}`}
+              onClick={toggleReferrers}
+            />
+          )}
           <IconButton icon="expandAll" tone="muted" label={`Expand all relationships of ${title}`} onClick={() => openBody(() => expandAllRelationships(nodeKey, id))} />
           <IconButton icon="collapseAll" tone="muted" label={`Collapse all in ${title}`} onClick={() => (nested && origin ? collapseNested(nodeKey, origin, id) : collapseAll(nodeKey))} />
           {canWhole && (
@@ -354,7 +367,17 @@ export default function EntityNode({
         {menu.menu}
         {popover}
       </header>
-      {expanded && <div id={ids.body} className="entity-node__body">{body}</div>}
+      {expanded && (
+        <div id={ids.body} className="entity-node__body">
+          {showReferrers && (
+            <ReferencedBy
+              id={id} title={title} refreshKey={refreshKey}
+              ctx={{ nodeKey, query, depth, chain: ownChain, refTo, renderNested, goTo: goToEntity }}
+            />
+          )}
+          {body}
+        </div>
+      )}
 
       <ConfirmDialog open={!!deleting} title={deleteTitle} confirmLabel="Delete" variant="danger" onConfirm={confirmDelete} onClose={() => setDeleting(null)}>
         {deleting?.entity

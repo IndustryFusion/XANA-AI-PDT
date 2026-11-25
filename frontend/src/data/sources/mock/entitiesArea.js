@@ -90,6 +90,24 @@ const OWN_MEMBERS = ['type', 'value', 'object', 'objectList', 'json', 'languageM
   'datasetId', 'lang', 'createdAt', 'modifiedAt', 'deletedAt', 'instanceId', 'objectType', 'previousValue', 'previousObject']
 const attributeNames = (e) => Object.keys(e).filter((k) => !RESERVED.includes(k))
 
+/** The places an entity refers to `target` from, like the backend: each a path of attribute names. */
+function referencesTo(entity, target) {
+  const found = []
+  const visit = (attribute, path, dataset) => {
+    for (const inst of [].concat(attribute)) {
+      if (!inst || typeof inst !== 'object') continue
+      const own = path.length === 1 ? inst.datasetId ?? dataset : dataset
+      const idOf = (key) => (v) => (v && typeof v === 'object' ? v[key] ?? (key === '@id' && Object.keys(v).join() === 'id' ? v.id : undefined) : v)
+      const held = [...[inst.object, inst.value].flat().map(idOf('@id')), ...[inst.objectList].flat().map(idOf('object'))]
+      const place = { path, ...(own ? { datasetId: own } : {}) }
+      if (held.includes(target) && !found.some((f) => JSON.stringify(f) === JSON.stringify(place))) found.push(place)
+      Object.entries(inst).filter(([k]) => !OWN_MEMBERS.includes(k)).forEach(([k, below]) => visit(below, [...path, k], own))
+    }
+  }
+  attributeNames(entity).forEach((name) => visit(entity[name], [name], null))
+  return found
+}
+
 function parseMoment(at) {
   const t = Date.parse(at)
   if (Number.isNaN(t)) throw err('invalid', 'Choose a valid date and time.')
@@ -270,6 +288,10 @@ export function createEntitiesArea(store) {
     listAttributes: withControls(() => [...new Set(store.get().entities.flatMap(attributeNames))].sort()),
     queryEntities: withControls((params = {}) => query(store.get().entities, params)),
     getEntity: withControls((id) => structuredClone(requireEntity(id))),
+    listReferrers: withControls((id) => store.get().entities
+      .map((e) => ({ id: e.id, type: e.type, ...(e.name ? { name: structuredClone(e.name) } : {}), references: referencesTo(e, id) }))
+      .filter((e) => e.references.length > 0)
+      .sort((a, b) => (a.id < b.id ? -1 : 1))),
 
     updateAttributes: withControls((id, attrs = {}, { path, datasetId, force = false } = {}) => {
       const entity = requireEntity(id)

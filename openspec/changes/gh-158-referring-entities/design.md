@@ -10,7 +10,7 @@ There is no conflict with architecture.md or existing specs. *Expand and collaps
 
 ### D1: The backend reads the entities and searches them
 
-It pages through all entities in ID order, 1,000 at a time, keeping only what refers, up to 20,000 entities or until a page brings the matches to 1,000 or more. If there were more entities it says how many were searched, in the header the query already uses (`X-Results-Limited`). At most two such searches run at once, as the broker serves everyone.
+It pages through all entities in ID order, 1,000 at a time, keeping only what refers, up to 20,000 entities or until a page brings the matches to 1,000 or more. If there were more entities it says how many were searched, in the header the query already uses (`X-Results-Limited`). At most two such searches run at once, as the broker serves everyone; the interface asks for no more at once, and a search whose client is gone stops.
 
 The cost grows with the number of entities, not with the history, and the operator asks for each search.
 

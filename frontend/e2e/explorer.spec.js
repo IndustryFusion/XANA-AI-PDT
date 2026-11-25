@@ -419,3 +419,14 @@ test('expand all relationships of an entity shows its tree in place, and collaps
   await sensor.getByRole('button', { name: 'Collapse all in Process chiller 01 flow' }).first().click()
   await expect(sensor.locator('.attr-line__nested [data-entity]')).toHaveCount(0)
 })
+
+test('the way up: what refers to an entity, expanded in place again and again', async ({ page }) => {
+  await page.goto(`/explorer/${encodeURIComponent(CHILLER)}`)
+  await page.getByRole('button', { name: 'Show what refers to Process chiller 01' }).click()
+  const sensor = page.locator(`[data-referrer="${SENSOR}"]`)
+  await expect(sensor).toBeVisible()
+  await sensor.getByRole('button', { name: `Expand ${SENSOR} in place` }).click()
+  await expect(node(sensor, SENSOR).getByRole('button', { name: /^Show what refers to/ })).toBeVisible()
+  await sensor.locator('.referrer__place').first().click()
+  await expect(page.locator(`.entity-node--current[data-entity="${SENSOR}"] .attr-line--focused`)).toBeVisible()
+})

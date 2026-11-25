@@ -30,6 +30,7 @@ const GLYPHS = {
   json: <><path d="M5.5 2.5c-1.5 0-2 .7-2 2v1.5c0 1-.5 2-1.5 2 1 0 1.5 1 1.5 2v1.5c0 1.3.5 2 2 2" /><path d="M10.5 2.5c1.5 0 2 .7 2 2v1.5c0 1 .5 2 1.5 2-1 0-1.5 1-1.5 2v1.5c0 1.3-.5 2-2 2" /></>,
   pin: <><path d="M6 2.5h4l-.5 4 2 2v1H4.5v-1l2-2z" /><path d="M8 9.5V14" /></>,
   pinned: <><path d="M6 2.5h4l-.5 4 2 2v1H4.5v-1l2-2z" fill="currentColor" /><path d="M8 9.5V14" /></>,
+  referrers: <><path d="M8 13.5V6" /><path d="M4.5 9L8 5.5 11.5 9" /><path d="M3 2.5h10" /></>,
   unnest: <><path d="M3 13V6h7" /><path d="M8 3.5L10.5 6 8 8.5" /><path d="M13 3v10" /></>,
   renest: <><path d="M13 3v7H6" /><path d="M8 12.5L5.5 10 8 7.5" /><path d="M3 3v10" /></>,
   chevronRight: <path d="M6 3.5L10.5 8 6 12.5" />,
