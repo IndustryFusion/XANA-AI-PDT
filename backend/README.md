@@ -147,6 +147,7 @@ Fields are snake_case. A refused request answers `{"error": {"kind", "message"}}
 | `/api/ngsi/types`, `attributes`, `stats` | GET | The broker's types and attributes, and the count per type |
 | `/api/ngsi/entities` | GET `?type&id&id_pattern&q&limit` | Query. `limit` is 1 to 1000, default 100 |
 | `/api/ngsi/entities/{id}` | GET, DELETE | One entity |
+| `/api/ngsi/referenced-by` | GET `?entity_id` | The entities that refer to it: `[{id, type, name?, references: [{path, datasetId?}]}]`. `X-Results-Limited` says when not all entities were searched |
 | `/api/ngsi/entities/{id}/attrs` | PATCH, POST, DELETE `?name&sub_attribute` | Merge into attributes, add attributes, delete an attribute or sub-attribute; 204 |
 | `/api/ngsi/import` | POST `[entity]` | Create or merge; one `{id, result, reason}` per entry. 207 if any failed |
 | `/api/ngsi/import/fetch` | POST `{url}` | A document from a public address; `{url, document}` |

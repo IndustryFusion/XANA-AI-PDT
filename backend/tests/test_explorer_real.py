@@ -129,6 +129,43 @@ def test_bad_expression_is_invalid_not_the_brokers_internal_error(api, entity):
 
 
 @needs_broker
+def test_what_refers_to_an_entity_on_a_real_broker(api):
+    target, referrer, other = unique("part"), unique("owner"), unique("other")
+    kind = f"{IRI}refers_{uuid.uuid4().hex[:8]}"
+    body = [
+        {
+            "id": referrer,
+            "type": kind,
+            f"{IRI}hasPart": {"type": "Relationship", "object": target},
+            f"{IRI}iri": {"type": "Property", "value": {"@id": target}},
+            f"{IRI}many": [
+                {"type": "Property", "value": 1, "datasetId": "urn:d:1"},
+                {
+                    "type": "Property",
+                    "value": 2,
+                    "datasetId": "urn:d:2",
+                    f"{IRI}about": {"type": "Relationship", "object": target},
+                },
+            ],
+        },
+        {"id": other, "type": kind, f"{IRI}hasPart": {"type": "Relationship", "object": f"{target}-more"}},
+    ]
+    assert {r["result"] for r in api.post("/api/ngsi/import", json=body).json()} == {"created"}
+    try:
+        answer = api.get("/api/ngsi/referenced-by", params={"entity_id": target})
+        assert answer.status_code == 200
+        assert [e["id"] for e in answer.json()] == [referrer]
+        assert sorted(answer.json()[0]["references"], key=lambda place: place["path"]) == [
+            {"path": [f"{IRI}hasPart"]},
+            {"path": [f"{IRI}iri"]},
+            {"path": [f"{IRI}many", f"{IRI}about"], "datasetId": "urn:d:2"},
+        ]
+    finally:
+        for entity_id in (referrer, other):
+            api.delete(f"/api/ngsi/entities/{entity_id}")
+
+
+@needs_broker
 def test_edit_keeps_unit_and_sub_attributes(api, entity):
     assert api.patch(f"{path(entity)}/attrs", json={f"{IRI}temp": {"value": 43}}).status_code == 204
     stored = api.get(path(entity)).json()[f"{IRI}temp"]

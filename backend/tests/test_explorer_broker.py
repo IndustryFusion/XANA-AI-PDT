@@ -1662,3 +1662,138 @@ def test_an_id_the_broker_refuses_in_a_list_leaves_the_others(client, broker):
 def test_a_failing_broker_still_fails_a_read_of_many(client, broker):
     broker._query = lambda params: httpx.Response(503, json={"title": "Unavailable"})
     assert client.post("/api/ngsi/entities-by-id", json={"ids": ["urn:a", "urn:b"]}).status_code == 502
+
+
+# References ------------------------------------------------------------------------------------
+
+TARGET = "urn:x:target"
+
+
+def referring(client: TestClient, target: str = TARGET):
+    return client.get("/api/ngsi/referenced-by", params={"entity_id": target})
+
+
+def test_every_kind_of_reference_is_found_with_its_place(client, broker):
+    broker.entities["urn:a"] = {
+        "id": "urn:a",
+        "type": "A",
+        "name": {"type": "Property", "value": "Name"},
+        f"{IRI}has.dots": {"type": "Relationship", "object": TARGET},
+        "several": {"type": "Relationship", "object": ["urn:other", TARGET]},
+        "list": {"type": "ListRelationship", "objectList": [{"object": TARGET}]},
+        "iri": {"type": "Property", "value": {"@id": TARGET}},
+        "short": {"type": "Property", "value": {"id": TARGET}},
+        "iris": {"type": "Property", "value": [{"id": "urn:other"}, {"id": TARGET}]},
+        "text": {"type": "Property", "value": TARGET},
+        "multi": [
+            {"type": "Relationship", "object": "urn:other"},
+            {
+                "type": "Property",
+                "value": 1,
+                "datasetId": "urn:d:2",
+                "below": {"type": "Property", "value": 2, "deep": {"type": "Relationship", "object": TARGET}},
+            },
+        ],
+    }
+    broker.entities["urn:b"] = {
+        "id": "urn:b",
+        "type": "B",
+        "json": {"type": "JsonProperty", "json": {"object": TARGET}},
+        "compound": {"type": "Property", "value": {"object": TARGET}},
+        "record": {"type": "Property", "value": {"id": TARGET, "label": "x"}},
+        "where": {"type": "GeoProperty", "value": {"type": "Point", "coordinates": [1, 2]}},
+        "longer": {"type": "Relationship", "object": f"{TARGET}:more"},
+        "odd": None,
+    }
+    answer = referring(client)
+    assert answer.status_code == 200
+    assert answer.json() == [
+        {
+            "id": "urn:a",
+            "type": "A",
+            "name": {"type": "Property", "value": "Name"},
+            "references": [
+                {"path": [f"{IRI}has.dots"]},
+                {"path": ["several"]},
+                {"path": ["list"]},
+                {"path": ["iri"]},
+                {"path": ["short"]},
+                {"path": ["iris"]},
+                {"path": ["text"]},
+                {"path": ["multi", "below", "deep"], "datasetId": "urn:d:2"},
+            ],
+        }
+    ]
+    assert "X-Results-Limited" not in answer.headers
+
+
+def test_references_are_found_on_every_page_and_none_is_an_empty_list(client, broker):
+    for i in range(2500):
+        broker.entities[f"urn:b:{i:05d}"] = {"id": f"urn:b:{i:05d}", "type": "Big"}
+    broker.entities["urn:b:02499"]["up"] = {"type": "Relationship", "object": TARGET}
+    answer = referring(client)
+    assert [e["id"] for e in answer.json()] == ["urn:b:02499"]
+    assert "X-Results-Limited" not in answer.headers
+    assert all(r.url.params["orderBy"] == "id" and "q" not in r.url.params for r in broker.requests)
+    assert referring(client, "urn:x:nothing").json() == []
+
+
+@pytest.mark.parametrize("limit", ["MAX_REFERENCE_SCAN", "MAX_REFERRERS"])
+def test_a_search_for_references_that_stopped_early_says_so(client, broker, monkeypatch, limit):
+    monkeypatch.setattr(f"app.ngsi.broker.{limit}", 999)
+    for i in range(2100):
+        refers = {"up": {"type": "Relationship", "object": TARGET}}
+        broker.entities[f"urn:b:{i:05d}"] = {"id": f"urn:b:{i:05d}", "type": "Big", **refers}
+    answer = referring(client)
+    assert answer.headers["X-Results-Limited"] == "scanned=1000, total=2101"
+
+
+@pytest.mark.parametrize("bad", ["", "..", " "])
+def test_references_to_an_invalid_identifier_are_refused(client, broker, bad):
+    assert referring(client, bad).status_code == 422
+    assert broker.requests == []
+
+
+def test_a_search_for_references_answers_again_after_a_failure(broker):
+    replies = iter([lambda request: httpx.Response(503), broker])
+    client_ = TestClient(app_with(lambda request: next(replies)(request)))
+    assert referring(client_).status_code == 502
+    assert referring(client_).json() == []
+
+
+@pytest.mark.parametrize(
+    "reply", [httpx.Response(200, text="<html>"), httpx.Response(200, json={"a": 1}), httpx.Response(503)]
+)
+def test_a_broker_that_fails_the_search_for_references_is_a_bad_gateway(reply):
+    assert referring(TestClient(app_with(lambda request: reply))).status_code == 502
+
+
+async def test_searches_for_references_are_bounded_and_one_whose_client_is_gone_stops():
+    from app.api import ngsi
+
+    started, release = [], asyncio.Event()
+
+    async def slow(request: httpx.Request) -> httpx.Response:
+        started.append(request)
+        await release.wait()
+        return httpx.Response(200, json=[])
+
+    broker = ContextBroker(make_settings(), lambda: None, httpx.MockTransport(slow))
+
+    class Gone:
+        def __init__(self, gone: bool) -> None:
+            self.gone = gone
+            self.app = type("App", (), {"state": type("State", (), {"broker": broker})})
+
+        async def is_disconnected(self) -> bool:
+            return self.gone
+
+    gone = [asyncio.create_task(ngsi.referenced_by(Gone(True), TARGET)) for _ in range(3)]
+    stays = asyncio.create_task(ngsi.referenced_by(Gone(False), TARGET))
+    await asyncio.sleep(0.1)
+    assert len(started) == 2  # the others wait for a place
+    assert [r.status_code for r in await asyncio.gather(*gone)] == [499] * 3
+    await asyncio.sleep(0.1)
+    assert len(started) == 3  # only the one still waited for
+    release.set()
+    assert await stays == []

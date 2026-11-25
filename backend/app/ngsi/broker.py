@@ -42,6 +42,7 @@ from app.ngsi.bounded import gather_bounded
 from app.ngsi.contexts import ContextAllowList, change_role, deployment_contexts, looks_external
 from app.ngsi.failures import refusal, scrubbed, unreachable
 from app.ngsi.query import broker_can_evaluate, compile_pattern, matches, parse
+from app.ngsi.references import references
 from xana_agent.literals import declared, is_value_object, literal
 from xana_agent.sources.ngsi import context_link
 
@@ -55,6 +56,11 @@ SINGLE_READS = 4
 IDS_PER_QUERY = 100
 BATCH = 100
 MAX_SCANNED = 5000
+# Looking for references reads every entity, one page at a time and keeping only what refers: further than a
+# query, but not without end. Few such reads at once, as the broker serves everyone.
+MAX_REFERENCE_SCAN = 20_000
+MAX_REFERRERS = 1000
+REFERENCE_SCANS = 2
 # Without an order, the broker's pages can repeat some entities and leave out others (measured on
 # Scorpio: 12 of 57 when paging by 7). It orders by ID when asked; a broker that doesn't know the
 # parameter ignores it.
@@ -463,6 +469,49 @@ class ContextBroker:
             answer.total = len(matched)
         elif len(matched) <= wanted and (total is None or total > MAX_SCANNED):
             answer.limited = {"scanned": MAX_SCANNED, **({"total": total} if total is not None else {})}
+        return answer
+
+    def _reference_scans(self) -> asyncio.Semaphore:
+        """The bound on searches for references, shared by all requests of the app."""
+        if getattr(self, "_reference_scans_gate", None) is None:
+            self._reference_scans_gate = asyncio.Semaphore(REFERENCE_SCANS)
+        return self._reference_scans_gate
+
+    async def referrers(self, entity_id: str) -> Limited:
+        """The entities that refer to `entity_id`, by ID: each with its `id`, `type` and `name`, and the places it
+        refers from. The referred-to entity need not exist.
+
+        NGSI-LD has no reverse lookup, and a `q` over the attribute names can't stand in for one: the broker finds
+        nothing for an IRI with a dot, and lists no sub-attributes. So the entities are read and searched here, the
+        first MAX_REFERENCE_SCAN of them and up to MAX_REFERRERS matches, saying so if there were more.
+        """
+        _checked_identifier(entity_id)
+        answer = Limited()
+        scanned = 0
+        async with self._reference_scans():
+            while True:
+                response = await self.send(
+                    "GET",
+                    "/entities",
+                    params={"type": "*", "limit": MAX_LIMIT, "offset": scanned, "count": "true", **STABLE_ORDER},
+                )
+                try:
+                    read = response.json()
+                except ValueError:
+                    raise bad_gateway(f"{SERVICE} sent an answer that isn't JSON.") from None
+                if not isinstance(read, list):
+                    raise bad_gateway(f"{SERVICE} sent an unexpected answer.")
+                for entity in read:
+                    if isinstance(entity, dict) and (places := references(entity, entity_id)):
+                        kept = {key: entity[key] for key in ("id", "type", "name") if key in entity}
+                        answer.append({**kept, "references": places})
+                scanned += len(read)
+                total = _count_of(response)
+                if len(read) < MAX_LIMIT or scanned == total:
+                    break
+                if scanned >= MAX_REFERENCE_SCAN or len(answer) >= MAX_REFERRERS:
+                    answer.limited = {"scanned": scanned, **({"total": total} if total is not None else {})}
+                    break
         return answer
 
     async def entity(self, entity_id: str) -> dict[str, Any]:

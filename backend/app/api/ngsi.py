@@ -44,6 +44,8 @@ router = APIRouter(prefix="/api/ngsi", tags=["explorer"])
 
 KEEPALIVE_S = 20
 SEND_TIMEOUT_S = 10
+# How often a long search looks whether its client is still there.
+DISCONNECT_POLL_S = 0.5
 OVERFLOW_CODE = 1013
 ORIGIN_REFUSED_CODE = 4403
 
@@ -264,6 +266,20 @@ async def delete_attribute(
     else:
         await broker.delete_attribute(entity_id, name)
     return Response(status_code=204)
+
+
+@router.get("/referenced-by")
+async def referenced_by(request: Request, entity_id: str) -> Any:
+    """The entities that refer to `entity_id`, each with the places it refers from."""
+    search = asyncio.ensure_future(request.app.state.broker.referrers(entity_id))
+    try:
+        while not (await asyncio.wait({search}, timeout=DISCONNECT_POLL_S))[0]:
+            # A search nobody waits for any more must not read on, nor hold a place in the queue.
+            if await request.is_disconnected():
+                return Response(status_code=499)
+        return _answer(await search)
+    finally:
+        search.cancel()
 
 
 @router.post("/entities-by-id")
