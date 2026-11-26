@@ -9,7 +9,7 @@ The shortest way from a cluster running the platform to the operator UI. The sec
 1. **What you need:**
    - `kubectl` pointing at the platform's cluster, and Docker to build the images.
    - Helm 3 with the [helm-diff](https://github.com/databus23/helm-diff) plugin, which `helmfile apply` needs: `helm plugin install https://github.com/databus23/helm-diff`. Without it, use `sync` instead of `apply` below.
-   - The platform with the `memory` database in its PostgreSQL chart: DigitalTwin's `main` has it since 2026-09-27, and no release holds it yet. On an older platform, create a database `memory` owned by the platform's database user.
+   - The platform with the `memory` database in its PostgreSQL chart: DigitalTwin's `main` has it since 2026-10-07 ([DigitalTwin#904](https://github.com/IndustryFusion/DigitalTwin/pull/904)), and no release holds it yet. On an older platform, create a database `memory` owned by the platform's database user.
 2. **Images.** No release of XANA is published yet, so build and push your own, from the repository root (see [Images](#images)):
 
    ```bash
